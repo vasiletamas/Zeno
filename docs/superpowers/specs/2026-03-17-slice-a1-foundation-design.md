@@ -22,10 +22,14 @@ Deliver a working Next.js 15 project with Docker Postgres, complete Prisma schem
 | Allianz submission | Email template | Simple for launch. Portal/API integration later. |
 | Regulatory posture | Allianz Agent | Not broker or intermediary. |
 | Team | Solo dev + Claude Code | One Allianz operator gets admin panel access (OPERATOR role). |
-| Answer storage | String, not Json | V1's Json answers caused 36 JSON.parse workarounds. String + type coercion is cleaner. |
+| Answer storage | String, not Json | V1's Json answers caused 36 JSON.parse workarounds. String + type coercion is cleaner. Multi-select answers stored as comma-separated values. |
 | Bilingual fields | Json with { en, ro } | Proven pattern from V1. |
 | Customer PII | App-level encryption for CNP | GDPR. Encrypt before write, decrypt on read. |
 | IDs | cuid() | Same as V1. Prisma default. |
+| Addon coverages | Normalized via CoverageAmount relation | Build plan had `coverages(json)` on Addon. V2 normalizes into CoverageAmount records with `addonId` set and `pricingLevelId` null. Better for querying. |
+| Application addons | `includesAddon` Boolean | Build plan had `addons(json)`. Simplified since only one addon (BD) exists. Migrate to Json if a second addon is added. |
+| Policy expiry | `effectiveUntil` | Build plan had `expiresAt`. Renamed to pair with `effectiveFrom` for consistency. |
+| Payment provider ID | `providerPaymentId` | Build plan had `stripePaymentId`. Generalized since we support both Stripe and PayU. |
 
 ## 3. Project structure
 
@@ -92,6 +96,8 @@ zeno/
 - `gracePeriod` String
 - `medicalExamRequired` Boolean @default(false)
 - `territoryCoverage` String
+- `premiumRange` Json? — { min, max, currency, frequency } for display
+- `paymentFrequencyOptions` Json? — [{ code: "annual", multiplier: 1.0 }, { code: "semi_annual", multiplier: 0.5 }, { code: "quarterly", multiplier: 0.25 }]
 - `quoteValidityDays` Int @default(30)
 - `isActive` Boolean @default(true)
 - `createdAt` DateTime @default(now())
@@ -119,6 +125,9 @@ zeno/
 **CoverageType**
 - `id`, `code` String @unique, `name` Json, `description` Json?
 - `category` String? — "life", "accident", "health"
+- `unit` String? — "lump_sum", "per_day", etc. (from extraction metadata)
+- `maxUnits` Int? — e.g., 90 max days for hospitalization
+- `deductibleDays` Int? — e.g., 3-day deductible for hospitalization
 - `createdAt`
 - Relations: coverageAmounts[]
 
@@ -188,7 +197,7 @@ zeno/
 - `lastActivityAt` DateTime @default(now())
 - `metadata` Json? — extensible for A/B test segment, referral source, etc.
 - `createdAt`, `updatedAt`
-- Relations: customer, product?, messages[], workflowSession?, summary?, answers[], application?
+- Relations: customer, product?, messages[], workflowSession?, summary?, answers[], application?, turnTraces[]
 
 **Message**
 - `id`, `conversationId`
@@ -228,7 +237,7 @@ zeno/
 - `agentInstructions` String? — prompt fragment for agent at this step
 - `uiAction` String? — frontend action hint
 - `createdAt`, `updatedAt`
-- Relations: workflow, transitionsFrom[], transitionsTo[]
+- Relations: workflow, transitionsFrom[], transitionsTo[], workflowSessions[]
 - @@unique([workflowId, code])
 
 **StepTransition**
@@ -259,7 +268,7 @@ zeno/
 - `id`, `groupId`
 - `text` Json — { en, ro }
 - `helpText` Json? — { en, ro }
-- `type` String — "BOOLEAN", "MULTIPLE_CHOICE", "OPEN_ENDED", "NUMBER", "DATE"
+- `type` String — "BOOLEAN", "MULTIPLE_CHOICE", "DROPDOWN", "MULTI_SELECT", "OPEN_ENDED", "NUMBER", "DATE"
 - `options` Json? — for MULTIPLE_CHOICE: [{ value, label: { en, ro } }]
 - `validationRules` Json? — { required, min, max, pattern, etc. }
 - `parentQuestionId` String? — for conditional branching
@@ -442,6 +451,8 @@ enum UserRole {
 }
 ```
 
+> Note: `UserRole` is defined now but consumed by the auth/User model added in Phase B. Defined here so the enum exists when seeds reference it and to avoid a migration later.
+
 ## 6. Seed data
 
 ### 6.1 seed-product.ts
@@ -456,9 +467,10 @@ Seeds:
 - ~54 CoverageAmounts for DEATH_ANY_CAUSE (age-banded: 18-25, 26-30, 31-35, 36-40, 41-45, 46-50, 51-55, 56-60, 61-64 × 6 levels)
 - Fixed CoverageAmounts for other types (per tier)
 - 1 Addon (BD — Medical Treatment Abroad)
-- 3 Addon CoverageTypes (TREATMENT_ABROAD, MEDICATION, HOSPITALIZATION_BD)
-- Addon CoverageAmounts (fixed: 2M EUR, 50K EUR, 100 EUR/day)
-- Age-banded AddonPricingRules (9 age bands × annual premium)
+- 3 Addon CoverageTypes (TREATMENT_COSTS, HOSPITALIZATION_ABROAD, POST_TREATMENT_MEDICATION) — codes from extraction
+- Addon CoverageAmounts (fixed: TREATMENT_COSTS 2M EUR, HOSPITALIZATION_ABROAD 100 EUR/day, POST_TREATMENT_MEDICATION 50K EUR)
+- 4 age-banded AddonPricingRules from product-catalog.json: 18-30: 200 RON/yr, 31-45: 350 RON/yr, 46-55: 500 RON/yr, 56-64: 700 RON/yr
+- Note: objection-handling-ro.md references 9 age bands in EUR — those are sales talking points, NOT canonical pricing. Use product-catalog.json (4 bands, RON) as source of truth.
 
 All numbers ported exactly from extraction. No rounding, no modification.
 
@@ -467,11 +479,18 @@ All numbers ported exactly from extraction. No rounding, no modification.
 Source: `extraction/product/medical-questionnaire.json` + `extraction/product/underwriting-flow.json`
 
 Seeds:
-- QuestionGroup: "dnt_consent" — GDPR and regulatory consent questions
-- QuestionGroup: "dnt_life" — life insurance specific DNT questions
-- QuestionGroup: "application" — application/underwriting questions
-- QuestionGroup: "bd_medical" — 6 BD medical yes/no questions
+- QuestionGroup: "dnt_consent" — GDPR and regulatory consents (3 questions from CONSENTS section)
+- QuestionGroup: "dnt_general" — General suitability questions (6 questions from GENERAL section)
+- QuestionGroup: "dnt_life_type" — Life insurance type selection (1 question from LIFE_TYPE section)
+- QuestionGroup: "dnt_life_financial" — Financial situation for life insurance (11 questions from LIFE_FINANCIAL section, conditional on LIFE_TYPE)
+- QuestionGroup: "dnt_life_investment" — Investment preferences (3 questions from LIFE_INVESTMENT section, conditional)
+- QuestionGroup: "dnt_sustainability" — Sustainability preferences (2 questions from SUSTAINABILITY section)
+- QuestionGroup: "application" — Application/health declaration questions
+- QuestionGroup: "bd_medical" — 6 BD medical yes/no questions (from medical-questionnaire.json)
+- Only LIFE-relevant DNT sections seeded. AUTO/HEALTH/TRAVEL/PROPERTY/CIVIL_LIABILITY sections from extraction are NOT seeded (Protect is life insurance only).
 - All Question records with bilingual text, type, options, validation rules, branching logic
+
+**DNT signing metadata:** V1 tracked signing state on a dedicated DNT model (signedAt, signatureIP, signatureUserAgent, pdfPath, validFrom, expiresAt). In V2, DNT signing metadata is stored in `WorkflowSession.data` Json when the workflow reaches the dnt-sign step. This includes: signedAt, signatureIP, signatureUserAgent, and the generated pdfPath. The workflow step transition from dnt-sign validates that signing is complete before allowing progression.
 
 ### 6.3 seed-objections.ts
 
@@ -566,7 +585,7 @@ A1 is complete when:
 - [ ] `docker compose up -d` starts Postgres
 - [ ] `npx prisma db push` applies schema without errors
 - [ ] `npx prisma db seed` populates all data
-- [ ] Prisma Studio shows: 1 product, 2 tiers, 6 levels, 54+ coverage amounts, 1 addon, 9 objections, 2 workflows, 12 steps, 15 transitions, 4 agents, 6+ models in catalog, 4 question groups with all questions
+- [ ] Prisma Studio shows: 1 product, 2 tiers, 6 levels, 72+ coverage amounts (54 age-banded death + 18 fixed per-level for other types), 1 addon with 4 pricing rules, 9 objections, 2 workflows, 12 steps, 15 transitions, 4 agents, 6+ models in catalog, 8 question groups with all questions
 - [ ] `npm run dev` starts Next.js without errors
 - [ ] `npx tsc --noEmit` passes (zero type errors)
 - [ ] Tailwind config includes all Zeno brand tokens
