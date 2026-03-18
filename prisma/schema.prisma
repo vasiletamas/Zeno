@@ -1,0 +1,594 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum ConversationStatus {
+  ACTIVE
+  IDLE
+  COMPLETED
+  ABANDONED
+}
+
+enum ApplicationStatus {
+  OPEN
+  PAUSED
+  COMPLETED
+}
+
+enum QuoteStatus {
+  DRAFT
+  ACCEPTED
+  EXPIRED
+}
+
+enum PolicyStatus {
+  PENDING_SUBMISSION
+  SUBMITTED
+  ACTIVE
+  CANCELLED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum PaymentProvider {
+  STRIPE
+  PAYU
+}
+
+enum WorkflowSessionStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum AgentType {
+  MAIN_CHAT
+  REASONING_GATE
+  SUMMARIZER
+  PROFILE_EXTRACTOR
+}
+
+enum LLMProvider {
+  OPENAI
+  ANTHROPIC
+}
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+  OPERATOR
+}
+
+// ==========================================
+// DOMAIN: CORE PRODUCT
+// ==========================================
+
+model Product {
+  id                      String   @id @default(cuid())
+  code                    String   @unique
+  name                    Json
+  description             Json
+  insuranceType           String
+  subType                 String
+  eligibility             Json
+  features                String[]
+  exclusions              String[]
+  defaultPlaybook         String   @db.Text
+  pricingExplanation      String   @db.Text
+  targetCustomer          String
+  targetAgeRange          String
+  contractTerm            String
+  gracePeriod             String
+  medicalExamRequired     Boolean  @default(false)
+  territoryCoverage       String
+  premiumRange            Json?
+  paymentFrequencyOptions Json?
+  quoteValidityDays       Int      @default(30)
+  isActive                Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  pricingTiers        PricingTier[]
+  addons              Addon[]
+  questionGroups      QuestionGroup[]
+  objectionStrategies ObjectionStrategy[]
+  conversations       Conversation[]
+  applications        Application[]
+  quotes              Quote[]
+  policies            Policy[]
+}
+
+model PricingTier {
+  id          String   @id @default(cuid())
+  productId   String
+  code        String
+  name        Json
+  description Json?
+  orderIndex  Int
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  product      Product        @relation(fields: [productId], references: [id])
+  levels       PricingLevel[]
+  applications Application[]
+
+  @@unique([productId, code])
+}
+
+model PricingLevel {
+  id            String   @id @default(cuid())
+  tierId        String
+  code          String
+  name          Json
+  premiumAnnual Float
+  currency      String   @default("RON")
+  orderIndex    Int
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tier            PricingTier      @relation(fields: [tierId], references: [id])
+  coverageAmounts CoverageAmount[]
+  applications    Application[]
+
+  @@unique([tierId, code])
+}
+
+model CoverageType {
+  id             String   @id @default(cuid())
+  code           String   @unique
+  name           Json
+  description    Json?
+  category       String?
+  unit           String?
+  maxUnits       Int?
+  deductibleDays Int?
+  createdAt      DateTime @default(now())
+
+  coverageAmounts CoverageAmount[]
+}
+
+model CoverageAmount {
+  id              String   @id @default(cuid())
+  coverageTypeId  String
+  pricingLevelId  String?
+  addonId         String?
+  amount          Float
+  currency        String   @default("RON")
+  isAgeBased      Boolean  @default(false)
+  minAge          Int?
+  maxAge          Int?
+  createdAt       DateTime @default(now())
+
+  coverageType CoverageType  @relation(fields: [coverageTypeId], references: [id])
+  pricingLevel PricingLevel? @relation(fields: [pricingLevelId], references: [id])
+  addon        Addon?        @relation(fields: [addonId], references: [id])
+
+  @@index([coverageTypeId, pricingLevelId])
+  @@index([coverageTypeId, addonId])
+}
+
+model Addon {
+  id            String   @id @default(cuid())
+  productId     String
+  code          String
+  name          Json
+  description   Json?
+  waitingPeriod String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  product         Product            @relation(fields: [productId], references: [id])
+  pricingRules    AddonPricingRule[]
+  coverageAmounts CoverageAmount[]
+
+  @@unique([productId, code])
+}
+
+model AddonPricingRule {
+  id            String   @id @default(cuid())
+  addonId       String
+  minAge        Int
+  maxAge        Int
+  premiumAnnual Float
+  currency      String   @default("RON")
+  createdAt     DateTime @default(now())
+
+  addon Addon @relation(fields: [addonId], references: [id])
+
+  @@index([addonId, minAge, maxAge])
+}
+
+model ObjectionStrategy {
+  id           String   @id @default(cuid())
+  productId    String
+  type         String
+  title        String
+  strategy     String   @db.Text
+  addonContext String?  @db.Text
+  orderIndex   Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([productId, type])
+}
+
+// ==========================================
+// DOMAIN: CONVERSATION AND SALES
+// ==========================================
+
+model Customer {
+  id               String    @id @default(cuid())
+  email            String?   @unique
+  phone            String?
+  name             String?
+  dateOfBirth      DateTime?
+  cnp              String?
+  address          Json?
+  language         String    @default("ro")
+  extractedProfile Json?
+  isAnonymous      Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  conversations     Conversation[]
+  applications      Application[]
+  quotes            Quote[]
+  policies          Policy[]
+  payments          Payment[]
+  referralsMade     Referral[] @relation("referrer")
+  referralsReceived Referral[] @relation("referred")
+}
+
+model Conversation {
+  id             String             @id @default(cuid())
+  customerId     String
+  productId      String?
+  status         ConversationStatus @default(ACTIVE)
+  channel        String             @default("web")
+  language       String             @default("ro")
+  messageCount   Int                @default(0)
+  startedAt      DateTime           @default(now())
+  completedAt    DateTime?
+  lastActivityAt DateTime           @default(now())
+  metadata       Json?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  customer        Customer             @relation(fields: [customerId], references: [id])
+  product         Product?             @relation(fields: [productId], references: [id])
+  messages        Message[]
+  workflowSession WorkflowSession?
+  summary         ConversationSummary?
+  answers         Answer[]
+  application     Application?
+  turnTraces      TurnTrace[]
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String
+  content        String   @db.Text
+  toolCalls      Json?
+  toolResults    Json?
+  tokenCount     Int?
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+
+  @@index([conversationId, createdAt])
+}
+
+model ConversationSummary {
+  id             String   @id @default(cuid())
+  conversationId String   @unique
+  summary        String   @db.Text
+  messagesUpTo   Int
+  tokenCount     Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+}
+
+// ==========================================
+// DOMAIN: WORKFLOW AND QUESTIONNAIRE
+// ==========================================
+
+model Workflow {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  version     Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  steps    WorkflowStep[]
+  sessions WorkflowSession[]
+}
+
+model WorkflowStep {
+  id                String   @id @default(cuid())
+  workflowId        String
+  code              String
+  name              String
+  type              String
+  orderIndex        Int
+  autoTool          String?
+  allowedTools      String[]
+  agentInstructions String?  @db.Text
+  uiAction          String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  workflow         Workflow          @relation(fields: [workflowId], references: [id])
+  transitionsFrom  StepTransition[]  @relation("fromStep")
+  transitionsTo    StepTransition[]  @relation("toStep")
+  workflowSessions WorkflowSession[]
+
+  @@unique([workflowId, code])
+}
+
+model StepTransition {
+  id             String   @id @default(cuid())
+  fromStepId     String
+  toStepId       String
+  conditionType  String
+  conditionValue String
+  label          String?
+  priority       Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  fromStep WorkflowStep @relation("fromStep", fields: [fromStepId], references: [id])
+  toStep   WorkflowStep @relation("toStep", fields: [toStepId], references: [id])
+}
+
+model WorkflowSession {
+  id             String                @id @default(cuid())
+  workflowId     String
+  currentStepId  String
+  conversationId String                @unique
+  status         WorkflowSessionStatus @default(ACTIVE)
+  data           Json?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  workflow     Workflow     @relation(fields: [workflowId], references: [id])
+  currentStep  WorkflowStep @relation(fields: [currentStepId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+}
+
+model QuestionGroup {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        Json
+  productId   String?
+  description String?
+  orderIndex  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  product   Product?   @relation(fields: [productId], references: [id])
+  questions Question[]
+}
+
+model Question {
+  id               String   @id @default(cuid())
+  groupId          String
+  text             Json
+  helpText         Json?
+  type             String
+  options          Json?
+  validationRules  Json?
+  parentQuestionId String?
+  showWhenValue    String?
+  orderIndex       Int
+  isRequired       Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  group          QuestionGroup @relation(fields: [groupId], references: [id])
+  parentQuestion Question?     @relation("questionBranching", fields: [parentQuestionId], references: [id])
+  childQuestions Question[]    @relation("questionBranching")
+  answers        Answer[]
+
+  @@index([groupId, orderIndex])
+}
+
+model Answer {
+  id             String   @id @default(cuid())
+  questionId     String
+  conversationId String
+  value          String
+  answeredAt     DateTime @default(now())
+
+  question     Question     @relation(fields: [questionId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+
+  @@unique([questionId, conversationId])
+}
+
+// ==========================================
+// DOMAIN: QUOTE AND POLICY
+// ==========================================
+
+model Application {
+  id                   String            @id @default(cuid())
+  conversationId       String            @unique
+  customerId           String
+  productId            String
+  tierId               String?
+  levelId              String?
+  includesAddon        Boolean           @default(false)
+  status               ApplicationStatus @default(OPEN)
+  currentQuestionIndex Int               @default(0)
+  totalQuestions        Int               @default(0)
+  completedAt          DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  conversation Conversation  @relation(fields: [conversationId], references: [id])
+  customer     Customer      @relation(fields: [customerId], references: [id])
+  product      Product       @relation(fields: [productId], references: [id])
+  tier         PricingTier?  @relation(fields: [tierId], references: [id])
+  level        PricingLevel? @relation(fields: [levelId], references: [id])
+  quote        Quote?
+}
+
+model Quote {
+  id             String      @id @default(cuid())
+  applicationId  String      @unique
+  productId      String
+  customerId     String
+  premiumAnnual  Float
+  premiumMonthly Float
+  currency       String      @default("RON")
+  coverages      Json
+  addonsSelected Json?
+  status         QuoteStatus @default(DRAFT)
+  validUntil     DateTime
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id])
+  product     Product     @relation(fields: [productId], references: [id])
+  customer    Customer    @relation(fields: [customerId], references: [id])
+  policy      Policy?
+}
+
+model Policy {
+  id                  String       @id @default(cuid())
+  quoteId             String       @unique
+  customerId          String
+  productId           String
+  allianzPolicyNumber String?
+  status              PolicyStatus @default(PENDING_SUBMISSION)
+  effectiveFrom       DateTime?
+  effectiveUntil      DateTime?
+  premiumAnnual       Float
+  premiumMonthly      Float
+  currency            String       @default("RON")
+  coverageSummary     Json
+  issuedAt            DateTime?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  quote    Quote     @relation(fields: [quoteId], references: [id])
+  customer Customer  @relation(fields: [customerId], references: [id])
+  product  Product   @relation(fields: [productId], references: [id])
+  payments Payment[]
+}
+
+model Payment {
+  id                String        @id @default(cuid())
+  policyId          String
+  customerId        String
+  amount            Float
+  currency          String        @default("RON")
+  provider          PaymentProvider
+  providerPaymentId String?
+  status            PaymentStatus @default(PENDING)
+  paidAt            DateTime?
+  metadata          Json?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  policy   Policy   @relation(fields: [policyId], references: [id])
+  customer Customer @relation(fields: [customerId], references: [id])
+}
+
+// ==========================================
+// DOMAIN: AGENT AND OBSERVABILITY
+// ==========================================
+
+model Agent {
+  id               String       @id @default(cuid())
+  slug             String       @unique
+  name             String
+  type             AgentType
+  provider         LLMProvider  @default(OPENAI)
+  model            String
+  fallbackProvider LLMProvider? @default(ANTHROPIC)
+  fallbackModel    String?
+  temperature      Float        @default(0.7)
+  maxTokens        Int          @default(4096)
+  systemPrompt     String?      @db.Text
+  constraints      String?      @db.Text
+  isActive         Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
+
+model ModelCatalog {
+  id                       String      @id @default(cuid())
+  provider                 LLMProvider
+  modelId                  String
+  displayName              String
+  supportsStreaming         Boolean     @default(true)
+  supportsTools            Boolean     @default(true)
+  supportsStructuredOutput Boolean     @default(true)
+  costPer1kInputTokens     Float
+  costPer1kOutputTokens    Float
+  isActive                 Boolean     @default(true)
+  createdAt                DateTime    @default(now())
+  updatedAt                DateTime    @updatedAt
+
+  @@unique([provider, modelId])
+}
+
+model TurnTrace {
+  id             String   @id @default(cuid())
+  conversationId String
+  messageIndex   Int
+  phases         Json
+  anomalies      Json?
+  inputTokens    Int?
+  outputTokens   Int?
+  cost           Float?
+  latencyMs      Int?
+  provider       String?
+  model          String?
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+
+  @@index([conversationId, messageIndex])
+}
+
+model Referral {
+  id                  String   @id @default(cuid())
+  referrerCustomerId  String
+  referredCustomerId  String?
+  code                String   @unique
+  status              String   @default("pending")
+  rewardApplied       Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  referrer Customer  @relation("referrer", fields: [referrerCustomerId], references: [id])
+  referred Customer? @relation("referred", fields: [referredCustomerId], references: [id])
+}
