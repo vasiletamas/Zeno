@@ -153,7 +153,7 @@ git commit -m "feat: scaffold Next.js 15 project with Docker Postgres"
 **Files:**
 - Create: `prisma/schema.prisma`
 
-This is the complete 26-model schema. Write it as one file since Prisma schemas are a single unit.
+This is the complete 27-model schema. Write it as one file since Prisma schemas are a single unit.
 
 - [ ] **Step 1: Initialize Prisma**
 
@@ -166,7 +166,7 @@ This creates `prisma/schema.prisma` with defaults. We will overwrite it.
 
 - [ ] **Step 2: Write complete schema**
 
-Overwrite `prisma/schema.prisma` with the complete schema from the spec. All 26 models, 11 enums, all relations, all indexes. The full schema content follows:
+Overwrite `prisma/schema.prisma` with the complete schema from the spec. All 27 models, 10 enums, all relations, all indexes. The full schema content follows:
 
 ```prisma
 generator client {
@@ -771,7 +771,7 @@ Run:
 ```bash
 npx prisma db push
 ```
-Expected: Schema applied successfully, all 26 models created.
+Expected: Schema applied successfully, all 27 models created.
 
 - [ ] **Step 4: Generate Prisma client**
 
@@ -793,7 +793,7 @@ Expected: No errors.
 
 ```bash
 git add prisma/schema.prisma lib/db.ts
-git commit -m "feat: add complete Prisma schema with 26 models and 11 enums"
+git commit -m "feat: add complete Prisma schema with 27 models and 10 enums"
 ```
 
 ---
