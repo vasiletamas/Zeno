@@ -29,7 +29,11 @@ lib/tools/handlers/
   bd-handlers.ts            — NEW: check_bd_eligibility
   utility-handlers.ts       — NEW: escalate_to_human
 
-lib/tools/registry.ts       — MODIFIED: replace stubs with real handler imports
+lib/tools/registry.ts       — MODIFIED: replace stubs with real handlers, add cancel_application + modify_quote registrations
+lib/tools/validation.ts     — MODIFIED: replace .passthrough() stubs with .strict() schemas
+
+prisma/schema.prisma        — MODIFIED: add Question.code, Application.flagsForReview, Quote payment frequency fields
+prisma/seeds/seed-questions.ts — MODIFIED: persist question codes, remove BD per-question flags
 
 __tests__/
   lib/engines/
@@ -39,22 +43,80 @@ __tests__/
     sales-flow.test.ts      — end-to-end happy path
 ```
 
-## 3. Questionnaire Engine
+## 3. Schema Changes (before implementation)
+
+A4 requires 3 schema additions:
+
+**3.1 Add `code` column to Question model:**
+```prisma
+model Question {
+  // ... existing fields
+  code String?    // e.g., "BD_CANCER_HISTORY", "PACKAGE_CHOICE", "BD_ADDON_INTEREST"
+  // ... rest of model
+  @@index([groupId, orderIndex])
+}
+```
+Required for identifying special questions (PACKAGE_CHOICE, PREMIUM_LEVEL, BD_ADDON_INTEREST) in handler logic. Update `seed-questions.ts` to persist the code field.
+
+**3.2 Add `flagsForReview` to Application model:**
+```prisma
+model Application {
+  // ... existing fields
+  flagsForReview Json?    // [{ questionCode, answer, reason }]
+  // ... rest of model
+}
+```
+Stores soft flags accumulated during questionnaire. Not a blocking field — just informational for admin review.
+
+**3.3 Add payment frequency fields to Quote model:**
+```prisma
+model Quote {
+  // ... existing fields
+  premiumSemiAnnual Float?
+  premiumQuarterly  Float?
+  paymentFrequency  String?    // "annual", "semi_annual", "quarterly"
+  // ... rest of model
+}
+```
+Stores all computed frequency options. The `premiumAnnual` and `premiumMonthly` fields already exist.
+
+Run `npx prisma db push` after schema changes, then `npx prisma db seed` to re-seed with question codes.
+
+## 4. Questionnaire Engine
 
 ### `lib/engines/questionnaire-engine.ts`
 
 Shared logic for DNT, Application, and BD medical questionnaire flows. All three use the same Question/Answer tables but different QuestionGroups.
 
+**Design pattern: Pure functions + DB wrapper.** The core functions (shouldShowQuestion, validateAnswer, checkForFlags) are pure — they take pre-fetched data and return results. The `getNextQuestion` and `calculateProgress` functions do DB I/O (fetch questions + answers) then delegate to pure functions. Handlers call the wrapper functions, not the pure functions directly. This matches V1's pattern and enables unit testing.
+
 **Reference:** Read `C:/GitHub/ai_sales_agent_crm/ai-sales-agent-crm/lib/questionnaire-engine.ts` for V1 patterns.
 
-### 3.1 Core functions
+### 4.1 Core functions
 
 ```typescript
-// Find next unanswered visible question across one or more groups
+// Question type used across the engine
+interface QuestionData {
+  id: string
+  code: string | null
+  groupId: string
+  groupCode: string
+  text: { en: string; ro: string }
+  helpText: { en: string; ro: string } | null
+  type: string
+  options: unknown
+  validationRules: unknown
+  parentQuestionId: string | null
+  showWhenValue: string | null
+  orderIndex: number
+  isRequired: boolean
+}
+
+// Wrapper function: fetches questions + answers from DB, then calls pure functions
 getNextQuestion(
   groupCodes: string[],
   conversationId: string,
-): Promise<{ question: QuestionWithGroup; progress: { answered: number; total: number } } | null>
+): Promise<{ question: QuestionData; progress: { answered: number; total: number } } | null>
 
 // Evaluate conditional visibility
 shouldShowQuestion(
@@ -117,11 +179,13 @@ Actions:
 - `escalate`: Application.status set to PAUSED, workflow pauses, agent informs customer
 - `reject`: For BD medical — any YES answer rejects the addon. Application.includesAddon set to false.
 
-### 3.5 BD rejection rule
+### 4.5 BD rejection rule
 
-All 6 BD medical questions have `{ "flags": [{ "value": "true", "action": "reject", "reason": "..." }] }`. The `check_bd_eligibility` handler checks if any BD answer is "true" after all 6 are answered.
+BD medical questions do NOT have per-question flags in their validationRules. Instead, the `check_bd_eligibility` handler runs AFTER all 6 BD questions are answered and checks if any answer is "true". If yes: sets Application.includesAddon=false and returns rejection with sensitive messaging. The seed data (`seed-questions.ts`) must be updated to remove any `flags` from BD question validationRules — the handler owns the rejection logic, not the flag system.
 
-## 4. Quote Engine
+This avoids escalating/pausing the workflow mid-questionnaire (which would be a bad UX — let the customer answer all 6, then check).
+
+## 5. Quote Engine
 
 ### `lib/engines/quote-engine.ts`
 
@@ -171,7 +235,7 @@ function calculateQuote(input: QuoteInput): QuoteResult
 
 No rounding magic — keep exact values from DB. Frontend handles display formatting.
 
-## 5. Tool Handlers
+## 6. Tool Handlers
 
 ### 5.1 DNT Handlers (`lib/tools/handlers/dnt-handlers.ts`)
 
@@ -263,13 +327,13 @@ No rounding magic — keep exact values from DB. Frontend handles display format
 
 ### 5.4 Product Handlers (`lib/tools/handlers/product-handlers.ts`)
 
-**compare_products(args: { productCodes: string[] }, context):**
+**compare_products(args: { productIds: string[] }, context):**
 - Load products with pricing tiers/levels
 - Format side-by-side comparison: features, pricing, coverages
 - Return comparison table
 
-**set_conversation_product(args: { productCode }, context):**
-- Find product by code
+**set_conversation_product(args: { productId }, context):**
+- Find product by ID
 - Update Conversation.productId
 - Return: product set, ready for next workflow step
 
@@ -307,7 +371,7 @@ No rounding magic — keep exact values from DB. Frontend handles display format
 - Log escalation (console for now, DB persistence in Phase B)
 - Return: escalation acknowledged, human will follow up
 
-## 6. Registry Update
+## 7. Registry Update
 
 `lib/tools/registry.ts` modified:
 - Import all handler files from `lib/tools/handlers/`
@@ -315,15 +379,27 @@ No rounding magic — keep exact values from DB. Frontend handles display format
 - Keep existing tool definitions (name, description, parameters, executionMode, statusMessage) unchanged
 - Only the handler function reference changes
 
-## 7. Validation Schema Updates
+## 8. Validation Schema Updates
 
 `lib/tools/validation.ts` modified:
 - Replace `.passthrough()` stubs with `.strict()` schemas for all tools
 - Add proper field definitions matching each handler's expected args
 
-## 8. Exit criteria
+## 9. Implementation notes
 
-- [ ] All 23 tool handlers implemented (no stubs)
+**CoverageAmount → baseCoverages mapping (in generate_quote handler):** The handler must:
+1. Load CoverageAmounts for the resolved PricingLevel, joined with CoverageType
+2. For DEATH_ANY_CAUSE (isAgeBased=true): filter by customer's age falling within minAge-maxAge
+3. For fixed types (PERMANENT_INVALIDITY, etc.): take the amount directly
+4. Map each to `{ code, name, amount, currency }` for the QuoteInput.baseCoverages array
+
+**Premium arithmetic is always in RON.** Base premiums are RON. Addon premiums are RON (stored as RON in AddonPricingRule). Coverage *display amounts* are mixed (death in RON, BD treatment in EUR) but that's for display only — premiums don't mix currencies.
+
+**Tool count reconciliation:** The registry has 23 tools from A2. Two tools (`cancel_application`, `modify_quote`) are referenced in workflow seeds but were not registered in A2. A4 adds their registrations + handlers. Additionally, `list_products` and `get_product_info` already have real handlers from A2. `profile_extractor` and `summarizer` are background agent tools, not chat tools — they run via gateway.call() in the orchestrator, not through the tool registry. So the total registered tools = 23 (from A2) + 2 (new) = 25. Of these, A4 implements 21 new handlers (replacing stubs) + keeps 2 existing (list_products, get_product_info) + 2 are background-only.
+
+## 10. Exit criteria
+
+- [ ] All 25 registered tools have real handlers (no stubs). 21 new in A4 + 2 existing from A2 + 2 new registrations (cancel_application, modify_quote).
 - [ ] Questionnaire engine: getNextQuestion, validateAnswer, checkForFlags, calculateProgress all working
 - [ ] Quote engine: accurate premium calculation for all 6 tier/level combinations × 9 age bands × with/without addon × 3 payment frequencies
 - [ ] DNT flow: start → answer all questions → sign with GDPR consent
@@ -336,7 +412,7 @@ No rounding magic — keep exact values from DB. Frontend handles display format
 - [ ] Unit tests: questionnaire engine (conditional Qs, validation, flags) + quote engine (all combinations)
 - [ ] Integration test: happy path conversation producing a policy
 
-## 9. What A4 does NOT include
+## 11. What A4 does NOT include
 
 - Frontend / UI (Phase B)
 - Payment processing (Phase B — Stripe/PayU)
@@ -345,7 +421,7 @@ No rounding magic — keep exact values from DB. Frontend handles display format
 - PDF generation for DNT suitability report (Phase C)
 - Re-engagement, debrief, learning loop (P2)
 
-## 10. Testing strategy
+## 12. Testing strategy
 
 - **questionnaire-engine.test.ts:** Conditional question visibility, answer validation (all types), flag detection (soft/escalate/reject), progress calculation, fuzzy Romanian matching
 - **quote-engine.test.ts:** All 6 tier/level premiums, age-banded death coverage amounts, addon pricing by age band, payment frequency calculations, with and without addon
