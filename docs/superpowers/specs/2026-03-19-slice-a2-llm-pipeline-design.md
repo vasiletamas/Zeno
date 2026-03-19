@@ -29,6 +29,7 @@ Deliver a working `POST /api/chat` endpoint that streams LLM responses via SSE, 
 lib/llm/
   gateway.ts              — gateway.call() + gateway.stream() facade
   agent-config.ts         — DB config loading with 5-min cache + flushCache()
+  errors.ts               — error classification (provider_down, transient, validation, unknown)
   providers/
     types.ts              — unified ChatRequest, ChatResponse, StreamChunk, Message types
     openai.ts             — OpenAI provider (chat, chatWithTools, chatStream)
@@ -50,7 +51,15 @@ lib/chat/
   action-adapter.ts       — convert UI actions to synthetic tool calls
 
 app/api/chat/route.ts     — thin HTTP handler, delegates to orchestrator
+
+__tests__/
+  lib/llm/                — gateway, provider, agent-config tests
+  lib/tools/              — pipeline, executor, validation, permissions tests
+  lib/chat/               — orchestrator, stream-handler tests
+  integration/            — POST /api/chat end-to-end with mocked LLM
 ```
+
+> Note: Build plan step 1 (HTTP entry + auth) maps to `route.ts`. The orchestrator's 10 steps correspond to build plan steps 2-10. Trivial-turn fast-path (skipping reasoning gate) is deferred to A3.
 
 ## 4. Dependencies (new in A2)
 
@@ -71,14 +80,15 @@ Two methods:
 - For secondary agents (reasoning gate, summarizer, profile extractor)
 - Loads agent config from DB via `agent-config.ts` (cached)
 - Resolves provider via `registry.ts`
-- Calls `provider.chat()` or `provider.chatWithTools()`
-- Returns `ChatResponse` or `ChatWithToolsResponse`
+- If `options.tools` provided: calls `provider.chatWithTools()`, returns `ChatWithToolsResponse`
+- If no tools: calls `provider.chat()`, returns `ChatResponse`
 - Records call metadata (tokens, cost, duration) for turn trace
 
 **`gateway.stream(agentSlug, options)`**
-- For main-chat streaming
+- For main-chat streaming (with or without tools)
 - Same config loading and provider resolution
-- Calls `provider.chatStream()`
+- If tools provided: calls `provider.chatStreamWithTools()` — stream yields both content chunks and tool_calls chunks
+- If no tools: calls `provider.chatStream()` — stream yields content only
 - Returns `AsyncIterable<StreamChunk>`
 - Records metadata after stream completes
 
@@ -230,7 +240,7 @@ interface ToolDefinition {
   parameters: Record<string, unknown>  // JSON Schema
   executionMode: ExecutionMode
   customerVisible: boolean
-  statusMessages: { ro: string[]; en: string[] } | null
+  statusMessage: { ro: string[]; en: string[] } | null
   alwaysAllowed: boolean               // bypasses workflow gate
   allowedRoles: UserRole[]
 }
@@ -255,7 +265,7 @@ interface ToolContext {
   customerId: string
   conversationId: string
   language: 'en' | 'ro'
-  product?: { id: string; code: string; name: unknown; insuranceType: string }
+  product?: { id: string; code: string; name: { en: string; ro: string }; insuranceType: string }
   application?: { id: string; status: string; currentQuestionIndex: number }
   quote?: { id: string; status: string; premiumAnnual: number; premiumMonthly: number }
   workflowSession?: {
@@ -286,11 +296,12 @@ getAllToolNames(): string[]
 
 **Tool execution classification** (from brand book S16):
 
-| Tool | executionMode | customerVisible | statusMessages |
-|------|--------------|-----------------|----------------|
+| Tool | executionMode | customerVisible | statusMessage |
+|------|--------------|-----------------|---------------|
 | generate_quote | blocking | true | 5 RO/EN messages |
 | sign_dnt | blocking | true | 4 RO/EN messages |
 | accept_quote | blocking | true | 4 RO/EN messages |
+| check_bd_eligibility | blocking | true | 2 RO/EN messages (neutral tone, no humor) |
 | get_objection_strategy | blocking | false | 3 RO/EN enhanced typing |
 | get_product_info | blocking | false | 3 RO/EN enhanced typing |
 | list_products | blocking | false | 3 RO/EN enhanced typing |
@@ -304,14 +315,14 @@ getAllToolNames(): string[]
 | get_customer_profile | blocking | false | null |
 | update_customer_profile | background | false | null |
 | get_quote_details | blocking | false | null |
-| accept_quote | blocking | true | 4 RO/EN messages |
 | modify_quote | blocking | false | null |
 | resume_application | blocking | false | null |
 | cancel_application | blocking | false | null |
 | set_conversation_product | blocking | false | null |
-| get_objection_strategy | blocking | false | 3 RO/EN messages |
 | profile_extractor | background | false | null |
 | summarizer | background | false | null |
+
+> Notes: (1) `check_bd_eligibility` maps to the brand book's "BD medical questionnaire processing" entry. (2) `statusMessage` field name matches brand book S16 (singular). (3) For blocking+silent tools with null `statusMessage`, the stream handler emits `tool_start` with a default "Zeno se gandeste..." indicator.
 
 **A2 implements 2 example handlers** to prove the pipeline:
 - `list_products` — reads from DB, returns product list
@@ -407,8 +418,15 @@ handleChatTurn(input: {
   customerId?: string
   message: string
   language?: 'en' | 'ro'
+  syntheticToolCall?: ToolCall   // from action adapter (UI button click)
 }): ReadableStream
 ```
+
+When `syntheticToolCall` is present:
+- Steps 1-2 run normally (resolve conversation, save a system-generated user message describing the action)
+- Steps 3-6 are skipped (no reasoning gate, no prompt assembly — we know exactly what tool to call)
+- Step 7: execute the synthetic tool call through the pipeline directly (gate → validate → permission → execute → transition). Then call the LLM with the tool result to generate a natural language response (streamed).
+- Steps 8-10 run normally
 
 **10-step flow:**
 
@@ -503,7 +521,29 @@ Thin handler:
 4. Return the ReadableStream as SSE response
 5. On validation error: return 400 JSON
 
-## 10. Environment variables (new in A2)
+## 10. Edge cases and error handling
+
+**`_providerContent` persistence:** In-memory only during the turn. Used to round-trip Anthropic thinking blocks across multi-round tool loops within the same turn. NOT persisted to DB. If thinking context is needed across turns (future optimization), store in `Message.toolCalls` Json field.
+
+**Streaming retry semantics:** Streaming calls are NOT retried after the first token has been emitted to the client. Only the initial connection attempt is retried (before any content is sent). If the stream fails mid-response, emit an SSE `error` event and close the stream. The client is responsible for reconnecting.
+
+**Error handling in orchestrator:**
+- Empty message + no action → 400 JSON response (before SSE stream starts)
+- Conversation in COMPLETED/ABANDONED status → 400 JSON response
+- DB unreachable → 500 JSON response (before SSE stream starts)
+- LLM returns unknown tool name → return error as tool result to LLM (loop continues)
+- Tool execution throws → catch, return error as tool result to LLM (loop continues)
+- 5-round tool loop limit exceeded → force `toolChoice: 'none'` on the 6th LLM call (LLM must respond with text)
+
+**`messageCount` increment:** Use Prisma `update({ data: { messageCount: { increment: 1 } } })` for atomic increment. One increment per saved message (user + assistant = 2 increments per turn).
+
+**`done` event sequencing:** Emitted after step 8 (assistant message saved, messageId available). Steps 9-10 (background agents, turn trace) are fire-and-forget and run after the stream closes. The `done` event carries approximate token/cost data from the LLM calls already completed; final cost is updated in the turn trace.
+
+**Zod schema vs JSON Schema:** The Zod schemas in `validation.ts` and the JSON Schema `parameters` in `ToolDefinition` are maintained independently. Zod validates at runtime (server-side). JSON Schema parameters are sent to the LLM for function calling. They describe the same shape but are not auto-derived from each other — this avoids a Zod-to-JSON-Schema build dependency.
+
+**`ToolContext.product.name` type:** Typed as `{ en: string; ro: string }` (the bilingual Json pattern). The context builder casts the Prisma Json field to this type.
+
+## 11. Environment variables (new in A2)
 
 ```
 OPENAI_API_KEY=sk-...
@@ -512,7 +552,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 Added to `.env.example` with placeholder values.
 
-## 11. What A2 delivers
+## 12. What A2 delivers
 
 - [ ] Working `POST /api/chat` endpoint that streams SSE responses
 - [ ] LLM gateway with OpenAI + Anthropic providers, per-agent config from DB, 5-min cache
@@ -528,7 +568,7 @@ Added to `.env.example` with placeholder values.
 - [ ] Failover: primary → fallback provider on error
 - [ ] `npx tsc --noEmit` passes
 
-## 12. What A2 does NOT include
+## 13. What A2 does NOT include
 
 - Full dynamic prompt assembly with 3-layer section registry (Slice A3)
 - Sliding window + summarizer trigger logic (Slice A3)
@@ -538,7 +578,7 @@ Added to `.env.example` with placeholder values.
 - Auth (Phase B)
 - Rate limiting (post-launch)
 
-## 13. Testing strategy
+## 14. Testing strategy
 
 A2 introduces testable business logic (unlike A1 which was schema + data). Tests:
 
