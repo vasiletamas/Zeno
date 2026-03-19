@@ -103,10 +103,9 @@ CONDITIONAL SECTIONS (list in requiredSections or excludedSections):
 - coachingBriefing: Include for moderate/complex. Exclude for simple Q&A.
 - productContext: Include when the product is discussed. Exclude during pure Q&A.
 - customerContext: Include when personalization matters (objections, closing, rapport).
-- globalWisdom: Include for moderate/complex. Exclude for simple.
+- agentKnowledge: Include for moderate/complex. Exclude for simple.
 - customerMemory: Include for returning customers with relevant history. Exclude during Q&A.
 - capabilityManifest: Include for first 3 turns only. Exclude otherwise.
-- metadata: Include for moderate/complex. Exclude for simple.
 
 RULES:
 - requiredSections: sections that MUST be included this turn

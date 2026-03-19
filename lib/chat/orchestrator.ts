@@ -17,7 +17,6 @@ import { getAgentConfig } from '@/lib/llm/agent-config'
 import type {
   Message,
   ToolCall,
-  StreamChunk,
   LLMToolDefinition,
 } from '@/lib/llm/providers/types'
 import { getToolDefinition, getToolsForLLM } from '@/lib/tools/registry'
@@ -25,14 +24,16 @@ import { executeToolWithPipeline } from '@/lib/tools/pipeline'
 import { buildToolContext } from './context-builder'
 import { createSSEStream, pickStatusMessage, type SSEEvent } from './stream-handler'
 import type { ToolContext, PipelineResult } from '@/lib/tools/types'
+import { buildPrompt, detectFastPath, FAST_PATH_GATE, type GateSelection } from './prompt-builder'
+import { executeReasoningGate, formatGateBriefing, type ReasoningGateInput, type ReasoningGateOutput } from './reasoning-gate'
+import { buildSlidingWindow } from './sliding-window'
+import { loadAllSections, type WorkflowSessionData } from './context-loaders'
 
 // ==============================================
 // CONSTANTS
 // ==============================================
 
 const MAX_TOOL_ROUNDS = 5
-const SLIDING_WINDOW_SIZE = 20
-const REASONING_GATE_MESSAGES = 3
 
 // ==============================================
 // INPUT TYPE
@@ -57,13 +58,14 @@ interface TurnState {
   messageCount: number
   productId: string | null
   workflowSessionId: string | null
+  workflowStepCode: string | null
   savedMessageId: string | null
   totalInputTokens: number
   totalOutputTokens: number
   provider: string | null
   model: string | null
   startMs: number
-  phases: Record<string, number>
+  phases: Record<string, unknown>
 }
 
 // ==============================================
@@ -90,6 +92,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     messageCount: 0,
     productId: null,
     workflowSessionId: null,
+    workflowStepCode: null,
     savedMessageId: null,
     totalInputTokens: 0,
     totalOutputTokens: 0,
@@ -133,6 +136,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
             select: {
               id: true,
               code: true,
+              name: true,
               agentInstructions: true,
               allowedTools: true,
               autoTool: true,
@@ -156,6 +160,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   state.messageCount = conversation.messageCount
   state.productId = conversation.productId
   state.workflowSessionId = conversation.workflowSession?.id ?? null
+  state.workflowStepCode = conversation.workflowSession?.currentStep.code ?? null
   state.phases['step1_resolve'] = Date.now() - step1Start
 
   // =============================================
@@ -186,76 +191,130 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // =============================================
   const step3Start = Date.now()
 
-  let gateResult: {
-    complexity: string
-    briefing: string
-    requiredSections: string[]
-    toolGuidance: string
-  } = {
-    complexity: 'moderate',
-    briefing: '',
-    requiredSections: [],
-    toolGuidance: '',
-  }
+  // Determine if fast path applies
+  const hasActiveQuestionnaire = !!(state.workflowStepCode &&
+    (['dnt_questionnaire', 'application_fill'].includes(state.workflowStepCode) ||
+      state.workflowStepCode.includes('bd')))
 
-  if (!input.syntheticToolCall) {
+  let gateOutput: ReasoningGateOutput | null = null
+  let gateSelection: GateSelection
+
+  if (detectFastPath(input.message, hasActiveQuestionnaire) && !input.syntheticToolCall) {
+    // Fast path: skip reasoning gate
+    gateSelection = FAST_PATH_GATE
+    state.phases['reasoningGate'] = { skipped: true, fastPath: true, durationMs: 0 }
+  } else if (input.syntheticToolCall) {
+    // Synthetic tool call: skip gate
+    gateSelection = { requiredSections: [], excludedSections: [], confidence: 0 }
+    state.phases['reasoningGate'] = { skipped: true, syntheticAction: true, durationMs: 0 }
+  } else {
+    // Full reasoning gate
+    const gateStart = Date.now()
+
     try {
-      // Load recent messages for context
+      // Load recent messages for gate context
       const recentMsgs = await prisma.message.findMany({
         where: { conversationId: state.conversationId },
         orderBy: { createdAt: 'desc' },
-        take: REASONING_GATE_MESSAGES,
+        take: 3,
         select: { role: true, content: true },
       })
-
-      const recentContext = recentMsgs
+      const last3Messages = recentMsgs
         .reverse()
-        .map((m) => `${m.role}: ${m.content.slice(0, 200)}`)
-        .join('\n')
+        .map((m) => ({ role: m.role, content: m.content.slice(0, 300) }))
 
-      const workflowInfo = conversation.workflowSession
-        ? `Workflow step: ${conversation.workflowSession.currentStep.code}`
-        : 'No active workflow'
+      // Load customer profile for gate input
+      const customer = await prisma.customer.findUnique({
+        where: { id: state.customerId },
+        select: {
+          name: true,
+          dateOfBirth: true,
+          extractedProfile: true,
+        },
+      })
+      const extractedProfile = (customer?.extractedProfile as Record<string, unknown>) ?? {}
+      const customerAge = customer?.dateOfBirth
+        ? Math.floor((Date.now() - customer.dateOfBirth.getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+        : null
 
-      const availableToolNames = getToolsForLLM()
-        .map((t) => t.function.name)
-        .join(', ')
-
-      const contextPrompt = [
-        `Recent conversation:\n${recentContext}`,
-        `\nCurrent state: ${workflowInfo}`,
-        `Available tools: ${availableToolNames}`,
-        `\nUser message: ${input.message}`,
-        `\nAnalyze this turn and respond with JSON:`,
-        `{"complexity":"simple"|"moderate"|"complex","briefing":"<situational analysis for the main agent>","requiredSections":[],"toolGuidance":"<which tools to consider>"}`,
-      ].join('\n')
-
-      const gateResponse = await gateway.call('reasoning-gate', {
-        messages: [{ role: 'user', content: contextPrompt }],
+      // Derive business state from conversation
+      const application = await prisma.application.findUnique({
+        where: { conversationId: state.conversationId },
+        select: {
+          status: true,
+          currentQuestionIndex: true,
+          totalQuestions: true,
+          quote: {
+            select: {
+              status: true,
+              premiumAnnual: true,
+              policy: { select: { id: true } },
+            },
+          },
+        },
       })
 
-      if (gateResponse.content) {
-        // Extract JSON from the response (handle markdown code fences)
-        const jsonMatch = gateResponse.content.match(/\{[\s\S]*\}/)
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>
-          gateResult = {
-            complexity: typeof parsed.complexity === 'string' ? parsed.complexity : 'moderate',
-            briefing: typeof parsed.briefing === 'string' ? parsed.briefing : '',
-            requiredSections: Array.isArray(parsed.requiredSections)
-              ? (parsed.requiredSections as string[])
-              : [],
-            toolGuidance: typeof parsed.toolGuidance === 'string' ? parsed.toolGuidance : '',
-          }
-        }
+      // Available tools: filter by workflow step's allowed tools if applicable
+      const gateStepTools = conversation.workflowSession?.currentStep.allowedTools ?? []
+      const availableToolDefs = getToolsForLLM(gateStepTools.length > 0 ? gateStepTools : undefined)
+      const availableToolNames = availableToolDefs.map((t) => t.function.name)
+
+      // Current questionnaire question text (for gate context)
+      let currentQuestionText: string | null = null
+      // We'll leave this null since loading questionnaire context is handled in step 4
+
+      const gateInput: ReasoningGateInput = {
+        lastUserMessage: input.message,
+        last3Messages,
+        hasActiveQuestionnaire,
+        currentQuestionText,
+        workflowStepCode: state.workflowStepCode,
+        availableTools: availableToolNames,
+        customerProfile: {
+          name: customer?.name ?? null,
+          age: customerAge,
+          family: typeof extractedProfile.familySize === 'number'
+            ? `family of ${extractedProfile.familySize}`
+            : typeof extractedProfile.hasChildren === 'boolean'
+              ? (extractedProfile.hasChildren ? 'has children' : 'no children')
+              : null,
+          occupation: typeof extractedProfile.occupation === 'string'
+            ? extractedProfile.occupation
+            : null,
+          isReturningCustomer: false, // P2: returning customer detection
+        },
+        businessState: {
+          selectedProduct: conversation.product?.id ?? null,
+          dntProgress: null, // Simplified: DNT progress tracked via questionnaire
+          applicationProgress: application
+            ? `${application.currentQuestionIndex}/${application.totalQuestions} (${application.status})`
+            : null,
+          hasQuote: !!application?.quote,
+          quoteValue: application?.quote?.premiumAnnual ?? null,
+          hasPolicy: !!application?.quote?.policy,
+        },
       }
 
-      // Track usage
-      state.totalInputTokens += gateResponse.usage.promptTokens
-      state.totalOutputTokens += gateResponse.usage.completionTokens
+      gateOutput = await executeReasoningGate(gateInput)
+      gateSelection = {
+        requiredSections: gateOutput.requiredSections,
+        excludedSections: gateOutput.excludedSections,
+        confidence: gateOutput.confidence,
+      }
+      state.phases['reasoningGate'] = {
+        durationMs: Date.now() - gateStart,
+        complexity: gateOutput.complexity,
+        situationType: gateOutput.situationType,
+        confidence: gateOutput.confidence,
+      }
     } catch (err: unknown) {
       // Reasoning gate failure is non-fatal: use defaults
       console.warn('[Orchestrator] Reasoning gate failed, using defaults:', err)
+      gateSelection = { requiredSections: [], excludedSections: [], confidence: 0 }
+      state.phases['reasoningGate'] = {
+        durationMs: Date.now() - gateStart,
+        error: true,
+      }
     }
   }
 
@@ -267,22 +326,33 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const step4Start = Date.now()
 
   const agentConfig = await getAgentConfig('main-chat')
-  let systemPrompt = agentConfig.systemPrompt ?? ''
+  const situationalBriefing = gateOutput ? formatGateBriefing(gateOutput) : null
 
-  // Append reasoning gate briefing
-  if (gateResult.briefing) {
-    systemPrompt += `\n\n=== SITUATIONAL ANALYSIS (${gateResult.complexity}) ===\n${gateResult.briefing}`
-  }
+  // Build WorkflowSessionData from current conversation state
+  const workflowSessionData: WorkflowSessionData | null = conversation.workflowSession
+    ? {
+        currentStepCode: conversation.workflowSession.currentStep.code,
+        currentStepName: conversation.workflowSession.currentStep.name,
+        agentInstructions: conversation.workflowSession.currentStep.agentInstructions,
+        allowedTools: conversation.workflowSession.currentStep.allowedTools,
+        data: conversation.workflowSession.data,
+      }
+    : null
 
-  // Append tool guidance
-  if (gateResult.toolGuidance) {
-    systemPrompt += `\n\nTool guidance: ${gateResult.toolGuidance}`
-  }
+  // Determine allowed tools for this step
+  const stepAllowedTools = conversation.workflowSession?.currentStep.allowedTools ?? []
 
-  // Append workflow step instructions
-  if (conversation.workflowSession?.currentStep.agentInstructions) {
-    systemPrompt += `\n\n=== CURRENT WORKFLOW STEP ===\n${conversation.workflowSession.currentStep.agentInstructions}`
-  }
+  const sections = await loadAllSections({
+    agentConfig: { systemPrompt: agentConfig.systemPrompt, constraints: agentConfig.constraints },
+    allowedTools: stepAllowedTools,
+    productId: state.productId,
+    conversationId: state.conversationId,
+    customerId: state.customerId,
+    workflowSession: workflowSessionData,
+    workflowStepCode: state.workflowStepCode,
+    situationalBriefing,
+    language: state.language,
+  })
 
   state.provider = agentConfig.provider
   state.model = agentConfig.model
@@ -293,20 +363,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // =============================================
   const step5Start = Date.now()
 
-  const dbMessages = await prisma.message.findMany({
-    where: { conversationId: state.conversationId },
-    orderBy: { createdAt: 'asc' },
-    take: SLIDING_WINDOW_SIZE,
-    select: {
-      role: true,
-      content: true,
-      toolCalls: true,
-    },
-  })
-
-  // Use the DB ordering to get the latest N messages
-  // (we ordered asc, so we need to get the tail if there are more)
-  const windowMessages = dbMessages
+  const { messages: windowMessages, summaryPrefix } = await buildSlidingWindow(
+    state.conversationId,
+    state.messageCount,
+  )
 
   state.phases['step5_sliding_window'] = Date.now() - step5Start
 
@@ -315,30 +375,20 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // =============================================
   const step6Start = Date.now()
 
-  const messages: Message[] = [
-    { role: 'system', content: systemPrompt },
-  ]
+  const buildResult = buildPrompt(sections, gateSelection)
+  const { prompt: systemPrompt } = buildResult
 
-  // Add history (excluding the user message we just saved, it goes at the end)
-  for (const dbMsg of windowMessages) {
-    if (dbMsg.role === 'user' || dbMsg.role === 'assistant') {
-      const msg: Message = {
-        role: dbMsg.role,
-        content: dbMsg.content,
-      }
-      // Reconstruct toolCalls for assistant messages
-      if (dbMsg.role === 'assistant' && dbMsg.toolCalls) {
-        msg.toolCalls = dbMsg.toolCalls as unknown as ToolCall[]
-      }
-      messages.push(msg)
-    } else if (dbMsg.role === 'tool') {
-      messages.push({
-        role: 'tool',
-        content: dbMsg.content,
-        toolCallId: (dbMsg.toolCalls as unknown as string) ?? undefined,
-      })
-    }
+  const messages: Message[] = [
+    { role: 'system' as const, content: systemPrompt },
+  ]
+  if (summaryPrefix) {
+    messages.push({
+      role: 'system' as const,
+      content: `[Previous conversation summary]\n${summaryPrefix}\n[End of summary — recent messages follow]`,
+    })
   }
+  messages.push(...windowMessages)
+  messages.push({ role: 'user' as const, content: input.message })
 
   state.phases['step6_build_messages'] = Date.now() - step6Start
 
@@ -647,41 +697,34 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // =============================================
   const step9Start = Date.now()
 
-  // Profile extractor: detect potential personal info
-  const hasPersonalInfo = /\b(\d{2,}|ani?|years?\s+old|name|nume|v[aâ]rst[aă])\b/i.test(input.message)
+  // Profile extractor: detect potential personal info (Romanian and English patterns)
+  const hasPersonalInfo = /\b(ani|varsta|vârstă|copil|copii|soț|soție|sot|sotie|lucrez|căsătorit|casatorit|familie|venit|salariu|\d{13})\b/i.test(input.message)
   if (hasPersonalInfo) {
     void (async () => {
       try {
-        await gateway.call('profile-extractor', {
-          messages: [
-            {
-              role: 'user',
-              content: `Extract profile information from this message. Customer ID: ${state.customerId}. Message: "${input.message}"`,
-            },
-          ],
+        const response = await gateway.call('profile-extractor', {
+          messages: [{ role: 'user' as const, content: input.message }],
         })
-      } catch (err: unknown) {
-        console.error('[Orchestrator] Profile extractor error:', err)
+        if (response.content) {
+          const extracted = JSON.parse(response.content) as Record<string, unknown>
+          const current = await prisma.customer.findUnique({
+            where: { id: state.customerId },
+            select: { extractedProfile: true },
+          })
+          const currentProfile = (current?.extractedProfile as Record<string, unknown>) ?? {}
+          const merged = { ...currentProfile, ...extracted }
+          await prisma.customer.update({
+            where: { id: state.customerId },
+            data: { extractedProfile: merged as unknown as Record<string, string | number | boolean | null> },
+          })
+        }
+      } catch (e) {
+        console.error('[Orchestrator] Profile extractor failed:', e)
       }
     })()
   }
 
-  // Summarizer: stub check (would create ConversationSummary)
-  if (state.messageCount > 20) {
-    void (async () => {
-      try {
-        const existing = await prisma.conversationSummary.findUnique({
-          where: { conversationId: state.conversationId },
-        })
-        if (!existing) {
-          // TODO: Implement summarizer agent call in future slice
-          console.log(`[Orchestrator] Conversation ${state.conversationId} needs summarization (${state.messageCount} messages)`)
-        }
-      } catch (err: unknown) {
-        console.error('[Orchestrator] Summarizer check error:', err)
-      }
-    })()
-  }
+  // Summarizer: handled by buildSlidingWindow (step 5) — no separate trigger needed
 
   state.phases['step9_background'] = Date.now() - step9Start
 
@@ -690,11 +733,21 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // =============================================
   const latencyMs = Date.now() - state.startMs
 
+  // Enrich phases with prompt assembly metadata
+  state.phases['promptAssembly'] = {
+    sectionSizes: buildResult.sectionSizes,
+    gateActive: buildResult.gateActive,
+    gateComplexity: gateOutput?.complexity ?? null,
+    fastPath: gateSelection === FAST_PATH_GATE,
+    includedSections: buildResult.includedSections,
+    excludedSections: buildResult.excludedSections,
+  }
+
   void prisma.turnTrace.create({
     data: {
       conversationId: state.conversationId,
       messageIndex: state.messageCount,
-      phases: state.phases as unknown as Record<string, number>,
+      phases: JSON.parse(JSON.stringify(state.phases)),
       inputTokens: state.totalInputTokens || null,
       outputTokens: state.totalOutputTokens || null,
       cost: null, // Cost calculation deferred to tracing layer
