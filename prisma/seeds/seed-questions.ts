@@ -70,6 +70,7 @@ export async function seedQuestions(prisma: PrismaClient) {
         await prisma.question.update({
           where: { id: existing.id },
           data: {
+            code: q.code,
             helpText: jsonOrDbNull(q.helpText),
             type: q.type,
             options: jsonOrDbNull(q.options),
@@ -85,6 +86,7 @@ export async function seedQuestions(prisma: PrismaClient) {
         const created = await prisma.question.create({
           data: {
             groupId: group.id,
+            code: q.code,
             text: q.text,
             helpText: jsonOrDbNull(q.helpText),
             type: q.type,
@@ -658,7 +660,6 @@ export async function seedQuestions(prisma: PrismaClient) {
         orderIndex: 1,
         validationRules: {
           riskWeight: 10.0,
-          flagAnswers: [{ value: 'true', action: 'escalate', reason: 'Medical condition disclosed — BD addon requires manual underwriting review' }],
         },
       },
       {
@@ -671,7 +672,6 @@ export async function seedQuestions(prisma: PrismaClient) {
         orderIndex: 2,
         validationRules: {
           riskWeight: 10.0,
-          flagAnswers: [{ value: 'true', action: 'escalate', reason: 'Medical condition disclosed — BD addon requires manual underwriting review' }],
         },
       },
       {
@@ -684,7 +684,6 @@ export async function seedQuestions(prisma: PrismaClient) {
         orderIndex: 3,
         validationRules: {
           riskWeight: 10.0,
-          flagAnswers: [{ value: 'true', action: 'escalate', reason: 'Medical condition disclosed — BD addon requires manual underwriting review' }],
         },
       },
       {
@@ -697,7 +696,6 @@ export async function seedQuestions(prisma: PrismaClient) {
         orderIndex: 4,
         validationRules: {
           riskWeight: 10.0,
-          flagAnswers: [{ value: 'true', action: 'escalate', reason: 'Medical condition disclosed — BD addon requires manual underwriting review' }],
         },
       },
       {
@@ -710,7 +708,6 @@ export async function seedQuestions(prisma: PrismaClient) {
         orderIndex: 5,
         validationRules: {
           riskWeight: 10.0,
-          flagAnswers: [{ value: 'true', action: 'escalate', reason: 'Medical condition disclosed — BD addon requires manual underwriting review' }],
         },
       },
       {
@@ -723,7 +720,6 @@ export async function seedQuestions(prisma: PrismaClient) {
         orderIndex: 6,
         validationRules: {
           riskWeight: 10.0,
-          flagAnswers: [{ value: 'true', action: 'escalate', reason: 'Medical condition disclosed — BD addon requires manual underwriting review' }],
         },
       },
     ],

@@ -399,6 +399,7 @@ model QuestionGroup {
 model Question {
   id               String   @id @default(cuid())
   groupId          String
+  code             String?
   text             Json
   helpText         Json?
   type             String
@@ -447,6 +448,7 @@ model Application {
   status               ApplicationStatus @default(OPEN)
   currentQuestionIndex Int               @default(0)
   totalQuestions        Int               @default(0)
+  flagsForReview       Json?
   completedAt          DateTime?
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
@@ -465,8 +467,11 @@ model Quote {
   productId      String
   customerId     String
   premiumAnnual  Float
-  premiumMonthly Float
-  currency       String      @default("RON")
+  premiumMonthly    Float
+  premiumSemiAnnual Float?
+  premiumQuarterly  Float?
+  paymentFrequency  String?
+  currency          String      @default("RON")
   coverages      Json
   addonsSelected Json?
   status         QuoteStatus @default(DRAFT)
