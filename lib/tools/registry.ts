@@ -11,6 +11,16 @@ import type { LLMToolDefinition } from '@/lib/llm/providers/types'
 import type { ToolDefinition, ToolHandler, ToolContext, ToolResult } from './types'
 import { prisma } from '@/lib/db'
 
+// --- Handler imports ---
+import { checkDntStatus, startDntQuestionnaire, saveDntAnswer, signDnt } from './handlers/dnt-handlers'
+import { startApplication, saveApplicationAnswer, getApplicationStatus, resumeApplication, cancelApplication } from './handlers/application-handlers'
+import { generateQuote, getQuoteDetails, acceptQuote, modifyQuote } from './handlers/quote-handlers'
+import { compareProducts, setConversationProduct } from './handlers/product-handlers'
+import { getCustomerProfile, updateCustomerProfile } from './handlers/profile-handlers'
+import { getObjectionStrategy } from './handlers/objection-handlers'
+import { checkBdEligibility } from './handlers/bd-handlers'
+import { escalateToHuman } from './handlers/utility-handlers'
+
 // ==============================================
 // INTERNAL STORAGE
 // ==============================================
@@ -156,7 +166,7 @@ const STATUS_PRODUCT_LOOKUP = {
 }
 
 // ==============================================
-// STUB HANDLER
+// STUB HANDLER (for background-only tools)
 // ==============================================
 
 const stubHandler: ToolHandler = async (): Promise<ToolResult> => ({
@@ -165,7 +175,7 @@ const stubHandler: ToolHandler = async (): Promise<ToolResult> => ({
 })
 
 // ==============================================
-// REAL HANDLERS
+// REAL HANDLERS (list_products, get_product_info kept from A2)
 // ==============================================
 
 /**
@@ -288,7 +298,7 @@ const ALL_ROLES: ToolDefinition['allowedRoles'] = ['CUSTOMER', 'OPERATOR', 'ADMI
 const ADMIN_OPERATOR: ToolDefinition['allowedRoles'] = ['OPERATOR', 'ADMIN']
 
 // ==============================================
-// REGISTER ALL 23 TOOLS
+// REGISTER ALL 25 TOOLS
 // ==============================================
 
 // --- Product / Discovery ---
@@ -348,7 +358,7 @@ registerTool('compare_products', {
   statusMessage: STATUS_PRODUCT_LOOKUP,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, compareProducts)
 
 registerTool('set_conversation_product', {
   description: 'Set the product focus for the current conversation.',
@@ -366,7 +376,7 @@ registerTool('set_conversation_product', {
   statusMessage: null,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, setConversationProduct)
 
 registerTool('get_objection_strategy', {
   description: 'Get a strategy for handling a specific customer objection type.',
@@ -391,7 +401,7 @@ registerTool('get_objection_strategy', {
   statusMessage: STATUS_OBJECTION_STRATEGY,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, getObjectionStrategy)
 
 // --- Profile ---
 
@@ -407,7 +417,7 @@ registerTool('get_customer_profile', {
   statusMessage: null,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, getCustomerProfile)
 
 registerTool('update_customer_profile', {
   description: 'Update the extracted customer profile with new information.',
@@ -430,7 +440,7 @@ registerTool('update_customer_profile', {
   statusMessage: null,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, updateCustomerProfile)
 
 // --- DNT (Declaration of Needs and Testing) ---
 
@@ -448,7 +458,7 @@ registerTool('check_dnt_status', {
   statusMessage: null,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, checkDntStatus)
 
 registerTool('start_dnt_questionnaire', {
   description: 'Start the DNT questionnaire for a given insurance type.',
@@ -465,7 +475,7 @@ registerTool('start_dnt_questionnaire', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, startDntQuestionnaire)
 
 registerTool('save_dnt_answer', {
   description: 'Save an answer to the current DNT question.',
@@ -483,7 +493,7 @@ registerTool('save_dnt_answer', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, saveDntAnswer)
 
 registerTool('sign_dnt', {
   description: 'Sign the completed DNT document with customer consent.',
@@ -501,7 +511,7 @@ registerTool('sign_dnt', {
   statusMessage: STATUS_SIGN_DNT,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, signDnt)
 
 // --- Application ---
 
@@ -519,7 +529,7 @@ registerTool('start_application', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, startApplication)
 
 registerTool('save_application_answer', {
   description: 'Save an answer to the current application question.',
@@ -536,7 +546,7 @@ registerTool('save_application_answer', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, saveApplicationAnswer)
 
 registerTool('resume_application', {
   description: 'Resume a previously paused application.',
@@ -552,7 +562,7 @@ registerTool('resume_application', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, resumeApplication)
 
 registerTool('get_application_status', {
   description: 'Get the current status and progress of the application.',
@@ -566,7 +576,23 @@ registerTool('get_application_status', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, getApplicationStatus)
+
+registerTool('cancel_application', {
+  description: 'Cancel the current application.',
+  parameters: {
+    type: 'object',
+    properties: {
+      reason: { type: 'string', description: 'Reason for cancellation.' },
+    },
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  alwaysAllowed: false,
+  allowedRoles: ALL_ROLES,
+}, cancelApplication)
 
 // --- Quote ---
 
@@ -584,7 +610,7 @@ registerTool('generate_quote', {
   statusMessage: STATUS_GENERATE_QUOTE,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, generateQuote)
 
 registerTool('accept_quote', {
   description: 'Accept the quote and proceed to policy issuance.',
@@ -602,7 +628,7 @@ registerTool('accept_quote', {
   statusMessage: STATUS_ACCEPT_QUOTE,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, acceptQuote)
 
 registerTool('get_quote_details', {
   description: 'Get detailed breakdown of a generated quote.',
@@ -618,7 +644,21 @@ registerTool('get_quote_details', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, getQuoteDetails)
+
+registerTool('modify_quote', {
+  description: 'Expire the current quote and reopen the application for package re-selection.',
+  parameters: {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  alwaysAllowed: false,
+  allowedRoles: ALL_ROLES,
+}, modifyQuote)
 
 // --- BD Eligibility ---
 
@@ -636,7 +676,7 @@ registerTool('check_bd_eligibility', {
   statusMessage: STATUS_CHECK_BD_ELIGIBILITY,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, checkBdEligibility)
 
 // --- Utility / Background ---
 
@@ -665,7 +705,7 @@ registerTool('escalate_to_human', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
-}, stubHandler)
+}, escalateToHuman)
 
 registerTool('profile_extractor', {
   description: 'Extract customer profile information from conversation messages (background).',

@@ -29,12 +29,12 @@ const getProductInfoSchema = z.object({
 
 const compareProductsSchema = z.object({
   productIds: z.array(z.string()).min(2).max(5),
-}).passthrough()
+}).strict()
 
 const setConversationProductSchema = z.object({
   productId: z.string().min(1, 'Product ID is required'),
   confidence: z.number().min(0).max(100).optional(),
-}).passthrough()
+}).strict()
 
 const getObjectionStrategySchema = z.object({
   objectionType: z.enum([
@@ -42,24 +42,15 @@ const getObjectionStrategySchema = z.object({
     'no_need', 'have_insurance', 'need_to_think',
     'no_trust', 'low_benefit', 'competitor',
   ]),
-}).passthrough()
+}).strict()
 
 // ==============================================
 // PROFILE TOOL SCHEMAS
 // ==============================================
 
-const getCustomerProfileSchema = z.object({}).passthrough()
+const getCustomerProfileSchema = z.object({}).strict()
 
-const updateCustomerProfileSchema = z.object({
-  age: z.number().optional(),
-  occupation: z.string().optional(),
-  familySize: z.number().optional(),
-  hasSpouse: z.boolean().optional(),
-  hasChildren: z.boolean().optional(),
-  incomeLevel: z.enum(['low', 'medium', 'high']).optional(),
-  motivations: z.array(z.string()).optional(),
-  interests: z.array(z.string()).optional(),
-}).passthrough()
+const updateCustomerProfileSchema = z.record(z.string(), z.unknown())
 
 // ==============================================
 // DNT TOOL SCHEMAS
@@ -67,25 +58,25 @@ const updateCustomerProfileSchema = z.object({
 
 const checkDntStatusSchema = z.object({
   insuranceType: InsuranceTypeSchema.optional(),
-}).passthrough()
+}).strict()
 
 const startDntQuestionnaireSchema = z.object({
   insuranceType: InsuranceTypeSchema,
-}).passthrough()
+}).strict()
 
 const saveDntAnswerSchema = z.object({
   questionId: z.string().optional(),
   answer: z.string().min(1, 'Answer is required'),
-}).passthrough()
+}).strict()
 
 const signDntSchema = z.object({
-  confirmSignature: z.boolean().refine((val) => val === true, {
+  confirmSignature: z.literal(true, {
     message: 'Signature confirmation is required',
   }),
-  gdprConsent: z.boolean().refine((val) => val === true, {
+  gdprConsent: z.literal(true, {
     message: 'GDPR consent is required',
   }),
-}).passthrough()
+}).strict()
 
 // ==============================================
 // APPLICATION TOOL SCHEMAS
@@ -93,17 +84,21 @@ const signDntSchema = z.object({
 
 const startApplicationSchema = z.object({
   productId: z.string().optional(),
-}).passthrough()
+}).strict()
 
 const saveApplicationAnswerSchema = z.object({
   answer: z.string().min(1, 'Answer is required'),
-}).passthrough()
+}).strict()
 
 const resumeApplicationSchema = z.object({
   applicationId: z.string().optional(),
-}).passthrough()
+}).strict()
 
-const getApplicationStatusSchema = z.object({}).passthrough()
+const getApplicationStatusSchema = z.object({}).strict()
+
+const cancelApplicationSchema = z.object({
+  reason: z.string().optional(),
+}).strict()
 
 // ==============================================
 // QUOTE TOOL SCHEMAS
@@ -111,18 +106,20 @@ const getApplicationStatusSchema = z.object({}).passthrough()
 
 const generateQuoteSchema = z.object({
   applicationId: z.string().optional(),
-}).passthrough()
+}).strict()
 
 const acceptQuoteSchema = z.object({
   quoteId: z.string().optional(),
-  confirmAcceptance: z.boolean().refine((val) => val === true, {
+  confirmAcceptance: z.literal(true, {
     message: 'Confirmation is required to accept the quote',
   }),
-}).passthrough()
+}).strict()
 
 const getQuoteDetailsSchema = z.object({
   quoteId: z.string().optional(),
-}).passthrough()
+}).strict()
+
+const modifyQuoteSchema = z.object({}).strict()
 
 // ==============================================
 // BD ELIGIBILITY
@@ -130,26 +127,26 @@ const getQuoteDetailsSchema = z.object({
 
 const checkBdEligibilitySchema = z.object({
   applicationId: z.string().optional(),
-}).passthrough()
+}).strict()
 
 // ==============================================
 // UTILITY / BACKGROUND SCHEMAS
 // ==============================================
 
 const escalateToHumanSchema = z.object({
-  reason: z.enum(['complex_question', 'customer_request', 'technical_issue', 'compliance_concern']),
-  summary: z.string().min(10, 'Summary must be at least 10 characters'),
-  priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
-}).passthrough()
+  reason: z.string().optional(),
+  summary: z.string().optional(),
+  priority: z.string().optional(),
+}).strict()
 
 const profileExtractorSchema = z.object({
   messageContent: z.string().min(1),
-}).passthrough()
+}).strict()
 
 const summarizerSchema = z.object({
   conversationId: z.string().min(1),
   maxLength: z.number().min(50).max(2000).optional(),
-}).passthrough()
+}).strict()
 
 // ==============================================
 // SCHEMA REGISTRY
@@ -178,11 +175,13 @@ const toolSchemas: Record<string, ZodType> = {
   save_application_answer: saveApplicationAnswerSchema,
   resume_application: resumeApplicationSchema,
   get_application_status: getApplicationStatusSchema,
+  cancel_application: cancelApplicationSchema,
 
   // Quote
   generate_quote: generateQuoteSchema,
   accept_quote: acceptQuoteSchema,
   get_quote_details: getQuoteDetailsSchema,
+  modify_quote: modifyQuoteSchema,
 
   // BD Eligibility
   check_bd_eligibility: checkBdEligibilitySchema,

@@ -1,0 +1,459 @@
+/**
+ * Application Handlers
+ *
+ * start_application, save_application_answer, get_application_status,
+ * resume_application, cancel_application
+ */
+
+import { prisma } from '@/lib/db'
+import {
+  getNextQuestion,
+  validateAnswer,
+  checkForFlags,
+  calculateProgress,
+} from '@/lib/engines/questionnaire-engine'
+import type { ToolHandler } from '@/lib/tools/types'
+
+const APPLICATION_GROUP_CODES = ['application']
+
+// ─────────────────────────────────────────────
+// start_application
+// ─────────────────────────────────────────────
+
+export const startApplication: ToolHandler = async (_args, context) => {
+  try {
+    // Verify DNT is signed
+    if (context.workflowSession) {
+      const session = await prisma.workflowSession.findUnique({
+        where: { id: context.workflowSession.id },
+      })
+      const data = (session?.data ?? {}) as Record<string, unknown>
+      if (!data.dntSignedAt) {
+        return {
+          success: false,
+          error: 'DNT must be signed before starting an application.',
+        }
+      }
+    }
+
+    // Check no existing OPEN application for this conversation
+    const existing = await prisma.application.findUnique({
+      where: { conversationId: context.conversationId },
+    })
+    if (existing && existing.status === 'OPEN') {
+      return {
+        success: true,
+        data: { alreadyExists: true, applicationId: existing.id },
+        message: 'An open application already exists for this conversation.',
+      }
+    }
+
+    // Resolve product from context
+    const productId = context.product?.id
+    if (!productId) {
+      return {
+        success: false,
+        error: 'No product selected. Please set a product before starting an application.',
+      }
+    }
+
+    // Calculate total questions for the application group
+    const progress = await calculateProgress(APPLICATION_GROUP_CODES, context.conversationId)
+
+    // Create Application record
+    const application = await prisma.application.create({
+      data: {
+        conversationId: context.conversationId,
+        customerId: context.customerId,
+        productId,
+        status: 'OPEN',
+        currentQuestionIndex: 0,
+        totalQuestions: progress.total,
+      },
+    })
+
+    // Get first question
+    const result = await getNextQuestion(APPLICATION_GROUP_CODES, context.conversationId)
+    if (!result) {
+      return {
+        success: false,
+        error: 'No application questions configured.',
+      }
+    }
+
+    const lang = context.language ?? 'ro'
+    const q = result.question
+    const text = q.text as { en: string; ro: string }
+
+    return {
+      success: true,
+      data: {
+        applicationStarted: true,
+        applicationId: application.id,
+        currentQuestion: {
+          id: q.id,
+          code: q.code,
+          text: text[lang],
+          helpText: q.helpText ? (q.helpText as { en: string; ro: string })[lang] : null,
+          type: q.type,
+          options: q.options,
+        },
+        progress: result.progress,
+      },
+      message: 'Application started. Let\'s begin with the first question.',
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
+
+// ─────────────────────────────────────────────
+// save_application_answer
+// ─────────────────────────────────────────────
+
+export const saveApplicationAnswer: ToolHandler = async (args, context) => {
+  const answer = args.answer as string
+
+  try {
+    // Find the active application
+    const application = await prisma.application.findUnique({
+      where: { conversationId: context.conversationId },
+    })
+    if (!application || application.status !== 'OPEN') {
+      return {
+        success: false,
+        error: 'No open application found. Please start an application first.',
+      }
+    }
+
+    // Get current question
+    const currentResult = await getNextQuestion(APPLICATION_GROUP_CODES, context.conversationId)
+    if (!currentResult) {
+      return {
+        success: true,
+        data: { alreadyComplete: true, applicationId: application.id },
+        message: 'All application questions have already been answered.',
+      }
+    }
+
+    const currentQuestion = currentResult.question
+
+    // Validate
+    const validation = validateAnswer(
+      { type: currentQuestion.type, options: currentQuestion.options, validationRules: currentQuestion.validationRules },
+      answer,
+    )
+    if (!validation.valid) {
+      return { success: false, error: validation.error ?? 'Invalid answer.' }
+    }
+
+    // Check flags
+    const flagResult = checkForFlags(currentQuestion.validationRules, validation.normalizedValue)
+
+    // If escalate: pause application
+    if (flagResult.flagged && flagResult.action === 'escalate') {
+      // Save answer first
+      await prisma.answer.upsert({
+        where: {
+          questionId_conversationId: {
+            questionId: currentQuestion.id,
+            conversationId: context.conversationId,
+          },
+        },
+        create: {
+          questionId: currentQuestion.id,
+          conversationId: context.conversationId,
+          value: validation.normalizedValue,
+        },
+        update: {
+          value: validation.normalizedValue,
+          answeredAt: new Date(),
+        },
+      })
+
+      // Accumulate flag
+      const existingFlags = (application.flagsForReview as unknown as Array<Record<string, unknown>>) ?? []
+      const newFlag = {
+        questionCode: currentQuestion.code,
+        answer: validation.normalizedValue,
+        reason: flagResult.reason,
+        action: flagResult.action,
+      }
+
+      await prisma.application.update({
+        where: { id: application.id },
+        data: {
+          status: 'PAUSED',
+          flagsForReview: JSON.parse(JSON.stringify([...existingFlags, newFlag])),
+        },
+      })
+
+      return {
+        success: true,
+        data: {
+          answerSaved: true,
+          escalated: true,
+          reason: flagResult.reason,
+          applicationId: application.id,
+        },
+        message: `Application paused for review. ${flagResult.reason ?? 'This answer requires human review.'}`,
+      }
+    }
+
+    // Accumulate soft flags
+    if (flagResult.flagged && flagResult.action === 'flag') {
+      const existingFlags = (application.flagsForReview as unknown as Array<Record<string, unknown>>) ?? []
+      const newFlag = {
+        questionCode: currentQuestion.code,
+        answer: validation.normalizedValue,
+        reason: flagResult.reason,
+        action: 'flag',
+      }
+      await prisma.application.update({
+        where: { id: application.id },
+        data: {
+          flagsForReview: JSON.parse(JSON.stringify([...existingFlags, newFlag])),
+        },
+      })
+    }
+
+    // Save answer
+    await prisma.answer.upsert({
+      where: {
+        questionId_conversationId: {
+          questionId: currentQuestion.id,
+          conversationId: context.conversationId,
+        },
+      },
+      create: {
+        questionId: currentQuestion.id,
+        conversationId: context.conversationId,
+        value: validation.normalizedValue,
+      },
+      update: {
+        value: validation.normalizedValue,
+        answeredAt: new Date(),
+      },
+    })
+
+    // Special question handling by code
+    const updateData: Record<string, unknown> = {
+      currentQuestionIndex: application.currentQuestionIndex + 1,
+    }
+
+    if (currentQuestion.code === 'PACKAGE_CHOICE') {
+      // Resolve PricingTier by answer value (e.g., "standard" or "optim")
+      const tier = await prisma.pricingTier.findFirst({
+        where: { productId: application.productId, code: validation.normalizedValue },
+      })
+      if (tier) updateData.tierId = tier.id
+    }
+
+    if (currentQuestion.code === 'PREMIUM_LEVEL') {
+      // Resolve PricingLevel by answer value (e.g., "level_1")
+      if (application.tierId) {
+        const level = await prisma.pricingLevel.findFirst({
+          where: { tierId: application.tierId, code: validation.normalizedValue },
+        })
+        if (level) updateData.levelId = level.id
+      }
+    }
+
+    if (currentQuestion.code === 'BD_ADDON_INTEREST') {
+      updateData.includesAddon = validation.normalizedValue === 'true'
+    }
+
+    await prisma.application.update({
+      where: { id: application.id },
+      data: updateData,
+    })
+
+    // Get next question
+    const nextResult = await getNextQuestion(APPLICATION_GROUP_CODES, context.conversationId)
+
+    if (!nextResult) {
+      // Mark application as COMPLETED
+      await prisma.application.update({
+        where: { id: application.id },
+        data: { status: 'COMPLETED', completedAt: new Date() },
+      })
+
+      return {
+        success: true,
+        data: {
+          answerSaved: true,
+          isComplete: true,
+          applicationId: application.id,
+          readyForQuote: true,
+        },
+        message: 'Application complete! All questions answered. Ready to generate a quote.',
+      }
+    }
+
+    const lang = context.language ?? 'ro'
+    const nq = nextResult.question
+    const nqText = nq.text as { en: string; ro: string }
+
+    return {
+      success: true,
+      data: {
+        answerSaved: true,
+        isComplete: false,
+        nextQuestion: {
+          id: nq.id,
+          code: nq.code,
+          text: nqText[lang],
+          helpText: nq.helpText ? (nq.helpText as { en: string; ro: string })[lang] : null,
+          type: nq.type,
+          options: nq.options,
+        },
+        progress: nextResult.progress,
+      },
+      message: `Answer saved. ${nextResult.progress.total - nextResult.progress.answered} questions remaining.`,
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
+
+// ─────────────────────────────────────────────
+// get_application_status
+// ─────────────────────────────────────────────
+
+export const getApplicationStatus: ToolHandler = async (_args, context) => {
+  try {
+    const application = await prisma.application.findUnique({
+      where: { conversationId: context.conversationId },
+    })
+
+    if (!application) {
+      return {
+        success: true,
+        data: { hasApplication: false },
+        message: 'No application found for this conversation.',
+      }
+    }
+
+    const progress = await calculateProgress(APPLICATION_GROUP_CODES, context.conversationId)
+    const flags = (application.flagsForReview as unknown as Array<Record<string, unknown>>) ?? []
+
+    return {
+      success: true,
+      data: {
+        hasApplication: true,
+        applicationId: application.id,
+        status: application.status,
+        progress,
+        tierId: application.tierId,
+        levelId: application.levelId,
+        includesAddon: application.includesAddon,
+        flagsForReview: flags,
+      },
+      message: `Application status: ${application.status}. Progress: ${progress.percentage}%.`,
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
+
+// ─────────────────────────────────────────────
+// resume_application
+// ─────────────────────────────────────────────
+
+export const resumeApplication: ToolHandler = async (_args, context) => {
+  try {
+    const application = await prisma.application.findUnique({
+      where: { conversationId: context.conversationId },
+    })
+
+    if (!application || application.status !== 'PAUSED') {
+      return {
+        success: false,
+        error: 'No paused application found to resume.',
+      }
+    }
+
+    // Set to OPEN
+    await prisma.application.update({
+      where: { id: application.id },
+      data: { status: 'OPEN' },
+    })
+
+    // Get next question
+    const nextResult = await getNextQuestion(APPLICATION_GROUP_CODES, context.conversationId)
+
+    if (!nextResult) {
+      return {
+        success: true,
+        data: {
+          applicationId: application.id,
+          alreadyComplete: true,
+          readyForQuote: true,
+        },
+        message: 'Application resumed. All questions already answered — ready for quote generation.',
+      }
+    }
+
+    const lang = context.language ?? 'ro'
+    const nq = nextResult.question
+    const nqText = nq.text as { en: string; ro: string }
+
+    return {
+      success: true,
+      data: {
+        applicationId: application.id,
+        resumed: true,
+        currentQuestion: {
+          id: nq.id,
+          code: nq.code,
+          text: nqText[lang],
+          helpText: nq.helpText ? (nq.helpText as { en: string; ro: string })[lang] : null,
+          type: nq.type,
+          options: nq.options,
+        },
+        progress: nextResult.progress,
+      },
+      message: 'Application resumed. Let\'s continue where you left off.',
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
+
+// ─────────────────────────────────────────────
+// cancel_application
+// ─────────────────────────────────────────────
+
+export const cancelApplication: ToolHandler = async (args, context) => {
+  const reason = (args.reason as string | undefined) ?? 'cancelled'
+
+  try {
+    const application = await prisma.application.findUnique({
+      where: { conversationId: context.conversationId },
+    })
+
+    if (!application || application.status === 'COMPLETED') {
+      return {
+        success: false,
+        error: 'No active application found to cancel.',
+      }
+    }
+
+    await prisma.application.update({
+      where: { id: application.id },
+      data: { status: 'COMPLETED', completedAt: new Date() },
+    })
+
+    return {
+      success: true,
+      data: {
+        applicationId: application.id,
+        status: 'COMPLETED',
+        reason,
+      },
+      message: 'Application cancelled.',
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
