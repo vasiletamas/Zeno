@@ -16,7 +16,7 @@ Replace the stub implementations in the orchestrator's steps 3-6 with the full r
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Token budgets | No hard limits | Start generous, optimize for cost when data exists. Turn traces record actual usage for future analysis. |
+| Token budgets | No hard limits | Build plan says "token budgeting" but we defer enforcement. Record section sizes in turn traces for analysis. Optimize when cost data exists. Conscious deviation from build plan. |
 | customerMemory section | Registered, returns null | Section infrastructure ready. Content populated when P2 learning loop ships. |
 | agentKnowledge section | Registered, returns null | Same as customerMemory. |
 | Fast path | Detect simple questionnaire answers | Skip reasoning gate on Da/Nu/single-word answers when questionnaire is active. ~2K prompt vs ~6-8K. |
@@ -41,9 +41,11 @@ __tests__/
 
 ## 4. Prompt Builder
 
+> Note: This is a NEW `lib/chat/prompt-builder.ts` file. There is no existing V2 prompt builder — the A2 orchestrator assembles prompts inline. V1 had `lib/agents/prompt-builder.ts` with 13 sections. V2 reduces to 10 sections: V1's `globalWisdom` → renamed to `agentKnowledge`, V1's `capabilities` → merged into `capabilityManifest`, V1's `metadata` → dropped (conversion scoring removed per build plan). Off-topic rules and customer autonomy rules are embedded in `agentIdentity` (part of the main-chat agent seed prompt from A1).
+
 ### 4.1 Section registry
 
-10 sections registered with metadata:
+10 sections registered with metadata. Section ordering follows V1's priority-based system (lower = renders earlier). Dynamic sections render after the `[INTERNAL GUIDANCE]` separator, so they come after constitution. This ordering differs from the build plan's Section 6.3 list order, which is conceptual, not rendering order. The priority values control what the LLM sees first (identity/constraints) vs last (product details that may change per turn).
 
 ```typescript
 interface SectionConfig {
@@ -185,7 +187,7 @@ interface ReasoningGateOutput {
 async function executeReasoningGate(input: ReasoningGateInput): Promise<ReasoningGateOutput>
 ```
 
-1. Load reasoning-gate agent config (has the full system prompt from seed)
+1. Load reasoning-gate agent config. The system prompt was seeded in A1 (`prisma/seeds/seed-agents.ts`, slug: `reasoning-gate`) and contains the full gate prompt ported from V1 (`extraction/prompts/synthesizer-prompt.md`). It instructs the LLM to output JSON with all fields from ReasoningGateOutput including complexity, contradictions, concernActions, requiredSections, excludedSections, briefing, toolGuidance, and knowledgeGaps.
 2. Build context message from input
 3. Call `gateway.call('reasoning-gate', { messages: [contextMessage] })`
 4. Parse JSON from response (handle markdown fences, validate enums, clamp confidence)
@@ -352,7 +354,38 @@ Add to TurnTrace.phases:
 - Token budget enforcement (deferred — record sizes, don't limit)
 - Individual tool handlers beyond list_products/get_product_info (Slice A4)
 
-## 11. Testing strategy
+## 11. Implementation notes
+
+**Sliding window bug in A2 orchestrator:** The current Step 5 (orchestrator.ts) orders by `createdAt: 'asc'` with `take: 20`, which fetches the FIRST 20 messages, not the last 20. The A3 replacement must use `orderBy: { createdAt: 'desc' }, take: 20` then reverse the result, or use `skip: Math.max(0, total - 20)`.
+
+**Reasoning gate `toolGuidance` shape change:** A2's orchestrator treats `toolGuidance` as a string. A3 changes it to `{ prioritize: string[]; discourage: string[] }`. The orchestrator must be updated to handle the new object shape when formatting the briefing.
+
+**`situationType` from gate output:** Used only for tracing (stored in TurnTrace.phases). Not used for section selection or any branching logic.
+
+**`loadQuestionnaireContext` active questionnaire detection:** The active questionnaire is determined by the current workflow step code:
+- Step `dnt_questionnaire` → load DNT QuestionGroups (dnt_consent, dnt_general, dnt_life_type, dnt_life_financial, dnt_life_investment, dnt_sustainability)
+- Step `application_fill` → load Application QuestionGroup
+- Step containing `bd` → load BD medical QuestionGroup
+- Find the first unanswered question: query Questions in group ordered by orderIndex, LEFT JOIN with Answers for this conversationId. First question with no answer = current question. Progress = answered count / total count.
+
+**`loadCustomerContext` when extractedProfile is null:** Return basic info only (name, language, isAnonymous). When extractedProfile exists, merge in demographics, employment, family from the JSON blob. Empty extractedProfile on first conversation is expected — the section will be sparse.
+
+**Profile extractor merge logic:** The fire-and-forget block in Step 9 must: (1) call gateway, (2) parse JSON response, (3) read current Customer.extractedProfile, (4) deep-merge new fields into existing (don't overwrite), (5) update Customer record. All inside the async closure — the orchestrator does not await this.
+
+**Summarizer system prompt:** The summarizer agent was seeded in A1 with a prompt covering: customer needs, products discussed, concerns raised, sales stage, personal details, commitments. No additional prompt definition needed — the seed prompt is sufficient.
+
+**Fast-path GateSelection defaults:**
+```typescript
+const FAST_PATH_GATE: GateSelection = {
+  requiredSections: ['questionnaireContext', 'workflowInstructions'],
+  excludedSections: ['productContext', 'coachingBriefing', 'customerContext', 'customerMemory', 'agentKnowledge', 'capabilityManifest'],
+  confidence: 1.0,
+}
+```
+
+**BD questionnaire in `loadQuestionnaireContext`:** BD medical questions are handled by the same loader. When the workflow step indicates BD questionnaire is active, the loader fetches the `bd_medical` QuestionGroup. The same current-question and progress logic applies. The only difference is the rejection rule (any YES = BD rejected), which is handled by the tool handler in A4, not the context loader.
+
+## 12. Testing strategy
 
 - **prompt-builder.test.ts:** Test section rendering order, gate-driven inclusion/exclusion, alwaysInclude enforcement, empty section skipping, internal guidance separator
 - **reasoning-gate.test.ts:** Test input building, JSON parsing from LLM response (clean JSON, markdown-fenced JSON, malformed JSON), fallback behavior, enum validation
