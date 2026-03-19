@@ -756,3 +756,154 @@ module.exports = {
 - Don't use blue as a primary color — that's every other insurance company
 - Don't animate aggressively — Zeno is calm, every transition is subtle
 - Don't use "AI" or "inteligent" in customer-facing copy — the experience speaks for itself
+
+---
+
+## 16. Tool status messages (streaming UX)
+
+### How it works
+When the AI agent calls a tool mid-conversation, the stream pauses. During the pause, the frontend shows a status message instead of a generic loading spinner. Each tool has a pool of messages — the system picks one at random each time. The customer never sees the same message twice in a row.
+
+### Tool execution classification
+
+Each tool in the DB has three fields controlling its streaming behavior:
+
+```
+executionMode:    "blocking" | "background"
+customerVisible:  true | false
+statusMessage:    { ro: ["msg1", "msg2", ...], en: ["msg1", "msg2", ...] } | null
+```
+
+- **Blocking + visible:** Stream pauses, customer sees a status message from the pool
+- **Blocking + silent:** Stream pauses, customer sees only "Zeno se gândește..." typing indicator
+- **Background:** Stream doesn't pause. Tool runs async. Customer sees nothing.
+
+### Status message pools by tool
+
+**generate_quote** (blocking + visible)
+```json
+{
+  "ro": [
+    "Calculez... numerele sunt prietenele mele",
+    "Negociez cu matematica în favoarea ta",
+    "Caut cea mai bună variantă pentru tine",
+    "Un moment, verific toate combinațiile",
+    "Consult tabelele Allianz... ele nu se grăbesc"
+  ],
+  "en": [
+    "Crunching the numbers for you",
+    "Negotiating with math on your behalf",
+    "Finding the best option for your situation",
+    "One moment, checking all combinations",
+    "Consulting the Allianz tables... they take their time"
+  ]
+}
+```
+
+**sign_dnt** (blocking + visible)
+```json
+{
+  "ro": [
+    "Se semnează documentul... partea oficială",
+    "Pun ștampila digitală, ca la carte",
+    "Pregătesc actele... promit că e ultima birocrație",
+    "Se finalizează documentația. Aproape gata."
+  ],
+  "en": [
+    "Signing the document... the official part",
+    "Applying the digital stamp, by the book",
+    "Preparing the paperwork... last bit of bureaucracy, I promise",
+    "Finalizing the documentation. Almost done."
+  ]
+}
+```
+
+**accept_quote** (blocking + visible)
+```json
+{
+  "ro": [
+    "Se activează protecția ta... momentul cel mare",
+    "Conectez totul la Allianz. Încă o secundă.",
+    "Pregătesc polița ta. Merită sărbătorit.",
+    "Ultimii pași... familia ta va fi protejată"
+  ],
+  "en": [
+    "Activating your protection... the big moment",
+    "Connecting everything to Allianz. One more second.",
+    "Preparing your policy. Worth celebrating.",
+    "Final steps... your family will be protected"
+  ]
+}
+```
+
+**get_objection_strategy** (blocking + silent — enhanced typing indicator)
+```json
+{
+  "ro": [
+    "Zeno se gândește...",
+    "Hmm, un moment...",
+    "Bună întrebare. Stai puțin."
+  ],
+  "en": [
+    "Zeno is thinking...",
+    "Hmm, one moment...",
+    "Good question. Bear with me."
+  ]
+}
+```
+Note: These replace the generic typing indicator dots. The customer sees Zeno "thinking" — not "loading."
+
+**get_product_info / list_products / compare_products** (blocking + silent — enhanced typing indicator)
+```json
+{
+  "ro": [
+    "Verific detaliile... să fiu precis",
+    "Consult catalogul Allianz",
+    "Un moment, nu vreau să-ți dau informații greșite"
+  ],
+  "en": [
+    "Checking the details... want to be precise",
+    "Consulting the Allianz catalog",
+    "One moment, don't want to give you wrong info"
+  ]
+}
+```
+Note: "Nu vreau să-ți dau informații greșite" builds trust — the agent explicitly checks rather than guessing.
+
+**save_dnt_answer / save_application_answer** (blocking + silent — no message, instant)
+These execute fast enough (<200ms) that no status message is needed. Standard typing indicator only.
+
+**BD medical questionnaire processing** (blocking + visible — neutral tone)
+```json
+{
+  "ro": [
+    "Analizez răspunsurile tale",
+    "Verific eligibilitatea..."
+  ],
+  "en": [
+    "Analyzing your answers",
+    "Checking eligibility..."
+  ]
+}
+```
+Note: No humor on medical questions. Ever. Keep these clinical and respectful.
+
+**profile_extractor** (background — invisible)
+No status message. Runs async. Customer never knows.
+
+**summarizer** (background — invisible)
+No status message. Runs async when conversation exceeds 20 messages.
+
+### Tone rules for status messages
+- **Quote, signing, activation:** Personality allowed. Dry wit. Zeno the calm philosopher.
+- **Product lookups:** Honesty-forward. "I'm checking" signals reliability.
+- **Medical/health:** Neutral and respectful. Zero humor.
+- **Payment:** Serious and reassuring. "Your payment is secure."
+- **Background tools:** Invisible. No message.
+
+### Frontend implementation
+The typing indicator area in the chat UI serves double duty:
+- Default: three animated dots (the standard "someone is typing" pattern)
+- When a tool with statusMessage fires: replace dots with the status text + a subtle pulse animation
+- The status text uses Inter 13px, Muted color (#8A8680), same position as typing indicator
+- Transition between dots and text: 150ms crossfade
