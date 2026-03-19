@@ -383,6 +383,8 @@ const FAST_PATH_GATE: GateSelection = {
 }
 ```
 
+**Gate seed prompt section name update:** The A1 reasoning gate seed prompt (in `prisma/seeds/seed-agents.ts`) still references V1 section names (`globalWisdom`, `metadata`). As part of A3 implementation, update the seed prompt to use V2 names (`agentKnowledge` instead of `globalWisdom`, remove `metadata` references). Re-run `npx prisma db seed` after the update.
+
 **BD questionnaire in `loadQuestionnaireContext`:** BD medical questions are handled by the same loader. When the workflow step indicates BD questionnaire is active, the loader fetches the `bd_medical` QuestionGroup. The same current-question and progress logic applies. The only difference is the rejection rule (any YES = BD rejected), which is handled by the tool handler in A4, not the context loader.
 
 ## 12. Testing strategy
