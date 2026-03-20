@@ -271,58 +271,237 @@ function RichContent({ action, onAction, language }: RichContentProps) {
 
 Add to state:
 ```typescript
+// Separate map, NOT on ChatMessage
 uiActions: Map<string, { type: string; payload: Record<string, unknown> }>
-// key = message ID that triggered the action
+// key = assistant message ID that triggered the action
 ```
 
-On `ui_action` SSE event: store with the current assistant message ID as key.
+On `ui_action` SSE event (in BOTH `sendMessage` and `sendAction` event loops): store with current assistant message ID as key.
 
 Expose in return: `uiActions` map.
+
+**Answered state:** Track which message IDs have been "answered" (user clicked a button on the rich component). Answered QuestionCards/ProductCards become read-only (show selected answer, disable inputs).
 
 ### 7.2 MessageList changes
 
 After rendering each assistant MessageBubble, check `uiActions.get(message.id)`:
-- If action exists → render `<RichContent action={action} onAction={sendAction} language={language} />` below the bubble
+- If action exists → render `<RichContent action={action} onAction={sendAction} language={language} isAnswered={answeredIds.has(message.id)} />` below the bubble
 - Rich content gets the same message-appear animation
+- When a component triggers `onAction()`, mark that message ID as answered
 
-### 7.3 Action adapter changes
+### 7.3 Action adapter redesign
 
-Add new mappings to `lib/chat/action-adapter.ts`:
+The existing adapter uses simple `Record<string, function>` lookup. B2 needs payload-conditional routing. Redesign `adaptAction()` to support this:
 
 ```typescript
-select_tier: (p) => ({ name: 'save_application_answer', arguments: { answer: `${p.tierCode}:${p.levelCode}` } })
-accept_quote: (p) => ({ name: 'accept_quote', arguments: { confirmAcceptance: true } })
-modify_quote: (p) => ({ name: 'modify_quote', arguments: {} })
-answer_question: (p) => ({ name: 'save_dnt_answer', arguments: { answer: String(p.answer) } })
-  // Note: the orchestrator determines whether to route to save_dnt_answer or save_application_answer
-  // based on current workflow step
-submit_field: (p) => ({ name: 'update_customer_profile', arguments: { [p.field]: p.value } })
+export function adaptAction(action: UIAction): ToolCall | null {
+  switch (action.type) {
+    case 'select_tier':
+      // Tier selection is a two-part answer: set package + level
+      // Use a dedicated tool that handles both at once
+      return {
+        id: `action_${Date.now()}`,
+        name: 'save_application_answer',
+        arguments: { answer: String(action.payload.tierCode), field: 'PACKAGE_CHOICE' },
+      }
+
+    case 'select_level':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'save_application_answer',
+        arguments: { answer: String(action.payload.levelCode), field: 'PREMIUM_LEVEL' },
+      }
+
+    case 'answer_question': {
+      // Route based on groupType in payload
+      const groupType = action.payload.groupType as string
+      const toolName = groupType === 'dnt' ? 'save_dnt_answer' : 'save_application_answer'
+      return {
+        id: `action_${Date.now()}`,
+        name: toolName,
+        arguments: { answer: String(action.payload.answer) },
+      }
+    }
+
+    case 'accept_quote':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'accept_quote',
+        arguments: { confirmAcceptance: true },
+      }
+
+    case 'modify_quote':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'modify_quote',
+        arguments: {},
+      }
+
+    case 'submit_field':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'collect_customer_field',  // NEW blocking tool, not update_customer_profile (which is background)
+        arguments: {
+          field: String(action.payload.field),
+          value: String(action.payload.value),
+        },
+      }
+
+    // Keep existing mappings from B1...
+    default:
+      return null
+  }
+}
 ```
 
-### 7.4 Tool handler changes
+**Key changes from B1 adapter:**
+- `answer_question` uses `switch` with `groupType` payload field to route to correct tool
+- `select_tier` and `select_level` are SEPARATE actions (not combined) matching the application's two-question flow (PACKAGE_CHOICE then PREMIUM_LEVEL)
+- `submit_field` routes to a NEW `collect_customer_field` tool (see Section 7.5) instead of background `update_customer_profile`
 
-Add `uiAction` to ToolResult for these handlers:
+### 7.4 Tool handler uiAction payloads (typed)
 
-| Handler file | Handler | uiAction |
-|-------------|---------|----------|
-| dnt-handlers.ts | startDntQuestionnaire | `{ type: 'show_question', payload: { question, progress, groupType: 'dnt' } }` |
-| dnt-handlers.ts | saveDntAnswer | `{ type: 'show_question', payload: { nextQuestion, progress, groupType: 'dnt' } }` (if has next) |
-| application-handlers.ts | saveApplicationAnswer | `{ type: 'show_question', payload: { nextQuestion, progress, groupType: 'application' } }` |
-| quote-handlers.ts | generateQuote | `{ type: 'show_quote', payload: { quote details } }` |
-| quote-handlers.ts | acceptQuote | `{ type: 'show_policy_issued', payload: { policy summary } }` |
-| bd-handlers.ts | checkBdEligibility | `{ type: 'show_bd_result' or 'show_bd_rejected', payload: { eligible, message } }` |
+Each handler adds `uiAction` to its ToolResult with a specific typed payload:
 
-The `get_product_info` handler from A2 already returns product data — add `uiAction: { type: 'show_product_cards', payload: { tiers with pricing } }` to its return.
+```typescript
+// show_question payload
+interface ShowQuestionPayload {
+  question: {
+    id: string
+    code: string | null
+    text: { en: string; ro: string }
+    helpText: { en: string; ro: string } | null
+    type: string  // BOOLEAN, DROPDOWN, etc.
+    options: Array<{ value: string; label: { en: string; ro: string } }> | null
+  }
+  progress: { answered: number; total: number }
+  groupType: 'dnt' | 'application' | 'bd_medical'
+}
 
-## 8. Answer routing
+// show_product_cards payload
+interface ShowProductCardsPayload {
+  tiers: Array<{
+    tierCode: string
+    tierName: { en: string; ro: string }
+    levels: Array<{
+      levelCode: string
+      levelName: { en: string; ro: string }
+      premiumAnnual: number
+      premiumMonthly: number
+      coverages: Array<{ name: { en: string; ro: string }; amount: number; currency: string }>
+    }>
+    isRecommended: boolean
+  }>
+  addonAvailable: boolean
+  addonName: { en: string; ro: string } | null
+}
 
-When a user taps an answer on a QuestionCard, the action is `answer_question`. But the action adapter needs to know whether to route to `save_dnt_answer` or `save_application_answer`.
+// show_quote payload
+interface ShowQuotePayload {
+  quoteId: string
+  tierName: { en: string; ro: string }
+  levelName: { en: string; ro: string }
+  includesAddon: boolean
+  premiumAnnual: number
+  premiumMonthly: number
+  baseCoverages: Array<{ name: { en: string; ro: string }; amount: number; currency: string }>
+  addonCoverages: Array<{ name: { en: string; ro: string }; amount: number; currency: string }>
+  validUntil: string  // ISO date
+}
 
-**Solution:** The QuestionCard's `show_question` payload includes `groupType` ('dnt', 'application', 'bd_medical'). The action adapter uses this to route:
-- `groupType: 'dnt'` → `save_dnt_answer`
-- `groupType: 'application'` or `groupType: 'bd_medical'` → `save_application_answer`
+// show_policy_issued payload
+interface ShowPolicyIssuedPayload {
+  policyId: string
+  tierName: { en: string; ro: string }
+  levelName: { en: string; ro: string }
+  includesAddon: boolean
+  premiumMonthly: number
+  totalCoverage: string  // formatted, e.g., "2.040.000 EUR"
+}
 
-The `sendAction` call includes the groupType: `sendAction({ type: 'answer_question', payload: { answer: value, groupType: 'dnt' } })`
+// show_bd_result / show_bd_rejected payload
+interface ShowBdResultPayload {
+  eligible: boolean
+  message: { en: string; ro: string }
+}
+
+// show_data_field payload
+interface ShowDataFieldPayload {
+  field: string  // 'name', 'cnp', 'dateOfBirth', 'email', 'phone', 'address'
+  label: { en: string; ro: string }
+  type: 'text' | 'email' | 'tel' | 'date' | 'textarea'
+  validation?: { pattern?: string; minLength?: number; maxLength?: number }
+  placeholder?: { en: string; ro: string }
+}
+```
+
+**Which handlers return which uiAction:**
+
+| Handler file | Handler | uiAction type | When |
+|-------------|---------|---------------|------|
+| handlers/dnt-handlers.ts | startDntQuestionnaire | show_question | Always (returns first question) |
+| handlers/dnt-handlers.ts | saveDntAnswer | show_question | When next question exists |
+| handlers/application-handlers.ts | startApplication | show_question | Always (returns first question) |
+| handlers/application-handlers.ts | saveApplicationAnswer | show_question | When next question exists |
+| handlers/quote-handlers.ts | generateQuote | show_quote | Always |
+| handlers/quote-handlers.ts | acceptQuote | show_policy_issued | Always |
+| handlers/bd-handlers.ts | checkBdEligibility | show_bd_result or show_bd_rejected | Always |
+| lib/tools/registry.ts (inline) | get_product_info | show_product_cards | When product has pricing tiers |
+| handlers/data-handlers.ts | collectCustomerField | show_data_field | When next field to collect |
+
+### 7.5 New tool: collect_customer_field
+
+The `update_customer_profile` tool is background (no SSE response). For inline data collection, we need a **blocking** tool that:
+1. Validates the field value (CNP pattern, email format, etc.)
+2. Saves to Customer record
+3. Returns `uiAction: { type: 'show_data_field', payload: nextField }` if more fields needed
+4. Returns success message when all fields collected
+
+Create: `lib/tools/handlers/data-handlers.ts`
+
+```typescript
+export const collectCustomerField: ToolHandler = async (args, context) => {
+  // Validate field value
+  // Save to Customer (name, cnp, email, phone, dateOfBirth, or address)
+  // Determine if more fields needed
+  // Return uiAction with next field, or success if done
+}
+```
+
+Register in `lib/tools/registry.ts`: `collect_customer_field`, blocking, silent, no statusMessage, allowedRoles: [CUSTOMER, ADMIN, OPERATOR].
+
+### 7.6 Orchestrator: uiAction → SSE event
+
+The orchestrator already checks for `uiAction` in tool results (Step 7 of A2). Verify this code path works:
+1. Tool handler returns `ToolResult` with `uiAction`
+2. Pipeline returns `PipelineResult` with `toolResult.uiAction`
+3. Orchestrator step 7: after executing tool, if `toolResult.uiAction` exists → yield SSE `ui_action` event
+4. `useChat` receives it, stores in `uiActions` map
+
+If the orchestrator does NOT currently emit `ui_action` SSE events from `toolResult.uiAction`, add this. Check the current code in `lib/chat/orchestrator.ts` step 7.
+
+### 7.7 BD medical answer routing
+
+BD medical questions are in the `bd_medical` QuestionGroup. When `answer_question` comes with `groupType: 'bd_medical'`:
+- Route to `save_application_answer` (NOT `save_dnt_answer`)
+- The `saveApplicationAnswer` handler must be updated to also handle BD medical group questions. Currently it only queries the `application` group. Update it to check the `groupType` from the action payload or from the current workflow step.
+- When the workflow is at the BD questionnaire step, the handler queries `['bd_medical']` groups instead of `['application']`.
+
+**Simplest approach:** The `saveApplicationAnswer` handler already determines the active group from the workflow step code (same pattern as context-loaders). On `application_fill` step → `['application']`. On BD step → `['bd_medical']`.
+
+## 8. Additional implementation notes
+
+**DROPDOWN vs MULTIPLE_CHOICE rendering:** Both render as a vertical list of tappable options. The distinction is semantic (DROPDOWN implies a compact widget), but in the mobile-first chat context they render identically. The QuestionCard uses the same rendering for both. MULTI_SELECT is the only one with checkboxes + submit button.
+
+**Answered QuestionCard state:** Once the user answers, the QuestionCard shows the selected answer (highlighted option) and disables all inputs. Prevents re-answering in scroll-back. The `isAnswered` prop controls this.
+
+**Button loading state:** When user clicks a button on any rich component (Alege, Accepta, Da/Nu), the button shows a loading spinner (small, Linen color on Forest bg) and is disabled until the SSE response arrives. The `isStreaming` state from `useChat` controls this.
+
+**Date formatting:** Romanian locale for dates. Use `Intl.DateTimeFormat('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' })` for display. Example: "19 aprilie 2026".
+
+**ProductCard tier selection flow:** The ProductCard shows tier+level combinations. When the customer clicks "Alege", it fires TWO sequential actions: first `select_tier` (sets PACKAGE_CHOICE), then after the tool response, `select_level` (sets PREMIUM_LEVEL). Alternatively, the handler can be updated to accept both values at once from a combined payload. The simpler approach: send `select_tier` with both `tierCode` and `levelCode`, and the handler sets both Application.tierId and Application.levelId in one call.
+
+**Revised select_tier approach:** Since the ProductCard already knows both tier and level, send both in one action. The `saveApplicationAnswer` handler is updated to accept an optional `field` parameter. When `field` is provided, it sets the specific application field directly instead of going through the questionnaire flow. This avoids the two-sequential-calls complexity.
 
 ## 9. Responsive behavior
 
