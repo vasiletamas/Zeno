@@ -1,11 +1,17 @@
-export default function Home() {
+import LandingHeader from '@/components/landing/landing-header'
+import HeroSection from '@/components/landing/hero-section'
+import BenefitsSection from '@/components/landing/benefits-section'
+import HowItWorksSection from '@/components/landing/how-it-works-section'
+import LandingFooter from '@/components/landing/landing-footer'
+
+export default function HomePage() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center">
-      <h1 className="font-display text-5xl font-medium text-forest">Zeno</h1>
-      <p className="mt-2 text-sm text-muted">powered by Allianz-Tiriac</p>
-      <p className="mt-8 max-w-md text-center text-lg text-night">
-        Pregatit pentru orice.
-      </p>
-    </main>
-  );
+    <div className="min-h-screen bg-soft-white">
+      <LandingHeader />
+      <HeroSection />
+      <BenefitsSection />
+      <HowItWorksSection />
+      <LandingFooter />
+    </div>
+  )
 }
