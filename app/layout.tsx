@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Fraunces } from "next/font/google";
+import { LanguageProvider } from "@/lib/i18n/language-context";
 import "./globals.css";
 
 const inter = Inter({
@@ -16,9 +17,9 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "Zeno — Pregatit pentru orice",
+  title: "Zeno — Pregătit pentru orice",
   description:
-    "Asigurare de viata Allianz-Tiriac. Acces la tratament de top. Oriunde in lume.",
+    "Asigurare de viață Allianz-Țiriac. Acces la tratament de top. Oriunde în lume.",
 };
 
 export default function RootLayout({
@@ -31,7 +32,7 @@ export default function RootLayout({
       <body
         className={`${inter.variable} ${fraunces.variable} antialiased`}
       >
-        {children}
+        <LanguageProvider>{children}</LanguageProvider>
       </body>
     </html>
   );
