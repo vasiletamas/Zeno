@@ -19,6 +19,7 @@ import { compareProducts, setConversationProduct } from './handlers/product-hand
 import { getCustomerProfile, updateCustomerProfile } from './handlers/profile-handlers'
 import { getObjectionStrategy } from './handlers/objection-handlers'
 import { checkBdEligibility } from './handlers/bd-handlers'
+import { collectCustomerField } from './handlers/data-handlers'
 import { escalateToHuman } from './handlers/utility-handlers'
 
 // ==============================================
@@ -264,10 +265,43 @@ const getProductInfoHandler: ToolHandler = async (
       return { success: false, error: `Product not found: ${productCode || productId}` }
     }
 
+    // Build uiAction with show_product_cards when product has pricing tiers
+    let uiAction: { type: string; payload: Record<string, unknown> } | undefined
+    if (product.pricingTiers.length > 0) {
+      const tiers = product.pricingTiers.map((tier) => ({
+        tierCode: tier.code,
+        tierName: tier.name as { en: string; ro: string },
+        levels: tier.levels.map((level) => ({
+          levelCode: level.code,
+          levelName: level.name as { en: string; ro: string },
+          premiumAnnual: level.premiumAnnual,
+          premiumMonthly: Math.round((level.premiumAnnual / 12) * 100) / 100,
+          coverages: level.coverageAmounts.map((ca) => ({
+            name: ca.coverageType.name as { en: string; ro: string },
+            amount: ca.amount,
+            currency: ca.currency,
+          })),
+        })),
+        isRecommended: tier.orderIndex === 0, // First tier recommended by default
+      }))
+
+      const addon = product.addons.length > 0 ? product.addons[0] : null
+
+      uiAction = {
+        type: 'show_product_cards',
+        payload: {
+          tiers,
+          addonAvailable: !!addon,
+          addonName: addon ? (addon.name as { en: string; ro: string }) : null,
+        } as unknown as Record<string, unknown>,
+      }
+    }
+
     return {
       success: true,
       data: { product: product as unknown as Record<string, unknown> },
       message: `Product details for ${product.code}.`,
+      uiAction,
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
@@ -537,6 +571,7 @@ registerTool('save_application_answer', {
     type: 'object',
     properties: {
       answer: { type: 'string', description: 'The customer\'s answer.' },
+      field: { type: 'string', description: 'Optional: specific field code to set (e.g. PACKAGE_CHOICE, PREMIUM_LEVEL).' },
     },
     required: ['answer'],
     additionalProperties: false,
@@ -677,6 +712,26 @@ registerTool('check_bd_eligibility', {
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
 }, checkBdEligibility)
+
+// --- Data Collection ---
+
+registerTool('collect_customer_field', {
+  description: 'Validate and save a single customer data field (name, cnp, email, phone, dateOfBirth). Returns the next field to collect or success when all are done.',
+  parameters: {
+    type: 'object',
+    properties: {
+      field: { type: 'string', description: 'Field to save: name, cnp, dateOfBirth, email, phone, address.' },
+      value: { type: 'string', description: 'The value for the field.' },
+    },
+    required: ['field', 'value'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  alwaysAllowed: false,
+  allowedRoles: ALL_ROLES,
+}, collectCustomerField)
 
 // --- Utility / Background ---
 

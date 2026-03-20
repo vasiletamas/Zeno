@@ -29,6 +29,9 @@ export interface UseChatReturn {
   sendMessage: (text: string) => void
   sendAction: (action: UIAction) => void
   suggestions: string[]
+  uiActions: Map<string, { type: string; payload: Record<string, unknown> }>
+  answeredMessageIds: Set<string>
+  markAnswered: (messageId: string) => void
 }
 
 // ==============================================
@@ -84,12 +87,22 @@ export function useChat(
   const [toolStatus, setToolStatus] = useState<{ tool: string; message: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>([])
+  const [uiActions, setUiActions] = useState<Map<string, { type: string; payload: Record<string, unknown> }>>(new Map())
+  const [answeredMessageIds, setAnsweredMessageIds] = useState<Set<string>>(new Set())
 
   // Use ref to track the current streaming assistant message id
   const streamingMessageIdRef = useRef<string | null>(null)
 
   // Abort controller for cancelling requests
   const abortControllerRef = useRef<AbortController | null>(null)
+
+  const markAnswered = useCallback((messageId: string) => {
+    setAnsweredMessageIds((prev) => {
+      const next = new Set(prev)
+      next.add(messageId)
+      return next
+    })
+  }, [])
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -201,7 +214,15 @@ export function useChat(
               }
 
               case 'ui_action': {
-                // Store for B2 future use — currently no-op
+                const currentMsgId = streamingMessageIdRef.current
+                if (currentMsgId) {
+                  const actionData = data as { type: string; payload: Record<string, unknown> }
+                  setUiActions((prev) => {
+                    const next = new Map(prev)
+                    next.set(currentMsgId, actionData)
+                    return next
+                  })
+                }
                 break
               }
 
@@ -379,6 +400,18 @@ export function useChat(
               case 'tool_complete':
                 setToolStatus(null)
                 break
+              case 'ui_action': {
+                const currentMsgId = streamingMessageIdRef.current
+                if (currentMsgId) {
+                  const actionData = data as { type: string; payload: Record<string, unknown> }
+                  setUiActions((prev) => {
+                    const next = new Map(prev)
+                    next.set(currentMsgId, actionData)
+                    return next
+                  })
+                }
+                break
+              }
               case 'error': {
                 const errorMessage = (data.error as string) ?? 'Unknown error'
                 setError(errorMessage)
@@ -448,5 +481,8 @@ export function useChat(
     sendMessage,
     sendAction,
     suggestions,
+    uiActions,
+    answeredMessageIds,
+    markAnswered,
   }
 }

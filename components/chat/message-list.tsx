@@ -1,20 +1,37 @@
 'use client'
 
 import { useRef, useEffect, useState, useCallback } from 'react'
-import type { ChatMessage } from '@/lib/hooks/use-chat'
+import type { ChatMessage, UIAction } from '@/lib/hooks/use-chat'
+import type { Language } from '@/lib/i18n/translations'
 import { MessageBubble } from './message-bubble'
 import { TypingIndicator } from './typing-indicator'
 import { ErrorMessage } from './error-message'
 import { ScrollToBottom } from './scroll-to-bottom'
+import { RichContent } from './rich/rich-content'
 
 interface MessageListProps {
   messages: ChatMessage[]
   isStreaming: boolean
   typingStatus: string | null
   error: string | null
+  uiActions?: Map<string, { type: string; payload: Record<string, unknown> }>
+  answeredMessageIds?: Set<string>
+  onAction?: (action: UIAction) => void
+  markAnswered?: (messageId: string) => void
+  language?: Language
 }
 
-export function MessageList({ messages, isStreaming, typingStatus, error }: MessageListProps) {
+export function MessageList({
+  messages,
+  isStreaming,
+  typingStatus,
+  error,
+  uiActions,
+  answeredMessageIds,
+  onAction,
+  markAnswered,
+  language = 'ro',
+}: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
   const [showScrollButton, setShowScrollButton] = useState(false)
@@ -64,13 +81,27 @@ export function MessageList({ messages, isStreaming, typingStatus, error }: Mess
       >
         {messages.map((message) => {
           if (message.role === 'user' || message.role === 'assistant') {
+            const actionData = message.role === 'assistant' ? uiActions?.get(message.id) : undefined
             return (
-              <MessageBubble
-                key={message.id}
-                role={message.role}
-                content={message.content}
-                isStreaming={message.isStreaming}
-              />
+              <div key={message.id}>
+                <MessageBubble
+                  role={message.role}
+                  content={message.content}
+                  isStreaming={message.isStreaming}
+                />
+                {actionData && onAction && (
+                  <RichContent
+                    action={actionData}
+                    onAction={(action) => {
+                      onAction(action)
+                      markAnswered?.(message.id)
+                    }}
+                    language={language}
+                    isAnswered={answeredMessageIds?.has(message.id) ?? false}
+                    isLoading={isStreaming}
+                  />
+                )}
+              </div>
             )
           }
           return null

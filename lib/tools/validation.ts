@@ -88,6 +88,7 @@ const startApplicationSchema = z.object({
 
 const saveApplicationAnswerSchema = z.object({
   answer: z.string().min(1, 'Answer is required'),
+  field: z.string().optional(),
 }).strict()
 
 const resumeApplicationSchema = z.object({
@@ -127,6 +128,15 @@ const modifyQuoteSchema = z.object({}).strict()
 
 const checkBdEligibilitySchema = z.object({
   applicationId: z.string().optional(),
+}).strict()
+
+// ==============================================
+// DATA COLLECTION
+// ==============================================
+
+const collectCustomerFieldSchema = z.object({
+  field: z.string().min(1, 'Field name is required'),
+  value: z.string().min(1, 'Field value is required'),
 }).strict()
 
 // ==============================================
@@ -185,6 +195,9 @@ const toolSchemas: Record<string, ZodType> = {
 
   // BD Eligibility
   check_bd_eligibility: checkBdEligibilitySchema,
+
+  // Data Collection
+  collect_customer_field: collectCustomerFieldSchema,
 
   // Utility / Background
   escalate_to_human: escalateToHumanSchema,

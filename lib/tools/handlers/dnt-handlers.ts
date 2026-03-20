@@ -109,6 +109,21 @@ export const startDntQuestionnaire: ToolHandler = async (_args, context) => {
         progress: result.progress,
       },
       message: `Started DNT questionnaire. ${result.progress.total} questions total.`,
+      uiAction: {
+        type: 'show_question',
+        payload: {
+          question: {
+            id: q.id,
+            code: q.code,
+            text: q.text as { en: string; ro: string },
+            helpText: q.helpText as { en: string; ro: string } | null,
+            type: q.type,
+            options: q.options,
+          },
+          progress: result.progress,
+          groupType: 'dnt',
+        } as unknown as Record<string, unknown>,
+      },
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -206,6 +221,21 @@ export const saveDntAnswer: ToolHandler = async (args, context) => {
         progress: nextResult.progress,
       },
       message: `Answer saved. ${nextResult.progress.total - nextResult.progress.answered} questions remaining.`,
+      uiAction: {
+        type: 'show_question',
+        payload: {
+          question: {
+            id: nq.id,
+            code: nq.code,
+            text: nq.text as { en: string; ro: string },
+            helpText: nq.helpText as { en: string; ro: string } | null,
+            type: nq.type,
+            options: nq.options,
+          },
+          progress: nextResult.progress,
+          groupType: 'dnt',
+        } as unknown as Record<string, unknown>,
+      },
     }
   } catch (error) {
     return { success: false, error: String(error) }

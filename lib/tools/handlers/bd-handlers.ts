@@ -72,6 +72,16 @@ export const checkBdEligibility: ToolHandler = async (_args, context) => {
         },
         message:
           'Based on the medical questionnaire responses, the Treatment Abroad coverage cannot be included at this time. This does not affect the base life insurance protection, which remains fully available.',
+        uiAction: {
+          type: 'show_bd_rejected',
+          payload: {
+            eligible: false,
+            message: {
+              en: 'Based on the medical questionnaire responses, the Treatment Abroad coverage cannot be included. Your base life insurance protection remains fully available.',
+              ro: 'Din cauza raspunsurilor, componenta de tratament medical in strainatate nu poate fi activata. Protectia de viata ramane disponibila si iti ofera acoperire pentru familie. Vrei sa continuam cu ea?',
+            },
+          } as unknown as Record<string, unknown>,
+        },
       }
     }
 
@@ -83,6 +93,16 @@ export const checkBdEligibility: ToolHandler = async (_args, context) => {
       },
       message:
         'Medical questionnaire complete. The customer is eligible for Treatment Abroad coverage.',
+      uiAction: {
+        type: 'show_bd_result',
+        payload: {
+          eligible: true,
+          message: {
+            en: 'You are eligible for international medical treatment coverage.',
+            ro: 'Esti eligibil pentru acoperirea de tratament medical international.',
+          },
+        } as unknown as Record<string, unknown>,
+      },
     }
   } catch (error) {
     return { success: false, error: String(error) }

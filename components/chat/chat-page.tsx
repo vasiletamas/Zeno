@@ -27,7 +27,11 @@ export default function ChatPage({
     toolStatus,
     error,
     sendMessage,
+    sendAction,
     suggestions,
+    uiActions,
+    answeredMessageIds,
+    markAnswered,
   } = useChat(conversationId, customerId, initialMessages)
 
   const handleSuggestionSelect = (text: string) => {
@@ -43,6 +47,11 @@ export default function ChatPage({
         isStreaming={isStreaming}
         typingStatus={toolStatus?.message ?? null}
         error={error}
+        uiActions={uiActions}
+        answeredMessageIds={answeredMessageIds}
+        onAction={sendAction}
+        markAnswered={markAnswered}
+        language={lang}
       />
 
       {suggestions.length > 0 && (

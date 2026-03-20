@@ -4,6 +4,9 @@
  * Converts frontend UI actions (button clicks, form submissions)
  * into synthetic ToolCall objects that the orchestrator can execute
  * directly through the tool pipeline.
+ *
+ * B2 redesign: switch-based routing with payload-conditional logic
+ * for question group routing (DNT vs Application vs BD Medical).
  */
 
 import type { ToolCall } from '@/lib/llm/providers/types'
@@ -18,36 +21,6 @@ export interface UIAction {
 }
 
 // ==============================================
-// ACTION-TO-TOOLCALL MAPPING
-// ==============================================
-
-/**
- * Mapping table: UI action type -> tool name.
- * Payload is passed through as tool arguments.
- */
-const ACTION_MAP: Record<string, string> = {
-  // Product selection
-  'select_product': 'set_conversation_product',
-
-  // DNT flow
-  'start_dnt': 'start_dnt_questionnaire',
-  'answer_dnt': 'save_dnt_answer',
-  'sign_dnt': 'sign_dnt',
-
-  // Application flow
-  'start_application': 'start_application',
-  'answer_question': 'save_application_answer',
-  'resume_application': 'resume_application',
-
-  // Quote flow
-  'generate_quote': 'generate_quote',
-  'accept_quote': 'accept_quote',
-
-  // Utility
-  'escalate': 'escalate_to_human',
-}
-
-// ==============================================
 // ADAPTER
 // ==============================================
 
@@ -56,12 +29,131 @@ const ACTION_MAP: Record<string, string> = {
  * Returns null if the action type is not recognized.
  */
 export function adaptAction(action: UIAction): ToolCall | null {
-  const toolName = ACTION_MAP[action.type]
-  if (!toolName) return null
+  switch (action.type) {
+    // ── Product selection (tier + level from ProductCard) ──
+    case 'select_tier':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'save_application_answer',
+        arguments: {
+          answer: String(action.payload.tierCode),
+          field: 'PACKAGE_CHOICE',
+        },
+      }
 
-  return {
-    id: `synthetic_${action.type}_${Date.now()}`,
-    name: toolName,
-    arguments: action.payload,
+    case 'select_level':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'save_application_answer',
+        arguments: {
+          answer: String(action.payload.levelCode),
+          field: 'PREMIUM_LEVEL',
+        },
+      }
+
+    // ── Question answering (routes by groupType) ──
+    case 'answer_question': {
+      const groupType = action.payload.groupType as string
+      const toolName = groupType === 'dnt' ? 'save_dnt_answer' : 'save_application_answer'
+      return {
+        id: `action_${Date.now()}`,
+        name: toolName,
+        arguments: { answer: String(action.payload.answer) },
+      }
+    }
+
+    // ── Quote actions ──
+    case 'accept_quote':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'accept_quote',
+        arguments: { confirmAcceptance: true },
+      }
+
+    case 'modify_quote':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'modify_quote',
+        arguments: {},
+      }
+
+    // ── Data collection ──
+    case 'submit_field':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'collect_customer_field',
+        arguments: {
+          field: String(action.payload.field),
+          value: String(action.payload.value),
+        },
+      }
+
+    // ── BD continue/decline ──
+    case 'bd_continue':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'save_application_answer',
+        arguments: { answer: 'continue_without_bd' },
+      }
+
+    // ── B1 legacy mappings ──
+    case 'select_product':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'set_conversation_product',
+        arguments: action.payload,
+      }
+
+    case 'start_dnt':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'start_dnt_questionnaire',
+        arguments: action.payload,
+      }
+
+    case 'answer_dnt':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'save_dnt_answer',
+        arguments: action.payload,
+      }
+
+    case 'sign_dnt':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'sign_dnt',
+        arguments: action.payload,
+      }
+
+    case 'start_application':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'start_application',
+        arguments: action.payload,
+      }
+
+    case 'resume_application':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'resume_application',
+        arguments: action.payload,
+      }
+
+    case 'generate_quote':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'generate_quote',
+        arguments: action.payload,
+      }
+
+    case 'escalate':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'escalate_to_human',
+        arguments: action.payload,
+      }
+
+    default:
+      return null
   }
 }

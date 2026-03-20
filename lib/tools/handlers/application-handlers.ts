@@ -101,6 +101,21 @@ export const startApplication: ToolHandler = async (_args, context) => {
         progress: result.progress,
       },
       message: 'Application started. Let\'s begin with the first question.',
+      uiAction: {
+        type: 'show_question',
+        payload: {
+          question: {
+            id: q.id,
+            code: q.code,
+            text: q.text as { en: string; ro: string },
+            helpText: q.helpText as { en: string; ro: string } | null,
+            type: q.type,
+            options: q.options,
+          },
+          progress: result.progress,
+          groupType: 'application',
+        } as unknown as Record<string, unknown>,
+      },
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -113,6 +128,7 @@ export const startApplication: ToolHandler = async (_args, context) => {
 
 export const saveApplicationAnswer: ToolHandler = async (args, context) => {
   const answer = args.answer as string
+  const fieldArg = args.field as string | undefined
 
   try {
     // Find the active application
@@ -126,8 +142,14 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
       }
     }
 
+    // Determine active group codes based on workflow step
+    // When the workflow step is BD-related, query bd_medical groups
+    const isBdStep = context.workflowSession?.currentStepCode?.includes('bd') ?? false
+    const activeGroupCodes = isBdStep ? ['bd_medical'] : APPLICATION_GROUP_CODES
+    const activeGroupType = isBdStep ? 'bd_medical' : 'application'
+
     // Get current question
-    const currentResult = await getNextQuestion(APPLICATION_GROUP_CODES, context.conversationId)
+    const currentResult = await getNextQuestion(activeGroupCodes, context.conversationId)
     if (!currentResult) {
       return {
         success: true,
@@ -237,11 +259,13 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
     })
 
     // Special question handling by code
+    // Use fieldArg if provided (from UI direct field set), otherwise check currentQuestion.code
+    const effectiveCode = fieldArg ?? currentQuestion.code
     const updateData: Record<string, unknown> = {
       currentQuestionIndex: application.currentQuestionIndex + 1,
     }
 
-    if (currentQuestion.code === 'PACKAGE_CHOICE') {
+    if (effectiveCode === 'PACKAGE_CHOICE') {
       // Resolve PricingTier by answer value (e.g., "standard" or "optim")
       const tier = await prisma.pricingTier.findFirst({
         where: { productId: application.productId, code: validation.normalizedValue },
@@ -249,7 +273,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
       if (tier) updateData.tierId = tier.id
     }
 
-    if (currentQuestion.code === 'PREMIUM_LEVEL') {
+    if (effectiveCode === 'PREMIUM_LEVEL') {
       // Resolve PricingLevel by answer value (e.g., "level_1")
       if (application.tierId) {
         const level = await prisma.pricingLevel.findFirst({
@@ -259,7 +283,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
       }
     }
 
-    if (currentQuestion.code === 'BD_ADDON_INTEREST') {
+    if (effectiveCode === 'BD_ADDON_INTEREST') {
       updateData.includesAddon = validation.normalizedValue === 'true'
     }
 
@@ -269,7 +293,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
     })
 
     // Get next question
-    const nextResult = await getNextQuestion(APPLICATION_GROUP_CODES, context.conversationId)
+    const nextResult = await getNextQuestion(activeGroupCodes, context.conversationId)
 
     if (!nextResult) {
       // Mark application as COMPLETED
@@ -310,6 +334,21 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
         progress: nextResult.progress,
       },
       message: `Answer saved. ${nextResult.progress.total - nextResult.progress.answered} questions remaining.`,
+      uiAction: {
+        type: 'show_question',
+        payload: {
+          question: {
+            id: nq.id,
+            code: nq.code,
+            text: nq.text as { en: string; ro: string },
+            helpText: nq.helpText as { en: string; ro: string } | null,
+            type: nq.type,
+            options: nq.options,
+          },
+          progress: nextResult.progress,
+          groupType: activeGroupType,
+        } as unknown as Record<string, unknown>,
+      },
     }
   } catch (error) {
     return { success: false, error: String(error) }

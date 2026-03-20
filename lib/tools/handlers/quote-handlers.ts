@@ -221,6 +221,20 @@ export const generateQuote: ToolHandler = async (_args, context) => {
         validUntil: result.validUntil.toISOString(),
       },
       message: `Quote generated: ${result.premiumAnnual} RON/year (${result.premiumMonthly} RON/month). Valid until ${result.validUntil.toISOString().split('T')[0]}.`,
+      uiAction: {
+        type: 'show_quote',
+        payload: {
+          quoteId: quote.id,
+          tierName: result.pricingTierLabel,
+          levelName: result.pricingLevelLabel,
+          includesAddon: application.includesAddon,
+          premiumAnnual: result.premiumAnnual,
+          premiumMonthly: result.premiumMonthly,
+          baseCoverages: result.baseCoverages,
+          addonCoverages: result.addonCoverages,
+          validUntil: result.validUntil.toISOString(),
+        } as unknown as Record<string, unknown>,
+      },
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -352,6 +366,38 @@ export const acceptQuote: ToolHandler = async (args, context) => {
       },
     })
 
+    // Load tier/level names for uiAction payload
+    const appWithPricing = await prisma.application.findUnique({
+      where: { id: application.id },
+      include: {
+        tier: { select: { name: true } },
+        level: { select: { name: true } },
+      },
+    })
+
+    const tierName = (appWithPricing?.tier?.name ?? { en: 'Standard', ro: 'Standard' }) as { en: string; ro: string }
+    const levelName = (appWithPricing?.level?.name ?? { en: 'Level', ro: 'Nivel' }) as { en: string; ro: string }
+    const includesAddon = appWithPricing?.includesAddon ?? false
+
+    // Calculate total coverage from coverages data
+    const coveragesData = quote.coverages as Record<string, unknown>
+    const baseCovs = (coveragesData?.baseCoverages ?? []) as Array<{ amount: number; currency: string }>
+    const addonCovs = (coveragesData?.addonCoverages ?? []) as Array<{ amount: number; currency: string }>
+    const allCovs = [...baseCovs, ...addonCovs]
+
+    // Group by currency and sum
+    const totals = new Map<string, number>()
+    for (const c of allCovs) {
+      totals.set(c.currency, (totals.get(c.currency) ?? 0) + c.amount)
+    }
+    const totalParts = Array.from(totals.entries()).map(([cur, amt]) => {
+      const formatted = amt >= 1_000_000
+        ? `${(amt / 1_000_000).toLocaleString('ro-RO')} M ${cur}`
+        : `${amt.toLocaleString('ro-RO')} ${cur}`
+      return formatted
+    })
+    const totalCoverage = totalParts.join(' + ') || `${quote.premiumAnnual} RON`
+
     return {
       success: true,
       data: {
@@ -364,6 +410,17 @@ export const acceptQuote: ToolHandler = async (args, context) => {
       },
       message:
         'Quote accepted! Your policy has been created and is pending submission to Allianz. An operator will process it shortly.',
+      uiAction: {
+        type: 'show_policy_issued',
+        payload: {
+          policyId: policy.id,
+          tierName,
+          levelName,
+          includesAddon,
+          premiumMonthly: quote.premiumMonthly,
+          totalCoverage,
+        } as unknown as Record<string, unknown>,
+      },
     }
   } catch (error) {
     return { success: false, error: String(error) }
