@@ -20,7 +20,10 @@ Deliver a customer-facing web app where someone can land on the Zeno homepage, c
 | Landing page scope | Full per brand book | First impression matters. Hero, benefits, how-it-works, footer. One page, not complex. |
 | Language | Hardcoded RO/EN toggle | Only 2 languages, static landing content. Chat language auto-detected. |
 | SSE consumer | React hook | `useChat` hook manages stream state. Optimistic UI — user message appears immediately. |
-| Animations | Brand book Section 9 | Subtle, purposeful. Fade+slide for messages, pulse for typing, crossfade for status messages. |
+| Animations | Brand book Section 9 | Subtle, purposeful. Fade+slide for messages, pulse for typing, crossfade for status messages. All animations respect `prefers-reduced-motion: reduce`. |
+| Focus ring | 0.1 opacity everywhere | Brand book has inconsistency (S6 CSS: 0.1, S11 text: 0.2). Standardize on 0.1 matching the CSS spec: `box-shadow: 0 0 0 3px rgba(45,107,82,0.1)` |
+| Dark mode | Light mode only in B1 | Brand book has full dark mode palette. Deferred — not in B1 scope. |
+| Cookie/URL mismatch | Starts fresh | If cookie customer != URL conversation owner: start a new conversation for the cookie's customer. No read-only mode. |
 
 ## 3. Routes
 
@@ -182,7 +185,7 @@ All landing page copy comes from `lib/i18n/translations.ts` with RO and EN varia
 |  | Buna! Sunt Zeno...  |           |
 |  +---------------------+           |
 |                                     |
-|           +---------------------+  |  <- User bubble (right, Forest)
+|           +---------------------+  |  <- User bubble (right, Forest bg, Soft White text)
 |           | Am 34 de ani...     |  |
 |           +---------------------+  |
 |                                     |
@@ -254,20 +257,27 @@ Desktop: centered, max-width 640px, Soft White visible on sides
 - Send button: right side, Forest bg circle with arrow-up icon (Linen color)
 - Send on Enter (desktop), send button tap (mobile)
 - Disabled while streaming (prevent double-send)
-- Focus ring: 3px Sage with 0.1 opacity
+- Focus ring: `box-shadow: 0 0 0 3px rgba(45,107,82,0.1)` (standardized at 0.1 opacity)
 
 ## 8. SSE Stream Consumer
 
 ### `lib/hooks/use-chat.ts`
 
 ```typescript
+interface UIAction {
+  type: string
+  payload: Record<string, unknown>
+}
+
 interface UseChatReturn {
   messages: ChatMessage[]
   isStreaming: boolean
   toolStatus: { tool: string; message: string } | null
   error: string | null
+  conversationId: string | null    // updated from done event
+  customerId: string | null        // from session
   sendMessage: (text: string) => void
-  sendAction: (action: UIAction) => void
+  sendAction: (action: UIAction) => void  // used in B2 for product cards, forms
   suggestions: string[]
 }
 
@@ -276,31 +286,73 @@ interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
   isStreaming: boolean       // true while content is still arriving
-  toolCalls?: unknown[]      // for UI actions
+  toolCalls?: unknown[]      // for UI actions (B2)
   createdAt: Date
 }
 
-function useChat(conversationId: string): UseChatReturn
+function useChat(conversationId: string, customerId: string): UseChatReturn
 ```
 
-**SSE connection flow:**
+### 8.1 Conversation lifecycle
+
+**Creation path:** The `/chat` server component creates the session and conversation via `POST /api/session` BEFORE rendering the client component. The `conversationId` and `customerId` are always available as props to the chat page — the orchestrator never needs to auto-create them.
+
+Flow:
+1. User clicks CTA → navigates to `/chat`
+2. `/chat/page.tsx` (server component): call `POST /api/session` → get `customerId`, create Conversation via Prisma, redirect to `/chat/[conversationId]`
+3. `/chat/[id]/page.tsx` (server component): load conversation + existing messages via Prisma, pass as props to client `ChatPage` component
+4. Client `ChatPage` initializes `useChat(conversationId, customerId)` with known IDs
+
+**Resume path (`/chat/[id]`):**
+- Server component loads conversation + messages via Prisma (server-side, no API call needed)
+- If conversation not found → redirect to `/chat` (start fresh)
+- Pass existing messages as `initialMessages` prop to `ChatPage`
+- `useChat` hook hydrates with initialMessages, then handles new messages via SSE
+
+### 8.2 SSE connection flow
+
 1. When `sendMessage(text)` is called:
    - Add optimistic user message to state
-   - POST to `/api/chat` with `{ conversationId, message: text }`
-   - Read SSE stream via `EventSource` or `fetch` with `getReader()`
+   - POST to `/api/chat` with `{ conversationId, customerId, message: text }`
+   - Read SSE stream via `fetch` + `getReader()` (not EventSource — we need POST with body)
 2. Handle events:
    - `content`: append to current assistant message content, set isStreaming=true
    - `tool_start`: set toolStatus with tool name + status message
    - `tool_complete`: clear toolStatus
    - `ui_action`: store for component rendering (product cards, etc. — used in B2)
-   - `error`: set error state
+   - `error`: set error state, show error inline in chat as a system message bubble (Error color #8B2D2D text, Linen bg)
    - `done`: finalize message (isStreaming=false), extract suggestions if present
 3. On stream end: clear isStreaming
 
-**Reconnection:** No automatic reconnection. If the stream fails mid-response, show error message. User can retry by sending another message.
+### 8.3 Error display
+
+Errors show as inline system messages in the chat, not toasts or banners:
+- Background: Linen (#F5EDE3)
+- Text: Error color (#8B2D2D)
+- Icon: AlertCircle (Lucide) left of text
+- Text: "A aparut o eroare. Te rog incearca din nou." (RO) / "Something went wrong. Please try again." (EN)
+- The message is ephemeral — removed when the user sends a new message
+
+### 8.4 Loading state (skeleton)
+
+While `/chat/[id]` server component fetches data:
+- Show Linen-colored pulsing skeleton blocks in the message area
+- Header and input bar render immediately (static)
+- Skeleton: 3 rounded rectangles (Linen bg, gentle opacity pulse 0.5→1.0, 1.5s cycle) mimicking message bubble shapes
+
+### 8.5 Scroll-to-bottom pill
+
+When user scrolls up (auto-scroll disabled):
+- Floating pill at bottom-center of message list
+- Soft White bg, warm-border 1px, 20px radius
+- ChevronDown icon (Lucide, 16px) + "Mesaje noi" text (Inter 12px)
+- Fade in 150ms
+- Click → smooth scroll to bottom, re-enable auto-scroll
+
+**Reconnection:** No automatic reconnection. If the stream fails mid-response, show inline error. User retries by sending another message.
 
 **Fetch-based SSE** (not EventSource):
-- EventSource only supports GET. We need POST with a body.
+- EventSource only supports GET. We need POST with body.
 - Use `fetch()` with `{ method: 'POST', body, headers }` → `response.body.getReader()` → decode SSE manually
 - Parse each `event: X\ndata: Y\n\n` block
 
@@ -344,7 +396,7 @@ function t(key: string, lang: 'ro' | 'en'): string
 
 ### `lib/i18n/language-context.tsx`
 
-React context providing current language + toggle function. Reads/writes `zeno_lang` cookie. Defaults to 'ro'.
+React context providing current language + toggle function. Reads/writes `zeno_lang` cookie. Defaults to 'ro'. Also updates `document.documentElement.lang` attribute for accessibility/screen readers.
 
 ## 11. Responsive Behavior
 
@@ -366,7 +418,7 @@ From brand book Section 10:
 
 From brand book Section 11:
 - All text meets WCAG 2.1 AA contrast ratios
-- Focus rings on all interactive elements (3px Sage, 0.2 opacity)
+- Focus rings on all interactive elements: `box-shadow: 0 0 0 3px rgba(45,107,82,0.1)`
 - Chat messages have proper ARIA roles (`role="log"` for message list, `aria-live="polite"` for new messages)
 - Suggestion pills are keyboard-navigable (Tab between, Enter to select)
 - Send button has `aria-label="Send message"`
