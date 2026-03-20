@@ -34,6 +34,44 @@ export const translations: Record<Language, Record<string, string>> = {
     chat_new_messages: 'Mesaje noi',
     chat_error: 'A apărut o eroare. Te rog încearcă din nou.',
     chat_typing: 'Zeno se gândește...',
+
+    // B2: Product cards
+    product_card_select: 'Alege acest plan',
+    product_card_recommended: 'Recomandat',
+
+    // B2: Quote card
+    quote_card_title: 'Oferta ta',
+    quote_card_coverages: 'Acoperiri incluse:',
+    quote_card_valid_until: 'Valabila pana la:',
+    quote_card_accept: 'Accepta oferta',
+    quote_card_modify: 'Modifica',
+
+    // B2: Question card
+    question_progress: 'Intrebarea {answered} din {total}',
+    question_continue: 'Continua',
+    question_submit: 'Trimite',
+    question_type_placeholder: 'Scrie raspunsul...',
+    question_number_placeholder: 'Introdu un numar',
+
+    // B2: BD result card
+    bd_result_continue: 'Da, continua',
+    bd_result_decline: 'Nu, multumesc',
+    bd_result_answered: 'Raspuns inregistrat',
+
+    // B2: Policy issued card
+    policy_congratulations: 'Felicitari!',
+    policy_activating: 'Polita ta se activeaza.',
+    policy_total_coverage: 'Acoperire totala',
+    policy_email_confirmation: 'Vei primi confirmarea pe email in urmatoarele ore.',
+
+    // B2: Inline data form
+    data_form_save: 'Salveaza',
+    data_form_cnp_error: 'CNP-ul trebuie sa contina exact 13 cifre',
+    data_form_email_error: 'Adresa de email nu este valida',
+    data_form_phone_error: 'Numarul de telefon nu este valid',
+    data_form_invalid: 'Valoarea introdusa nu este valida',
+    data_form_too_short: 'Minim {min} caractere',
+    data_form_too_long: 'Maxim {max} caractere',
   },
   en: {
     // Hero section
@@ -69,6 +107,44 @@ export const translations: Record<Language, Record<string, string>> = {
     chat_new_messages: 'New messages',
     chat_error: 'Something went wrong. Please try again.',
     chat_typing: 'Zeno is thinking...',
+
+    // B2: Product cards
+    product_card_select: 'Choose this plan',
+    product_card_recommended: 'Recommended',
+
+    // B2: Quote card
+    quote_card_title: 'Your quote',
+    quote_card_coverages: 'Included coverages:',
+    quote_card_valid_until: 'Valid until:',
+    quote_card_accept: 'Accept quote',
+    quote_card_modify: 'Modify',
+
+    // B2: Question card
+    question_progress: 'Question {answered} of {total}',
+    question_continue: 'Continue',
+    question_submit: 'Submit',
+    question_type_placeholder: 'Type your answer...',
+    question_number_placeholder: 'Enter a number',
+
+    // B2: BD result card
+    bd_result_continue: 'Yes, continue',
+    bd_result_decline: 'No, thank you',
+    bd_result_answered: 'Answer recorded',
+
+    // B2: Policy issued card
+    policy_congratulations: 'Congratulations!',
+    policy_activating: 'Your policy is being activated.',
+    policy_total_coverage: 'Total coverage',
+    policy_email_confirmation: 'You will receive email confirmation within the next hours.',
+
+    // B2: Inline data form
+    data_form_save: 'Save',
+    data_form_cnp_error: 'CNP must contain exactly 13 digits',
+    data_form_email_error: 'Email address is not valid',
+    data_form_phone_error: 'Phone number is not valid',
+    data_form_invalid: 'The entered value is not valid',
+    data_form_too_short: 'Minimum {min} characters',
+    data_form_too_long: 'Maximum {max} characters',
   },
 }
 
