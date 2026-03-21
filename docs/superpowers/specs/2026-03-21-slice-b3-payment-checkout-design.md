@@ -25,13 +25,46 @@ Enable a customer to pay their first premium inline in the chat conversation, re
 
 ## 3. Schema Changes
 
-Add to Customer model:
+**Customer model — add:**
 ```prisma
-magicLinkToken     String?
+magicLinkToken     String?   @unique
 magicLinkExpiresAt DateTime?
 ```
 
-Run `npx prisma db push` after schema change.
+**Payment model — add:**
+```prisma
+failureReason String?
+@@index([providerPaymentId])
+```
+
+**PaymentProvider enum — add:**
+```prisma
+enum PaymentProvider {
+  STRIPE
+  PAYU
+  MOCK
+}
+```
+
+**Policy model — add:**
+```prisma
+paymentFrequency String?    // "annual", "semi_annual", "quarterly"
+```
+
+**ToolContext — add policy field** to `lib/tools/types.ts`:
+```typescript
+policy?: {
+  id: string
+  status: string
+  premiumMonthly: number
+  premiumAnnual: number
+  paymentFrequency: string | null
+}
+```
+
+Also update `lib/chat/context-builder.ts` to load policy via conversation → application → quote → policy.
+
+Run `npx prisma db push` then `npx prisma generate` after schema changes.
 
 ## 4. File Structure
 
@@ -188,12 +221,13 @@ Props: `{ clientSecret, amount, currency, providerName, paymentId, policyDescrip
 
 **For Stripe (`providerName === 'stripe'`):**
 - Load Stripe.js via `@stripe/stripe-js` + `@stripe/react-stripe-js`
-- Render `<Elements>` wrapper with `clientSecret`
-- Show `<CardElement>` for card input (or `<PaymentElement>` for broader methods)
+- Render `<Elements>` wrapper with `clientSecret` and Zeno appearance theme
+- Show `<PaymentElement>` (not legacy CardElement — supports cards, wallets, bank debits)
 - Submit button: "Plătește {amount} {currency}" (primary button, Forest bg)
-- On submit: `stripe.confirmPayment()` → on success: call `onPaymentComplete(paymentId)`
+- On submit: `stripe.confirmPayment({ return_url: '${APP_URL}/api/payments/confirm?provider=stripe&paymentId=${paymentId}' })` → handles 3DS redirects automatically
+- On immediate success (no redirect needed): call `onPaymentComplete(paymentId)`
 - On error: show error message inline (Error color)
-- Card styling matches Zeno brand: Forest text, warm-border, Linen bg
+- Stripe appearance theme: match Zeno brand — Forest text, warm-border, Linen bg via `appearance: { theme: 'flat', variables: { colorPrimary: '#1A3A2F', ... } }`
 
 **For PayU (`providerName === 'payu'`):**
 - Show amount summary + "Continuă la PayU" button
@@ -224,12 +258,19 @@ After `onPaymentComplete(paymentId)`:
 export async function runPostPaymentFlow(paymentId: string): Promise<void>
 ```
 
-**Idempotent** — safe to call multiple times (checks Payment.status before proceeding).
+**Idempotent** — safe to call from both confirm API and webhooks concurrently. Uses atomic compare-and-swap to prevent race conditions.
 
 Steps:
-1. Load Payment with Policy, Customer, Quote
-2. If Payment.status already COMPLETED → return (idempotent guard)
-3. Update Payment → status: COMPLETED, paidAt: now
+1. **Atomic status transition** (prevents race between confirm API and webhook):
+   ```typescript
+   const updated = await prisma.payment.updateMany({
+     where: { id: paymentId, status: 'PENDING' },
+     data: { status: 'COMPLETED', paidAt: new Date() },
+   })
+   if (updated.count === 0) return // already processed or not found
+   ```
+   Only the first caller succeeds. Second caller sees count=0 and exits.
+2. Load Payment with Policy, Customer, Quote (now safe — we own the transition)
 4. Update Policy → status: SUBMITTED
 5. Create magic link:
    - Generate `crypto.randomUUID()` token
@@ -242,7 +283,20 @@ Steps:
 - `POST /api/payments/confirm` (immediate client confirmation)
 - Webhook handlers (async backup confirmation)
 
-Both call `runPostPaymentFlow(paymentId)` — idempotent guard prevents double-processing.
+Both call `runPostPaymentFlow(paymentId)` — atomic compare-and-swap prevents double-processing.
+
+**Email send failure handling:** If the email provider returns an error, log it and continue. The payment is already COMPLETED and policy is SUBMITTED — email failure should not reverse these. Surface failed emails in admin panel (B4) for manual retry. Consider adding `emailSentAt DateTime?` on Payment for tracking.
+
+**show_payment_success payload:**
+```typescript
+interface ShowPaymentSuccessPayload {
+  policyDescription: string    // "Standard Nivelul II + BD"
+  premiumMonthly: number
+  currency: string
+  emailSent: boolean
+  dashboardUrl: string         // magic link URL
+}
+```
 
 ## 8. Payment Confirmation API
 
@@ -271,10 +325,11 @@ For PayU redirect-based flow. Extracts orderId, finds Payment by providerPayment
 
 1. Read raw body + `stripe-signature` header
 2. Call `stripeProvider.handleWebhook(body, signature)` → validates + parses
-3. Find Payment by providerPaymentId
-4. If `payment_succeeded`: run post-payment flow
-5. If `payment_failed`: update Payment.status → FAILED
-6. Return 200
+3. If event type not recognized (`payment_succeeded` or `payment_failed`): return 200 (acknowledge, ignore). Stripe sends many event types — we only care about these two.
+4. Find Payment by providerPaymentId (using the `@@index`)
+5. If `payment_succeeded`: run post-payment flow
+6. If `payment_failed`: update Payment.status → FAILED, set failureReason
+7. Return 200
 
 ### `app/api/webhooks/payu/route.ts`
 
