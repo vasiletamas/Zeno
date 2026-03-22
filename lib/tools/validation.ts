@@ -196,6 +196,9 @@ const toolSchemas: Record<string, ZodType> = {
   // BD Eligibility
   check_bd_eligibility: checkBdEligibilitySchema,
 
+  // Payment
+  initiate_payment: z.object({}).strict(),
+
   // Data Collection
   collect_customer_field: collectCustomerFieldSchema,
 

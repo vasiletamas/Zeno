@@ -21,6 +21,7 @@ import { getObjectionStrategy } from './handlers/objection-handlers'
 import { checkBdEligibility } from './handlers/bd-handlers'
 import { collectCustomerField } from './handlers/data-handlers'
 import { escalateToHuman } from './handlers/utility-handlers'
+import { initiatePayment } from './handlers/payment-handlers'
 
 // ==============================================
 // INTERNAL STORAGE
@@ -150,6 +151,17 @@ const STATUS_OBJECTION_STRATEGY = {
     'Zeno is thinking...',
     'Hmm, one moment...',
     'Good question. Bear with me.',
+  ],
+}
+
+const STATUS_INITIATE_PAYMENT = {
+  ro: [
+    'Pregătesc plata... un moment',
+    'Conectez sistemul de plată',
+  ],
+  en: [
+    'Preparing payment... one moment',
+    'Connecting payment system',
   ],
 }
 
@@ -712,6 +724,22 @@ registerTool('check_bd_eligibility', {
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
 }, checkBdEligibility)
+
+// --- Payment ---
+
+registerTool('initiate_payment', {
+  description: 'Initiate a payment for the current policy. Creates a payment intent and shows the inline payment UI.',
+  parameters: {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: true,
+  statusMessage: STATUS_INITIATE_PAYMENT,
+  alwaysAllowed: false,
+  allowedRoles: ALL_ROLES,
+}, initiatePayment)
 
 // --- Data Collection ---
 

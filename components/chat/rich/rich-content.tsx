@@ -7,6 +7,7 @@ import { QuestionCard } from './question-card'
 import { BdResultCard } from './bd-result-card'
 import { PolicyIssuedCard } from './policy-issued-card'
 import { InlineDataForm } from './inline-data-form'
+import { PaymentCard } from './payment-card'
 
 /* ── Types ────────────────────────────────────────── */
 
@@ -257,6 +258,95 @@ export function RichContent({
           isAnswered={isAnswered}
           isLoading={isLoading}
         />
+      )
+    }
+
+    /* ── Payment card ────────────────────────────── */
+    case 'show_payment': {
+      return (
+        <PaymentCard
+          clientSecret={p.clientSecret as string}
+          amount={p.amount as number}
+          currency={p.currency as string}
+          providerName={p.providerName as string}
+          paymentId={p.paymentId as string}
+          policyDescription={p.policyDescription as string}
+          redirectUrl={p.redirectUrl as string | null | undefined}
+          onPaymentComplete={(paymentId) =>
+            onAction({
+              type: 'payment_complete',
+              payload: { paymentId },
+            })
+          }
+          language={language}
+          isAnswered={isAnswered}
+        />
+      )
+    }
+
+    /* ── Payment success celebration ─────────────── */
+    case 'show_payment_success': {
+      const policyDesc = p.policyDescription as string | undefined
+      const premiumMo = p.premiumMonthly as number | undefined
+      const curr = (p.currency as string) ?? 'RON'
+      const dashUrl = p.dashboardUrl as string | undefined
+
+      return (
+        <div className="relative bg-forest/5 border border-sage rounded-xl p-6 animate-[message-appear_300ms_ease-out] overflow-hidden">
+          {/* Success icon */}
+          <div className="flex items-center gap-3 mb-3 relative z-10">
+            <div className="w-10 h-10 rounded-full bg-sage flex items-center justify-center">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 20 20"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M4 10.5L8 14.5L16 5.5"
+                  stroke="white"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
+            <div>
+              <h3 className="font-display text-[20px] text-night">
+                {language === 'ro' ? 'Plata confirmata!' : 'Payment confirmed!'}
+              </h3>
+            </div>
+          </div>
+
+          {/* Details */}
+          {policyDesc ? (
+            <p className="text-[15px] text-night relative z-10">
+              {policyDesc}
+              {premiumMo ? (
+                <span className="font-medium">
+                  {' '}&mdash; {premiumMo} {curr}/{language === 'ro' ? 'luna' : 'month'}
+                </span>
+              ) : null}
+            </p>
+          ) : null}
+
+          <p className="text-[14px] text-muted mt-3 relative z-10">
+            {language === 'ro'
+              ? 'Polita ta este in curs de activare. Vei primi un email de confirmare.'
+              : 'Your policy is being activated. You will receive a confirmation email.'}
+          </p>
+
+          {/* Dashboard link */}
+          {dashUrl ? (
+            <a
+              href={dashUrl}
+              className="inline-block mt-4 px-5 py-2.5 bg-forest text-linen rounded-lg text-[14px] font-medium hover:opacity-90 transition-opacity relative z-10"
+            >
+              {language === 'ro' ? 'Acceseaza contul tau' : 'Access your account'}
+            </a>
+          ) : null}
+        </div>
       )
     }
 
