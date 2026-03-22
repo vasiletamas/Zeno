@@ -61,15 +61,15 @@ role: ADMIN
 ## 4. File Structure
 
 ```
+middleware.ts                  — Next.js middleware at PROJECT ROOT: route protection by role
+
 lib/auth/
   jwt.ts                    — sign/verify JWT with jose
   passwords.ts              — hash/verify with bcryptjs
-  middleware.ts              — role-checking helpers
+  middleware.ts              — role-checking helpers (NOT the Next.js middleware file)
   types.ts                  — AuthUser, JWTPayload types
 
 app/
-  middleware.ts              — Next.js middleware: route protection by role
-
   api/auth/
     login/route.ts           — POST: email+password → JWT cookie (admin/operator)
     magic-link/route.ts      — POST: email → send magic link (customer)
