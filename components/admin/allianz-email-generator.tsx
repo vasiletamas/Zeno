@@ -7,7 +7,7 @@ interface CustomerData {
   name: string | null
   email: string | null
   phone: string | null
-  cnp: string | null
+  cnpEncrypted: string | null
   dateOfBirth: string | null
   address: unknown
 }
@@ -58,7 +58,7 @@ Stimate partener,
 Va rugam sa emiteti polita de asigurare cu urmatoarele date:
 
 Asigurat: ${customer.name ?? '-'}
-CNP: ${customer.cnp ?? '-'}
+CNP: ${customer.cnpEncrypted ? '[criptat - vezi raport DNT]' : '-'}
 Data nasterii: ${dob}
 Adresa: ${formatAddress(customer.address)}
 Email: ${customer.email ?? '-'}

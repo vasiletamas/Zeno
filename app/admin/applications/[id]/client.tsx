@@ -22,7 +22,9 @@ interface ApplicationDetailData {
       name: string | null
       email: string | null
       phone: string | null
-      cnp: string | null
+      cnpEncrypted: string | null
+      cnpIv: string | null
+      cnpTag: string | null
       dateOfBirth: string | null
       address: unknown
     }
@@ -123,7 +125,7 @@ export default function ApplicationDetailClient({
             ['Nume', application.customer.name],
             ['Email', application.customer.email],
             ['Telefon', application.customer.phone],
-            ['CNP', application.customer.cnp ? `****${application.customer.cnp.slice(-4)}` : null],
+            ['CNP', application.customer.cnpEncrypted ? '******* (criptat)' : null],
             ['Data nasterii', application.customer.dateOfBirth ? new Date(application.customer.dateOfBirth).toLocaleDateString('ro-RO') : null],
           ].map(([label, value]) => (
             <div key={label as string}>
@@ -318,7 +320,7 @@ export default function ApplicationDetailClient({
             name: application.customer.name,
             email: application.customer.email,
             phone: application.customer.phone,
-            cnp: application.customer.cnp,
+            cnpEncrypted: application.customer.cnpEncrypted,
             dateOfBirth: application.customer.dateOfBirth,
             address: application.customer.address,
           }}

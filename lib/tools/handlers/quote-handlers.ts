@@ -8,6 +8,7 @@ import { prisma } from '@/lib/db'
 import { calculateQuote } from '@/lib/engines/quote-engine'
 import type { QuoteInput } from '@/lib/engines/quote-engine'
 import { getNextQuestion } from '@/lib/engines/questionnaire-engine'
+import { verifyConsents } from '@/lib/compliance/consent-check'
 import type { ToolHandler } from '@/lib/tools/types'
 
 // ─────────────────────────────────────────────
@@ -16,6 +17,15 @@ import type { ToolHandler } from '@/lib/tools/types'
 
 export const generateQuote: ToolHandler = async (_args, context) => {
   try {
+    // Verify GDPR consents before generating quote
+    const consents = await verifyConsents(context.conversationId)
+    if (!consents.valid) {
+      return {
+        success: false,
+        error: `GDPR consents required: missing ${consents.missing.join(', ')}`,
+      }
+    }
+
     // Load application (must be COMPLETED)
     const application = await prisma.application.findUnique({
       where: { conversationId: context.conversationId },

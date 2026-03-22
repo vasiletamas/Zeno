@@ -111,7 +111,11 @@ export default async function DashboardPage() {
     <div className="flex flex-col gap-6">
       <PolicyHeroCard policy={policyData} />
       <QuickActions policyActive={isActive} />
-      <DocumentList policyActive={isActive} />
+      <DocumentList
+        policyActive={isActive}
+        policyId={latestPolicy.id}
+        suitabilityReportPath={latestPolicy.suitabilityReportPath}
+      />
     </div>
   )
 }

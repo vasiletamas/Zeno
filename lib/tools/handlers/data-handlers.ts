@@ -6,6 +6,7 @@
  */
 
 import { prisma } from '@/lib/db'
+import { encrypt } from '@/lib/security/encryption'
 import type { ToolHandler } from '@/lib/tools/types'
 
 // ─────────────────────────────────────────────
@@ -148,9 +149,13 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
       case 'name':
         updateData.name = trimmedValue
         break
-      case 'cnp':
-        updateData.cnp = trimmedValue
+      case 'cnp': {
+        const { encrypted, iv, tag } = encrypt(trimmedValue)
+        updateData.cnpEncrypted = encrypted
+        updateData.cnpIv = iv
+        updateData.cnpTag = tag
         break
+      }
       case 'email':
         updateData.email = trimmedValue
         break
@@ -182,7 +187,7 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
       where: { id: context.customerId },
       select: {
         name: true,
-        cnp: true,
+        cnpEncrypted: true,
         dateOfBirth: true,
         email: true,
         phone: true,
@@ -194,9 +199,17 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
     }
 
     // Find the first field that is still null in the ordered list
+    // Map 'cnp' to cnpEncrypted for the check (cnp field is now encrypted)
+    const fieldMap: Record<CollectableField, unknown> = {
+      name: customer.name,
+      cnp: customer.cnpEncrypted,
+      dateOfBirth: customer.dateOfBirth,
+      email: customer.email,
+      phone: customer.phone,
+    }
     let nextField: CollectableField | null = null
     for (const f of FIELD_ORDER) {
-      if (customer[f] === null || customer[f] === undefined) {
+      if (fieldMap[f] === null || fieldMap[f] === undefined) {
         nextField = f
         break
       }

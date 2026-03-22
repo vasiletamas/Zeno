@@ -53,7 +53,11 @@ export default async function DocumentsPage() {
           </p>
         </div>
       ) : (
-        <DocumentList policyActive={isActive} />
+        <DocumentList
+          policyActive={isActive}
+          policyId={latestPolicy.id}
+          suitabilityReportPath={latestPolicy.suitabilityReportPath}
+        />
       )}
     </div>
   )

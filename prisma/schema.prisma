@@ -245,7 +245,9 @@ model Customer {
   phone            String?
   name             String?
   dateOfBirth      DateTime?
-  cnp              String?
+  cnpEncrypted     String?
+  cnpIv            String?
+  cnpTag           String?
   address          Json?
   language         String    @default("ro")
   extractedProfile   Json?
@@ -502,10 +504,11 @@ model Policy {
   premiumMonthly      Float
   paymentFrequency    String?
   currency            String       @default("RON")
-  coverageSummary     Json
-  issuedAt            DateTime?
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  coverageSummary         Json
+  suitabilityReportPath  String?
+  issuedAt               DateTime?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
 
   quote    Quote     @relation(fields: [quoteId], references: [id])
   customer Customer  @relation(fields: [customerId], references: [id])

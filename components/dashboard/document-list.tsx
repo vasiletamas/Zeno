@@ -4,16 +4,18 @@
  * Document List
  *
  * Lists policy documents: Polita PDF, Raport suitabilitate (DNT), Chitanta plata.
- * For non-ACTIVE policies: shows unavailability message.
- * For ACTIVE: placeholder download links (actual PDFs in Phase C).
+ * DNT report links to real PDF download when suitabilityReportPath exists.
+ * Other documents remain placeholders for now.
  */
 
-import { FileText } from 'lucide-react'
+import { FileText, Download } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/language-context'
 import { t } from '@/lib/i18n/translations'
 
 interface DocumentListProps {
   policyActive: boolean
+  policyId?: string | null
+  suitabilityReportPath?: string | null
 }
 
 interface DocumentItem {
@@ -27,8 +29,63 @@ const DOCUMENTS: DocumentItem[] = [
   { key: 'receipt', labelKey: 'document_receipt' },
 ]
 
-export default function DocumentList({ policyActive }: DocumentListProps) {
+export default function DocumentList({
+  policyActive,
+  policyId,
+  suitabilityReportPath,
+}: DocumentListProps) {
   const { lang } = useLanguage()
+
+  function renderAction(doc: DocumentItem) {
+    // DNT report: link to real download if available
+    if (doc.key === 'dnt' && policyId && suitabilityReportPath) {
+      return (
+        <a
+          href={`/api/documents/dnt-report/${policyId}`}
+          download
+          className="flex min-h-[44px] items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-sage transition-colors hover:bg-sage/10"
+        >
+          <Download size={16} />
+          Download
+        </a>
+      )
+    }
+
+    // DNT report: not yet generated
+    if (doc.key === 'dnt' && policyActive && !suitabilityReportPath) {
+      return (
+        <span className="text-xs text-muted">
+          {lang === 'ro'
+            ? 'Documentul va fi disponibil in curand'
+            : 'Document will be available soon'}
+        </span>
+      )
+    }
+
+    // Other documents: placeholder
+    if (policyActive) {
+      return (
+        <button
+          onClick={() =>
+            alert(
+              lang === 'ro'
+                ? 'Descarcarea va fi disponibila in curand'
+                : 'Download will be available soon',
+            )
+          }
+          className="min-h-[44px] rounded-lg px-3 py-2 text-sm font-medium text-sage transition-colors hover:bg-sage/10"
+        >
+          Download
+        </button>
+      )
+    }
+
+    return (
+      <span className="text-xs text-muted">
+        {t('document_unavailable', lang)}
+      </span>
+    )
+  }
 
   return (
     <div>
@@ -49,24 +106,7 @@ export default function DocumentList({ policyActive }: DocumentListProps) {
               </span>
             </div>
 
-            {policyActive ? (
-              <button
-                onClick={() =>
-                  alert(
-                    lang === 'ro'
-                      ? 'Descarcarea va fi disponibila in curand'
-                      : 'Download will be available soon',
-                  )
-                }
-                className="min-h-[44px] rounded-lg px-3 py-2 text-sm font-medium text-sage transition-colors hover:bg-sage/10"
-              >
-                Download
-              </button>
-            ) : (
-              <span className="text-xs text-muted">
-                {t('document_unavailable', lang)}
-              </span>
-            )}
+            {renderAction(doc)}
           </div>
         ))}
       </div>

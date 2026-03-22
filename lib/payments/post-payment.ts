@@ -16,6 +16,7 @@ import crypto from 'crypto'
 import { prisma } from '@/lib/db'
 import { getEmailProvider } from '@/lib/email'
 import { purchaseConfirmationEmail } from '@/lib/email/templates/purchase-confirmation'
+import { generateDntReport } from '@/lib/compliance/dnt-report'
 
 export async function runPostPaymentFlow(
   paymentId: string,
@@ -62,6 +63,18 @@ export async function runPostPaymentFlow(
     where: { id: policy.id },
     data: { status: 'SUBMITTED' },
   })
+
+  // ─── Step 3b: Generate DNT suitability report PDF ─────────
+  try {
+    await generateDntReport(policy.id)
+    console.log(`[PostPayment] DNT report generated for policy ${policy.id}`)
+  } catch (error) {
+    // PDF failure must not block the payment flow
+    console.error(
+      `[PostPayment] DNT report generation failed for policy ${policy.id}:`,
+      error instanceof Error ? error.message : error,
+    )
+  }
 
   // ─── Step 4: Generate magic link ───────────────────────────
   const magicLinkToken = crypto.randomUUID()
