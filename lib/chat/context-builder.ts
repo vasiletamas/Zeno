@@ -40,6 +40,15 @@ export async function buildToolContext(
               status: true,
               premiumAnnual: true,
               premiumMonthly: true,
+              policy: {
+                select: {
+                  id: true,
+                  status: true,
+                  premiumMonthly: true,
+                  premiumAnnual: true,
+                  paymentFrequency: true,
+                },
+              },
             },
           },
         },
@@ -95,6 +104,18 @@ export async function buildToolContext(
         status: q.status,
         premiumAnnual: q.premiumAnnual,
         premiumMonthly: q.premiumMonthly,
+      }
+
+      // Map policy if present on the quote
+      if (q.policy) {
+        const pol = q.policy
+        ctx.policy = {
+          id: pol.id,
+          status: pol.status,
+          premiumMonthly: pol.premiumMonthly,
+          premiumAnnual: pol.premiumAnnual,
+          paymentFrequency: pol.paymentFrequency,
+        }
       }
     }
   }

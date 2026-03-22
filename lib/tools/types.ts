@@ -65,6 +65,13 @@ export interface ToolContext {
     premiumAnnual: number
     premiumMonthly: number
   }
+  policy?: {
+    id: string
+    status: string
+    premiumMonthly: number
+    premiumAnnual: number
+    paymentFrequency: string | null
+  }
   workflowSession?: {
     id: string
     workflowId: string

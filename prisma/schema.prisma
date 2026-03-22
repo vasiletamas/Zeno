@@ -48,6 +48,7 @@ enum PaymentStatus {
 enum PaymentProvider {
   STRIPE
   PAYU
+  MOCK
 }
 
 enum WorkflowSessionStatus {
@@ -247,10 +248,12 @@ model Customer {
   cnp              String?
   address          Json?
   language         String    @default("ro")
-  extractedProfile Json?
-  isAnonymous      Boolean   @default(true)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  extractedProfile   Json?
+  isAnonymous        Boolean   @default(true)
+  magicLinkToken     String?   @unique
+  magicLinkExpiresAt DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   conversations     Conversation[]
   applications      Application[]
@@ -496,6 +499,7 @@ model Policy {
   effectiveUntil      DateTime?
   premiumAnnual       Float
   premiumMonthly      Float
+  paymentFrequency    String?
   currency            String       @default("RON")
   coverageSummary     Json
   issuedAt            DateTime?
@@ -518,12 +522,15 @@ model Payment {
   providerPaymentId String?
   status            PaymentStatus @default(PENDING)
   paidAt            DateTime?
+  failureReason     String?
   metadata          Json?
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
   policy   Policy   @relation(fields: [policyId], references: [id])
   customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([providerPaymentId])
 }
 
 // ==========================================

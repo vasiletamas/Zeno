@@ -1,0 +1,228 @@
+/**
+ * PayU Payment Provider
+ *
+ * PayU REST API integration using test/sandbox mode.
+ * Uses plain fetch calls (no official SDK).
+ * Requires PAYU_MERCHANT_ID and PAYU_SECRET_KEY env vars.
+ *
+ * PayU uses a redirect-based flow: the customer is redirected to PayU's
+ * hosted page, which redirects back on completion.
+ */
+
+import crypto from 'crypto'
+import type {
+  PaymentProvider,
+  PaymentIntent,
+  PaymentStatus,
+  WebhookEvent,
+} from '../types'
+
+const PAYU_API_BASE = 'https://secure.snd.payu.com' // sandbox
+
+function getPayUConfig() {
+  const merchantId = process.env.PAYU_MERCHANT_ID
+  const secretKey = process.env.PAYU_SECRET_KEY
+  if (!merchantId || !secretKey) {
+    throw new Error(
+      'PAYU_MERCHANT_ID and PAYU_SECRET_KEY must be set for PayU provider.',
+    )
+  }
+  return { merchantId, secretKey }
+}
+
+async function getAccessToken(
+  merchantId: string,
+  secretKey: string,
+): Promise<string> {
+  const response = await fetch(`${PAYU_API_BASE}/pl/standard/user/oauth/authorize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: merchantId,
+      client_secret: secretKey,
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`PayU auth failed: ${response.status} ${response.statusText}`)
+  }
+
+  const data = (await response.json()) as { access_token: string }
+  return data.access_token
+}
+
+export class PayUPaymentProvider implements PaymentProvider {
+  name = 'payu'
+
+  async createPaymentIntent(input: {
+    amount: number
+    currency: string
+    customerId: string
+    policyId: string
+    description: string
+  }): Promise<PaymentIntent> {
+    const { merchantId, secretKey } = getPayUConfig()
+    const accessToken = await getAccessToken(merchantId, secretKey)
+
+    const appUrl = process.env.APP_URL ?? 'http://localhost:3001'
+
+    const orderPayload = {
+      merchantPosId: merchantId,
+      description: input.description,
+      currencyCode: input.currency,
+      totalAmount: String(input.amount), // PayU expects string amount in smallest unit
+      extOrderId: `${input.policyId}_${Date.now()}`,
+      continueUrl: `${appUrl}/api/payments/confirm?provider=payu`,
+      notifyUrl: `${appUrl}/api/webhooks/payu`,
+      products: [
+        {
+          name: input.description,
+          unitPrice: String(input.amount),
+          quantity: '1',
+        },
+      ],
+      buyer: {
+        extCustomerId: input.customerId,
+      },
+    }
+
+    const response = await fetch(`${PAYU_API_BASE}/api/v2_1/orders`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(orderPayload),
+      redirect: 'manual', // PayU responds with 302 redirect
+    })
+
+    // PayU returns 302 with redirect to payment page, or 200/201 with order data
+    const redirectUrl = response.headers.get('location')
+
+    let orderId: string
+    if (response.status === 302 && redirectUrl) {
+      // Extract orderId from redirect URL query params or from response
+      const url = new URL(redirectUrl)
+      orderId = url.searchParams.get('orderId') ?? `payu_${Date.now()}`
+    } else {
+      const data = (await response.json()) as {
+        orderId?: string
+        redirectUri?: string
+      }
+      orderId = data.orderId ?? `payu_${Date.now()}`
+      // If response body has redirectUri, use that
+      if (data.redirectUri) {
+        return {
+          clientSecret: '',
+          providerPaymentId: orderId,
+          providerName: this.name,
+          redirectUrl: data.redirectUri,
+        }
+      }
+    }
+
+    return {
+      clientSecret: '',
+      providerPaymentId: orderId,
+      providerName: this.name,
+      redirectUrl: redirectUrl ?? undefined,
+    }
+  }
+
+  async getPaymentStatus(providerPaymentId: string): Promise<PaymentStatus> {
+    const { merchantId, secretKey } = getPayUConfig()
+    const accessToken = await getAccessToken(merchantId, secretKey)
+
+    const response = await fetch(
+      `${PAYU_API_BASE}/api/v2_1/orders/${providerPaymentId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      },
+    )
+
+    if (!response.ok) {
+      return { status: 'pending' }
+    }
+
+    const data = (await response.json()) as {
+      orders?: Array<{ status: string; completedAt?: string }>
+    }
+
+    const order = data.orders?.[0]
+    if (!order) return { status: 'pending' }
+
+    switch (order.status) {
+      case 'COMPLETED':
+        return {
+          status: 'completed',
+          paidAt: order.completedAt ? new Date(order.completedAt) : new Date(),
+        }
+      case 'CANCELED':
+      case 'REJECTED':
+        return {
+          status: 'failed',
+          failureReason: `Order ${order.status.toLowerCase()}`,
+        }
+      default:
+        return { status: 'pending' }
+    }
+  }
+
+  async handleWebhook(
+    payload: unknown,
+    signature: string,
+  ): Promise<WebhookEvent> {
+    const { secretKey } = getPayUConfig()
+
+    // Validate IPN signature: PayU sends OpenPayU-Signature header
+    // Format: "signature=<hash>;algorithm=<alg>;sender=checkout"
+    const signatureParts = signature.split(';')
+    const hashPart = signatureParts.find((p) => p.startsWith('signature='))
+    const expectedHash = hashPart?.split('=')?.[1]
+
+    if (expectedHash) {
+      const payloadString =
+        typeof payload === 'string' ? payload : JSON.stringify(payload)
+      const computedHash = crypto
+        .createHmac('md5', secretKey)
+        .update(payloadString)
+        .digest('hex')
+
+      if (computedHash !== expectedHash) {
+        throw new Error('Invalid PayU webhook signature')
+      }
+    }
+
+    const body = (
+      typeof payload === 'string' ? JSON.parse(payload) : payload
+    ) as {
+      order?: {
+        orderId: string
+        status: string
+        extOrderId?: string
+      }
+    }
+
+    const order = body.order
+    if (!order) {
+      throw new Error('Invalid PayU webhook payload: missing order')
+    }
+
+    if (order.status === 'COMPLETED') {
+      return {
+        event: 'payment_succeeded',
+        providerPaymentId: order.orderId,
+        metadata: { extOrderId: order.extOrderId },
+      }
+    }
+
+    return {
+      event: 'payment_failed',
+      providerPaymentId: order.orderId,
+      metadata: { status: order.status, extOrderId: order.extOrderId },
+    }
+  }
+}
