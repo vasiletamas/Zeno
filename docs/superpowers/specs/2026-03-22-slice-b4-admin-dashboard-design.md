@@ -137,6 +137,13 @@ Secret: `process.env.JWT_SECRET` (random 256-bit string in env).
 Algorithm: HS256.
 Expiry: '7d' for CUSTOMER, '24h' for ADMIN/OPERATOR.
 
+**Cookie attributes (mandatory):**
+- Name: `zeno_auth`
+- HttpOnly: true
+- SameSite: Lax (CSRF protection)
+- Secure: true in production (`process.env.NODE_ENV === 'production'`)
+- Path: /
+
 ### 5.2 Passwords (`lib/auth/passwords.ts`)
 
 ```typescript
@@ -165,9 +172,14 @@ async function getAuthUser(request: NextRequest): Promise<AuthUser | null>
 
 // Check if user has required role
 function hasRole(user: AuthUser, requiredRoles: string[]): boolean
+
+// Verify user is still active in DB (for admin/operator roles)
+// Called by middleware on every protected request for ADMIN/OPERATOR
+// Adds one DB query but prevents deactivated users from using active tokens
+async function verifyUserActive(userId: string): Promise<boolean>
 ```
 
-### 5.5 Next.js Middleware (`app/middleware.ts`)
+### 5.5 Next.js Middleware (`middleware.ts` at PROJECT ROOT)
 
 Route protection rules:
 ```typescript
@@ -201,7 +213,7 @@ Body: `{ email }`
 1. Find Customer by email
 2. Generate token: `crypto.randomUUID()`
 3. Find or create User (role: CUSTOMER, customerId linked)
-4. Update Customer.magicLinkToken + expiresAt (7 days)
+4. Update Customer.magicLinkToken + expiresAt (30 minutes — short-lived for security. The JWT session after verification lasts 7 days.)
 5. Send magic link email: `${APP_URL}/api/auth/verify?token=${token}`
 6. Return `{ sent: true }`
 
@@ -305,7 +317,7 @@ Status filter. Inline status update for quick workflow.
 ### 7.6 Agent Config (`app/admin/agents/page.tsx`)
 
 ADMIN only. One card per agent:
-- Agent name + slug
+- Agent name + slug + type (read-only label: MAIN_CHAT, REASONING_GATE, etc.)
 - Provider: dropdown (OPENAI, ANTHROPIC) — populated from LLMProvider enum
 - Model: dropdown — populated from ModelCatalog where provider matches
 - Fallback Provider + Model: same dropdowns
@@ -345,7 +357,7 @@ Load customer's policies (most recent first).
 - Status badge: PENDING_SUBMISSION (warning), SUBMITTED (warning), ACTIVE (success)
 - Total coverage amount
 - Next payment date + amount
-- Card: `bg-forest/5 border border-sage rounded-xl p-6`
+- Card: `bg-forest text-soft-white rounded-xl p-6` (dark card per brand book wireframe)
 
 **Quick actions:**
 - "Vorbeste cu Zeno" → navigates to `/chat`
@@ -369,8 +381,8 @@ Success: "Verifica email-ul. Am trimis un link de acces."
 Server actions or API routes for admin operations:
 
 ```
-POST /api/admin/policies/[id]/status     — Update policy status + optional allianzPolicyNumber
-POST /api/admin/agents/[id]              — Update agent config
+PATCH /api/admin/policies/[id]/status    — Update policy status + optional allianzPolicyNumber
+PATCH /api/admin/agents/[id]             — Update agent config
 POST /api/admin/agents/flush-cache       — Flush agent config cache
 POST /api/admin/users                    — Create operator user
 PATCH /api/admin/users/[id]              — Toggle active status
@@ -429,8 +441,10 @@ ADMIN_PASSWORD=change-this-in-production
 
 - Policy PDF generation (Phase C)
 - DNT suitability report PDF (Phase C)
-- Referral system (P1)
-- Analytics / PostHog (Phase D)
+- Referral system + `/dashboard/referral` route (P1)
+- Analytics dashboard `/admin/analytics` (Phase D — PostHog integration)
 - Sentry monitoring (Phase D)
 - A/B test management (P1)
 - Email template builder (hardcoded templates are fine)
+- systemPrompt/constraints editing in admin UI (Phase C — large text, needs dedicated editor)
+- Rate limiting on auth endpoints (add before production deployment)
