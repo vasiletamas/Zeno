@@ -6,6 +6,7 @@ import { seedObjections } from './seed-objections'
 import { seedWorkflows } from './seed-workflows'
 import { seedAgents } from './seed-agents'
 import { seedModelCatalog } from './seed-model-catalog'
+import { seedUsers } from './seed-users'
 
 async function main() {
   const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! })
@@ -20,6 +21,7 @@ async function main() {
     await seedWorkflows(prisma)
     await seedAgents(prisma)
     await seedModelCatalog(prisma)
+    await seedUsers(prisma)
 
     console.log('Seed completed successfully.')
   } catch (error) {

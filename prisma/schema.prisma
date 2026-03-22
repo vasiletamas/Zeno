@@ -262,6 +262,7 @@ model Customer {
   payments          Payment[]
   referralsMade     Referral[] @relation("referrer")
   referralsReceived Referral[] @relation("referred")
+  user              User?
 }
 
 model Conversation {
@@ -603,4 +604,22 @@ model Referral {
 
   referrer Customer  @relation("referrer", fields: [referrerCustomerId], references: [id])
   referred Customer? @relation("referred", fields: [referredCustomerId], references: [id])
+}
+
+// ==========================================
+// DOMAIN: AUTH AND USERS
+// ==========================================
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  passwordHash   String?
+  role           UserRole  @default(CUSTOMER)
+  customerId     String?   @unique
+  isActive       Boolean   @default(true)
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  customer       Customer? @relation(fields: [customerId], references: [id])
 }
