@@ -17,6 +17,7 @@ import { prisma } from '@/lib/db'
 import { getEmailProvider } from '@/lib/email'
 import { purchaseConfirmationEmail } from '@/lib/email/templates/purchase-confirmation'
 import { generateDntReport } from '@/lib/compliance/dnt-report'
+import { trackPaymentCompleted } from '@/lib/analytics/events'
 
 export async function runPostPaymentFlow(
   paymentId: string,
@@ -57,6 +58,8 @@ export async function runPostPaymentFlow(
   })
 
   const { policy, customer } = payment
+
+  trackPaymentCompleted(customer.id, payment.amount)
 
   // ─── Step 3: Update Policy → SUBMITTED ─────────────────────
   await prisma.policy.update({

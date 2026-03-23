@@ -10,6 +10,7 @@ import type { QuoteInput } from '@/lib/engines/quote-engine'
 import { getNextQuestion } from '@/lib/engines/questionnaire-engine'
 import { verifyConsents } from '@/lib/compliance/consent-check'
 import type { ToolHandler } from '@/lib/tools/types'
+import { trackQuoteGenerated, trackQuoteAccepted } from '@/lib/analytics/events'
 
 // ─────────────────────────────────────────────
 // generate_quote
@@ -212,6 +213,8 @@ export const generateQuote: ToolHandler = async (_args, context) => {
       },
     })
 
+    trackQuoteGenerated(application.customerId, result.premiumAnnual)
+
     return {
       success: true,
       data: {
@@ -366,6 +369,8 @@ export const acceptQuote: ToolHandler = async (args, context) => {
         issuedAt: new Date(),
       },
     })
+
+    trackQuoteAccepted(quote.customerId, quote.premiumAnnual)
 
     // Update Conversation status -> COMPLETED
     await prisma.conversation.update({

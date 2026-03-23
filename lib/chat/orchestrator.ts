@@ -28,6 +28,7 @@ import { buildPrompt, detectFastPath, FAST_PATH_GATE, type GateSelection } from 
 import { executeReasoningGate, formatGateBriefing, type ReasoningGateInput, type ReasoningGateOutput } from './reasoning-gate'
 import { buildSlidingWindow } from './sliding-window'
 import { loadAllSections, type WorkflowSessionData } from './context-loaders'
+import { trackChatStarted } from '@/lib/analytics/events'
 
 // ==============================================
 // CONSTANTS
@@ -123,6 +124,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       },
     })
     state.conversationId = conversation.id
+    trackChatStarted(state.customerId)
   }
 
   // Load conversation state

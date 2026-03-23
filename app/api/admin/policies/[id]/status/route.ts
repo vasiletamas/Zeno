@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken, COOKIE_NAME } from '@/lib/auth/jwt'
 import { prisma } from '@/lib/db'
+import { trackPolicyIssued } from '@/lib/analytics/events'
 
 export async function PATCH(
   request: NextRequest,
@@ -65,6 +66,11 @@ export async function PATCH(
         customer: { select: { email: true, name: true } },
       },
     })
+
+    // Track policy activation event
+    if (status === 'ACTIVE') {
+      trackPolicyIssued(policy.customerId, policy.id)
+    }
 
     // If activating, log that we would send email notification
     // (Email service integration is Phase C — for now just log)

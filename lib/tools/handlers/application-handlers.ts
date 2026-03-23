@@ -13,6 +13,7 @@ import {
   calculateProgress,
 } from '@/lib/engines/questionnaire-engine'
 import type { ToolHandler } from '@/lib/tools/types'
+import { trackProductSelected } from '@/lib/analytics/events'
 
 const APPLICATION_GROUP_CODES = ['application']
 
@@ -271,6 +272,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
         where: { productId: application.productId, code: validation.normalizedValue },
       })
       if (tier) updateData.tierId = tier.id
+      trackProductSelected(context.customerId, validation.normalizedValue, '')
     }
 
     if (effectiveCode === 'PREMIUM_LEVEL') {
@@ -281,6 +283,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
         })
         if (level) updateData.levelId = level.id
       }
+      trackProductSelected(context.customerId, '', validation.normalizedValue)
     }
 
     if (effectiveCode === 'BD_ADDON_INTEREST') {

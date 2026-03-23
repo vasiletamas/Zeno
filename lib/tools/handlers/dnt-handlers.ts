@@ -11,6 +11,7 @@ import {
   calculateProgress,
 } from '@/lib/engines/questionnaire-engine'
 import type { ToolHandler } from '@/lib/tools/types'
+import { trackDntCompleted } from '@/lib/analytics/events'
 
 // All DNT group codes in order
 const DNT_GROUP_CODES = [
@@ -293,6 +294,8 @@ export const signDnt: ToolHandler = async (args, context) => {
         },
       },
     })
+
+    trackDntCompleted(context.customerId)
 
     return {
       success: true,

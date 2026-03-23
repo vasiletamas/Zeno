@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Fraunces } from "next/font/google";
 import { LanguageProvider } from "@/lib/i18n/language-context";
+import { PostHogProvider } from "@/components/providers/posthog-provider";
 import "./globals.css";
 
 const inter = Inter({
@@ -32,7 +33,9 @@ export default function RootLayout({
       <body
         className={`${inter.variable} ${fraunces.variable} antialiased`}
       >
-        <LanguageProvider>{children}</LanguageProvider>
+        <LanguageProvider>
+          <PostHogProvider>{children}</PostHogProvider>
+        </LanguageProvider>
       </body>
     </html>
   );
