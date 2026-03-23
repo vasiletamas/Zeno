@@ -82,7 +82,7 @@ Non-negotiable rules governing every architectural decision, derived from V1 suc
 |-------|----|----|---------------------|
 | Framework | Next.js 15 App Router | Next.js 15 App Router | Same. Team knows it. SSR for landing page SEO. API routes for backend. |
 | Language | TypeScript (strict) | TypeScript (strict) | Same. Non-negotiable. |
-| Database | PostgreSQL (Prisma) | PostgreSQL (Prisma) — Docker dev, managed Postgres production | Same ORM. Docker locally, managed Postgres (on VPS/Azure/AWS) for production. |
+| Database | PostgreSQL (Prisma) | PostgreSQL (Prisma) — Docker dev, Azure Database for PostgreSQL production | Same ORM. Docker locally, Azure managed Postgres for production. EU West region. |
 | LLM providers | OpenAI (primary) + Anthropic (fallback) | Both, per-task assignment via admin UI | Keep dual provider. V2 assigns provider per agent role via DB config, not globally. |
 | LLM models | GPT-5, GPT-5-mini, GPT-4o-mini | Any model from either provider, admin-configurable | No hardcoded models. Agent table has provider + model fields. Admin UI dropdown to change. |
 | Streaming | Fake (chunk + delay) | Real SSE from provider | Critical UX improvement. |
@@ -90,7 +90,7 @@ Non-negotiable rules governing every architectural decision, derived from V1 suc
 | Payments | None | PayU + Stripe (abstracted, configurable) | New. Provider interface supports multiple processors. PayU for Romania, Stripe international. |
 | Auth | Admin auth only | Custom RBAC (JWT + magic link) | 3 roles: CUSTOMER, ADMIN, OPERATOR. Magic link for customers, password for admin/operator. No external auth service. |
 | Email | None | Resend (abstracted, configurable) | New. Provider interface with Resend implementation + mock for dev. |
-| Hosting | Local dev | VPS (DigitalOcean/Hetzner) or Azure/AWS | Single Next.js app, no split frontend/backend. EU region for GDPR. |
+| Hosting | Local dev | Azure App Service (EU West) | Single Next.js app deployed as Docker container to Azure App Service. Azure Database for PostgreSQL Flexible Server for DB. Custom domain + SSL via Azure. |
 | Analytics | Turn traces only | PostHog + turn traces (Phase D) | Add funnel analytics alongside existing trace system. Deferred to production deployment. |
 | Monitoring | None | Sentry (Phase D) | Error tracking for production. Deferred to deployment. |
 
@@ -407,7 +407,7 @@ Four sequential phases. Each phase produces a working increment. No phase starts
 
 | Task | Output |
 |------|--------|
-| Production deployment: VPS (DigitalOcean/Hetzner) or Azure/AWS. Docker Compose for app + managed Postgres. EU region, domain, SSL, DNS. | Production environment running |
+| Production deployment: Azure App Service (EU West) + Azure Database for PostgreSQL Flexible Server. Dockerfile for app. Custom domain, SSL via Azure. | Production environment running |
 | Monitoring: Sentry error tracking + PostHog funnel analytics + turn trace dashboard | Visibility into errors, funnels, agent performance |
 | Facebook ad campaign: 5 hook variations targeting 25-45 Romania, limited budget | Ads running, traffic flowing to landing page |
 | Manual Allianz submission SOP: documented process, SLA targets for operator | Operator can process applications reliably |
@@ -463,13 +463,13 @@ All decisions have been resolved during implementation:
 | 1 | Brand name | **Zeno** — Stoic philosophy. Brand book at zeno-brand-book.md. |
 | 2 | Default LLM for main chat | **GPT-5.2** primary, Anthropic equivalent fallback. Admin-configurable per agent. |
 | 3 | Payment processor | **PayU + Stripe** (abstracted interface, configurable via env var). Mock for dev. |
-| 4 | Database hosting | **Docker Postgres** for dev. **VPS/Azure/AWS managed Postgres** for production. No Supabase, no Neon. |
+| 4 | Database hosting | **Docker Postgres** for dev. **Azure Database for PostgreSQL Flexible Server** (EU West) for production. No Supabase, no Neon. |
 | 5 | Allianz submission format | **Email template** generated in admin panel. Copy-paste to Allianz. |
 | 6 | ASF regulatory posture | **Allianz Agent** (not broker or intermediary). |
 | 7 | Team structure | **Solo dev + Claude Code**. One Allianz operator gets admin panel access (OPERATOR role). |
 | 8 | Initial ad budget | Deferred to Phase D. |
 | 9 | Auth (added) | **Custom RBAC** with JWT (jose) + bcryptjs. 3 roles: CUSTOMER, ADMIN, OPERATOR. No external auth service. |
-| 10 | Hosting (added) | **VPS or Azure/AWS**. Single Next.js app, no split frontend/backend. EU region for GDPR. |
+| 10 | Hosting (added) | **Azure App Service** (EU West). Next.js as Docker container. Azure Database for PostgreSQL Flexible Server. Custom domain + managed SSL. |
 | 11 | Email (added) | **Resend** with abstracted provider interface + mock fallback. |
 
 **Removed from plan:** Supabase (DB + Auth), Vercel, Railway/Render, Neon, Postmark.
