@@ -47,7 +47,11 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Allow login pages without auth
-  if (pathname === '/admin/login' || pathname === '/dashboard/login') {
+  if (
+    pathname === '/admin/login' || pathname === '/admin/login/' ||
+    pathname === '/dashboard/login' || pathname === '/dashboard/login/' ||
+    pathname.startsWith('/admin/login?') || pathname.startsWith('/dashboard/login?')
+  ) {
     return NextResponse.next()
   }
 
