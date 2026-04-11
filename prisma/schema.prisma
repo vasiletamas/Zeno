@@ -76,6 +76,21 @@ enum UserRole {
   OPERATOR
 }
 
+enum InsightCategory {
+  DEMOGRAPHIC
+  PREFERENCE
+  OBJECTION_PATTERN
+  BUYING_SIGNAL
+  RISK_FACTOR
+}
+
+enum KnowledgeCategory {
+  OBJECTION_RESPONSE
+  TOOL_SEQUENCE
+  CONVERSATION_PATTERN
+  PROMPT_FRAGMENT
+}
+
 // ==========================================
 // DOMAIN: CORE PRODUCT
 // ==========================================
@@ -113,6 +128,7 @@ model Product {
   applications        Application[]
   quotes              Quote[]
   policies            Policy[]
+  agentKnowledge      AgentKnowledge[]
 }
 
 model PricingTier {
@@ -265,6 +281,7 @@ model Customer {
   referralsMade     Referral[] @relation("referrer")
   referralsReceived Referral[] @relation("referred")
   user              User?
+  insights          CustomerInsight[]
 }
 
 model Conversation {
@@ -569,6 +586,7 @@ model ModelCatalog {
   supportsStructuredOutput Boolean     @default(true)
   costPer1kInputTokens     Float
   costPer1kOutputTokens    Float
+  contextWindow            Int         @default(128000)
   isActive                 Boolean     @default(true)
   createdAt                DateTime    @default(now())
   updatedAt                DateTime    @updatedAt
@@ -625,4 +643,45 @@ model User {
   updatedAt      DateTime  @updatedAt
 
   customer       Customer? @relation(fields: [customerId], references: [id])
+}
+
+// ==========================================
+// DOMAIN: CROSS-CONVERSATION MEMORY
+// ==========================================
+
+model CustomerInsight {
+  id              String          @id @default(cuid())
+  customerId      String
+  category        InsightCategory
+  key             String
+  value           String          @db.Text
+  confidence      Float           @default(0.5)
+  source          String
+  lastConfirmedAt DateTime        @default(now())
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@unique([customerId, key])
+  @@index([customerId, category])
+}
+
+model AgentKnowledge {
+  id               String            @id @default(cuid())
+  category         KnowledgeCategory
+  trigger          String
+  content          String            @db.Text
+  successRate      Float             @default(0.0)
+  sampleSize       Int               @default(0)
+  productId        String?
+  workflowStepCode String?
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  product Product? @relation(fields: [productId], references: [id])
+
+  @@index([category, isActive])
+  @@index([productId, workflowStepCode])
 }

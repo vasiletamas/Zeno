@@ -101,3 +101,62 @@ function getErrorCode(error: unknown): string | undefined {
   }
   return undefined
 }
+
+function getErrorMessage(error: unknown): string | null {
+  if (error instanceof Error) return error.message
+  if (
+    error !== null &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof (error as Record<string, unknown>).message === 'string'
+  ) {
+    return (error as Record<string, unknown>).message as string
+  }
+  return null
+}
+
+// ==============================================
+// CONTEXT LENGTH OVERFLOW
+// ==============================================
+
+const CONTEXT_LENGTH_PATTERNS = [
+  /context.length/i,
+  /too.long/i,
+  /maximum.context/i,
+  /token.limit/i,
+]
+
+export function isContextLengthError(error: unknown): boolean {
+  const status = getStatusCode(error)
+  if (status !== 400) return false
+
+  const message = getErrorMessage(error)
+  if (!message) return false
+
+  return CONTEXT_LENGTH_PATTERNS.some((p) => p.test(message))
+}
+
+export function parseTokenDeficit(error: unknown): number | null {
+  const message = getErrorMessage(error)
+  if (!message) return null
+
+  // OpenAI format: "maximum context length is 128000 tokens ... resulted in 135000 tokens"
+  const openaiMatch = message.match(
+    /maximum context length is (\d+).*resulted in (\d+)/i,
+  )
+  if (openaiMatch) {
+    const limit = parseInt(openaiMatch[1], 10)
+    const actual = parseInt(openaiMatch[2], 10)
+    return actual - limit
+  }
+
+  // Anthropic format: "150000 tokens > 128000 maximum"
+  const anthropicMatch = message.match(/(\d+)\s*tokens?\s*>\s*(\d+)/i)
+  if (anthropicMatch) {
+    const actual = parseInt(anthropicMatch[1], 10)
+    const limit = parseInt(anthropicMatch[2], 10)
+    return actual - limit
+  }
+
+  return null
+}

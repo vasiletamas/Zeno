@@ -6,10 +6,13 @@
  * are included, saving tokens on simple turns while including full context on
  * complex ones.
  *
- * Three layers:
- * - CONSTITUTION: Core identity and constraints (priorities 1-5)
- * - REASONING:    Gate situational analysis (priority 10)
- * - DYNAMIC:      Gate-selected context sections (priorities 20-26)
+ * Four layers:
+ * - CONSTITUTION: Core identity and constraints (priorities 1-3)
+ * - STABLE:       Product/coaching context, rarely changes (priorities 4-5)
+ * - DYNAMIC:      Per-turn context — situational, customer, workflow (priorities 10-15)
+ *
+ * Constitution + Stable = stablePrefix (cacheable across turns)
+ * Dynamic = dynamicSuffix (changes each turn)
  *
  * Backward compatible: if gate provides no selection, all sections are included.
  */
@@ -39,7 +42,9 @@ export interface GateSelection {
 }
 
 export interface PromptBuildResult {
-  prompt: string
+  stablePrefix: string
+  dynamicSuffix: string
+  prompt: string          // stablePrefix + dynamicSuffix (backward compat)
   sectionSizes: Record<string, number>
   gateActive: boolean
   includedSections: string[]
@@ -53,28 +58,26 @@ export interface PromptBuildResult {
 interface SectionConfig {
   key: keyof PromptSections
   priority: number
-  layer: 'constitution' | 'reasoning' | 'dynamic'
+  layer: 'constitution' | 'stable' | 'reasoning' | 'dynamic'
   alwaysInclude: boolean
   prefix: string
 }
 
 const SECTION_REGISTRY: SectionConfig[] = [
-  // CONSTITUTION LAYER
+  // STABLE PREFIX — rarely changes within a conversation
   { key: 'agentIdentity',       priority: 1,  layer: 'constitution', alwaysInclude: true,  prefix: '' },
-  { key: 'capabilityManifest',  priority: 2,  layer: 'constitution', alwaysInclude: false, prefix: 'WHAT I CAN DO:' },
-  { key: 'constraints',         priority: 5,  layer: 'constitution', alwaysInclude: true,  prefix: 'CRITICAL CONSTRAINTS:' },
+  { key: 'constraints',         priority: 2,  layer: 'constitution', alwaysInclude: true,  prefix: 'CRITICAL CONSTRAINTS:' },
+  { key: 'capabilityManifest',  priority: 3,  layer: 'constitution', alwaysInclude: false, prefix: 'WHAT I CAN DO:' },
+  { key: 'productContext',      priority: 4,  layer: 'stable',      alwaysInclude: false, prefix: '=== PRODUCT CONTEXT ===' },
+  { key: 'coachingBriefing',    priority: 5,  layer: 'stable',      alwaysInclude: false, prefix: '=== PRODUCT SALES PLAYBOOK ===' },
 
-  // REASONING LAYER
-  { key: 'situationalBriefing', priority: 10, layer: 'reasoning',    alwaysInclude: true,  prefix: '=== SITUATIONAL ANALYSIS ===' },
-
-  // DYNAMIC LAYER
-  { key: 'customerMemory',       priority: 20, layer: 'dynamic', alwaysInclude: false, prefix: '=== RETURNING CUSTOMER ===' },
-  { key: 'agentKnowledge',       priority: 21, layer: 'dynamic', alwaysInclude: false, prefix: '=== PROVEN PATTERNS ===' },
-  { key: 'customerContext',      priority: 22, layer: 'dynamic', alwaysInclude: false, prefix: '=== CUSTOMER PROFILE ===' },
-  { key: 'coachingBriefing',     priority: 23, layer: 'dynamic', alwaysInclude: false, prefix: '=== PRODUCT SALES PLAYBOOK ===' },
-  { key: 'workflowInstructions', priority: 24, layer: 'dynamic', alwaysInclude: true,  prefix: '=== ACTIVE WORKFLOW ===' },
-  { key: 'questionnaireContext', priority: 25, layer: 'dynamic', alwaysInclude: false, prefix: '=== ACTIVE QUESTIONNAIRE ===' },
-  { key: 'productContext',       priority: 26, layer: 'dynamic', alwaysInclude: false, prefix: '=== PRODUCT CONTEXT ===' },
+  // DYNAMIC SUFFIX — changes every turn
+  { key: 'situationalBriefing', priority: 10, layer: 'dynamic',     alwaysInclude: true,  prefix: '=== SITUATIONAL ANALYSIS ===' },
+  { key: 'customerMemory',      priority: 11, layer: 'dynamic',     alwaysInclude: false, prefix: '=== RETURNING CUSTOMER ===' },
+  { key: 'agentKnowledge',      priority: 12, layer: 'dynamic',     alwaysInclude: false, prefix: '=== PROVEN PATTERNS ===' },
+  { key: 'customerContext',     priority: 13, layer: 'dynamic',     alwaysInclude: false, prefix: '=== CUSTOMER PROFILE ===' },
+  { key: 'workflowInstructions',priority: 14, layer: 'dynamic',     alwaysInclude: true,  prefix: '=== ACTIVE WORKFLOW ===' },
+  { key: 'questionnaireContext', priority: 15, layer: 'dynamic',     alwaysInclude: false, prefix: '=== ACTIVE QUESTIONNAIRE ===' },
 ]
 
 // Pre-sorted by priority at module load
@@ -162,7 +165,8 @@ export function buildPrompt(
   const gateActive =
     (required.size > 0 || excluded.size > 0) && gateSelection.confidence >= 0.3
 
-  const parts: string[] = []
+  const stableParts: string[] = []
+  const dynamicParts: string[] = []
   const sectionSizes: Record<string, number> = {}
   const includedSections: string[] = []
   const excludedSectionsList: string[] = []
@@ -180,9 +184,11 @@ export function buildPrompt(
       continue
     }
 
-    // Insert internal guidance separator before first non-constitution section
-    if (!separatorInserted && config.layer !== 'constitution') {
-      parts.push(INTERNAL_GUIDANCE_SEPARATOR)
+    const isDynamic = config.layer === 'dynamic' || config.layer === 'reasoning'
+
+    // Insert internal guidance separator before first dynamic section
+    if (!separatorInserted && isDynamic) {
+      dynamicParts.push(INTERNAL_GUIDANCE_SEPARATOR)
       separatorInserted = true
     }
 
@@ -192,23 +198,30 @@ export function buildPrompt(
       rendered = `\n\n${config.prefix}\n${content}`
     } else {
       // agentIdentity renders first with no prefix or leading newlines
-      if (parts.length === 0 && !separatorInserted) {
-        rendered = content
-      } else if (parts.length === 0) {
+      if (stableParts.length === 0 && dynamicParts.length === 0) {
         rendered = content
       } else {
         rendered = `\n\n${content}`
       }
     }
 
-    parts.push(rendered)
+    if (isDynamic) {
+      dynamicParts.push(rendered)
+    } else {
+      stableParts.push(rendered)
+    }
+
     sectionSizes[config.key] = rendered.length
     includedSections.push(config.key)
   }
 
-  const prompt = parts.join('')
+  const stablePrefix = stableParts.join('')
+  const dynamicSuffix = dynamicParts.join('')
+  const prompt = stablePrefix + dynamicSuffix
 
   return {
+    stablePrefix,
+    dynamicSuffix,
     prompt,
     sectionSizes,
     gateActive,

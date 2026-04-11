@@ -53,17 +53,20 @@ describe('buildPrompt', () => {
 
     const prompt = result.prompt
 
-    // agentIdentity (priority 1) should appear before constraints (priority 5)
+    // Stable prefix: identity(1) → constraints(2) → product(4) → coaching(5)
+    // Dynamic suffix: briefing(10) → workflow(14)
     const identityIdx = prompt.indexOf('You are Zeno')
     const constraintsIdx = prompt.indexOf('Never give medical advice')
+    const productIdx = prompt.indexOf('Protect Standard I')
+    const coachingIdx = prompt.indexOf('Focus on value')
     const briefingIdx = prompt.indexOf('Customer is asking about pricing')
     const workflowIdx = prompt.indexOf('Ask the next DNT question')
-    const productIdx = prompt.indexOf('Protect Standard I')
 
     expect(identityIdx).toBeLessThan(constraintsIdx)
-    expect(constraintsIdx).toBeLessThan(briefingIdx)
+    expect(constraintsIdx).toBeLessThan(productIdx)
+    expect(productIdx).toBeLessThan(coachingIdx)
+    expect(coachingIdx).toBeLessThan(briefingIdx)
     expect(briefingIdx).toBeLessThan(workflowIdx)
-    expect(workflowIdx).toBeLessThan(productIdx)
   })
 
   it('gate-driven exclusion removes non-alwaysInclude sections', () => {
@@ -179,6 +182,42 @@ describe('buildPrompt', () => {
     for (const key of result.includedSections) {
       expect(result.sectionSizes[key]).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('prompt caching — stable prefix', () => {
+  it('returns stablePrefix and dynamicSuffix separately', () => {
+    const sections = makeSections()
+    const result = buildPrompt(sections, NO_GATE)
+
+    expect(result.stablePrefix).toBeDefined()
+    expect(result.dynamicSuffix).toBeDefined()
+    expect(result.prompt).toBe(result.stablePrefix + result.dynamicSuffix)
+  })
+
+  it('places constitution + product + coaching in stable prefix', () => {
+    const sections = makeSections()
+    const result = buildPrompt(sections, NO_GATE)
+
+    // Stable prefix should contain these
+    expect(result.stablePrefix).toContain('You are Zeno')
+    expect(result.stablePrefix).toContain('Never give medical advice')
+    expect(result.stablePrefix).toContain('Protect Standard I')
+    expect(result.stablePrefix).toContain('Focus on value')
+
+    // Dynamic suffix should NOT contain them
+    expect(result.dynamicSuffix).not.toContain('You are Zeno')
+    expect(result.dynamicSuffix).not.toContain('Protect Standard I')
+  })
+
+  it('places situational + customer + workflow in dynamic suffix', () => {
+    const sections = makeSections()
+    const result = buildPrompt(sections, NO_GATE)
+
+    // Dynamic suffix should contain these
+    expect(result.dynamicSuffix).toContain('Customer is asking about pricing')
+    expect(result.dynamicSuffix).toContain('Ion, age 35')
+    expect(result.dynamicSuffix).toContain('Ask the next DNT question')
   })
 })
 

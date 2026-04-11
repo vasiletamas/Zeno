@@ -29,6 +29,9 @@ import { executeReasoningGate, formatGateBriefing, type ReasoningGateInput, type
 import { buildSlidingWindow } from './sliding-window'
 import { loadAllSections, type WorkflowSessionData } from './context-loaders'
 import { trackChatStarted } from '@/lib/analytics/events'
+import { estimateTokens, calculateMessageBudget } from '@/lib/chat/token-budget'
+import { compactMessages } from '@/lib/chat/compaction'
+import { isContextLengthError, parseTokenDeficit } from '@/lib/llm/errors'
 
 // ==============================================
 // CONSTANTS
@@ -358,7 +361,33 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
   state.provider = agentConfig.provider
   state.model = agentConfig.model
+
+  // Build prompt early — needed for token budget calculation
+  const buildResult = buildPrompt(sections, gateSelection)
+  const { prompt: systemPrompt } = buildResult
+
   state.phases['step4_context'] = Date.now() - step4Start
+
+  // =============================================
+  // STEP 4b — Calculate token budget
+  // =============================================
+  const contextWindow = agentConfig.provider === 'ANTHROPIC' ? 200_000 : 128_000
+  const systemPromptTokens = estimateTokens(buildResult.prompt, state.language)
+  const toolDefs = getToolsForLLM()
+  const toolDefTokens = estimateTokens(JSON.stringify(toolDefs), 'en')
+  const availableTokenBudget = calculateMessageBudget({
+    modelContextWindow: contextWindow,
+    systemPromptTokens,
+    toolDefinitionTokens: toolDefTokens,
+    outputReservation: agentConfig.maxTokens,
+  })
+
+  state.phases['step4b_token_budget'] = {
+    contextWindow,
+    systemPromptTokens,
+    toolDefTokens,
+    availableTokenBudget,
+  }
 
   // =============================================
   // STEP 5 — Sliding window
@@ -368,6 +397,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const { messages: windowMessages, summaryPrefix } = await buildSlidingWindow(
     state.conversationId,
     state.messageCount,
+    availableTokenBudget,
   )
 
   state.phases['step5_sliding_window'] = Date.now() - step5Start
@@ -376,9 +406,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // STEP 6 — Build messages array
   // =============================================
   const step6Start = Date.now()
-
-  const buildResult = buildPrompt(sections, gateSelection)
-  const { prompt: systemPrompt } = buildResult
 
   const messages: Message[] = [
     { role: 'system' as const, content: systemPrompt },
@@ -510,12 +537,33 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     while (round <= MAX_TOOL_ROUNDS) {
       const toolChoice = round >= MAX_TOOL_ROUNDS ? 'none' as const : 'auto' as const
 
-      const stream = await gateway.stream('main-chat', {
-        messages,
-        tools: toolChoice === 'none' ? undefined : tools,
-        toolChoice: toolChoice === 'none' ? undefined : toolChoice,
-        overrideSystemPrompt: systemPrompt,
-      })
+      let stream: AsyncIterable<import('@/lib/llm/providers/types').StreamChunk>
+      try {
+        stream = await gateway.stream('main-chat', {
+          messages,
+          tools: toolChoice === 'none' ? undefined : tools,
+          toolChoice: toolChoice === 'none' ? undefined : toolChoice,
+          overrideSystemPrompt: systemPrompt,
+        })
+      } catch (err) {
+        if (round === 0 && isContextLengthError(err)) {
+          // Reactive compaction: compress and retry once
+          const deficit = parseTokenDeficit(err) ?? 2000
+          const compactedMessages = await compactMessages(messages, deficit, state.conversationId)
+          messages.length = 0
+          messages.push(...compactedMessages)
+          state.phases['reactiveCompaction'] = { deficit, originalLength: messages.length }
+
+          stream = await gateway.stream('main-chat', {
+            messages,
+            tools: toolChoice === 'none' ? undefined : tools,
+            toolChoice: toolChoice === 'none' ? undefined : toolChoice,
+            overrideSystemPrompt: systemPrompt,
+          })
+        } else {
+          throw err
+        }
+      }
 
       let roundContent = ''
       let roundToolCalls: ToolCall[] = []
@@ -719,6 +767,32 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
             where: { id: state.customerId },
             data: { extractedProfile: merged as unknown as Record<string, string | number | boolean | null> },
           })
+
+          // Write insights to CustomerInsight table
+          for (const [key, value] of Object.entries(extracted)) {
+            if (value == null) continue
+            const category = categorizeInsight(key)
+            await prisma.customerInsight.upsert({
+              where: {
+                customerId_key: {
+                  customerId: state.customerId,
+                  key,
+                },
+              },
+              update: {
+                value: String(value),
+                lastConfirmedAt: new Date(),
+              },
+              create: {
+                customerId: state.customerId,
+                category,
+                key,
+                value: String(value),
+                confidence: 0.6,
+                source: state.conversationId,
+              },
+            })
+          }
         }
       } catch (e) {
         console.error('[Orchestrator] Profile extractor failed:', e)
@@ -777,4 +851,19 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       latencyMs,
     },
   }
+}
+
+// ==============================================
+// HELPERS
+// ==============================================
+
+function categorizeInsight(key: string): 'DEMOGRAPHIC' | 'PREFERENCE' | 'OBJECTION_PATTERN' | 'BUYING_SIGNAL' | 'RISK_FACTOR' {
+  const demographics = ['age', 'occupation', 'income', 'education', 'familySize', 'hasSpouse', 'hasChildren', 'minorChildren']
+  const buyingSignals = ['urgency', 'motivation', 'readiness', 'interests']
+  const riskFactors = ['health', 'smoking', 'hazardous']
+
+  if (demographics.includes(key)) return 'DEMOGRAPHIC'
+  if (buyingSignals.includes(key)) return 'BUYING_SIGNAL'
+  if (riskFactors.includes(key)) return 'RISK_FACTOR'
+  return 'PREFERENCE'
 }

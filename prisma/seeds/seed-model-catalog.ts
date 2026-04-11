@@ -8,6 +8,7 @@ interface ModelDef {
   provider: 'OPENAI' | 'ANTHROPIC'
   modelId: string
   displayName: string
+  contextWindow: number
   supportsStreaming: boolean
   supportsTools: boolean
   supportsStructuredOutput: boolean
@@ -18,8 +19,9 @@ interface ModelDef {
 const MODELS: ModelDef[] = [
   {
     provider: 'OPENAI',
-    modelId: 'gpt-5.2',
-    displayName: 'GPT-5.2',
+    modelId: 'gpt-5.4',
+    displayName: 'GPT-5.4',
+    contextWindow: 128_000,
     supportsStreaming: true,
     supportsTools: true,
     supportsStructuredOutput: true,
@@ -28,8 +30,9 @@ const MODELS: ModelDef[] = [
   },
   {
     provider: 'OPENAI',
-    modelId: 'gpt-5.2-mini',
-    displayName: 'GPT-5.2 Mini',
+    modelId: 'gpt-5.4-mini',
+    displayName: 'GPT-5.4 Mini',
+    contextWindow: 128_000,
     supportsStreaming: true,
     supportsTools: true,
     supportsStructuredOutput: true,
@@ -40,6 +43,7 @@ const MODELS: ModelDef[] = [
     provider: 'ANTHROPIC',
     modelId: 'claude-opus-4-6',
     displayName: 'Claude Opus 4.6',
+    contextWindow: 200_000,
     supportsStreaming: true,
     supportsTools: true,
     supportsStructuredOutput: true,
@@ -50,6 +54,7 @@ const MODELS: ModelDef[] = [
     provider: 'ANTHROPIC',
     modelId: 'claude-sonnet-4-6',
     displayName: 'Claude Sonnet 4.6',
+    contextWindow: 200_000,
     supportsStreaming: true,
     supportsTools: true,
     supportsStructuredOutput: true,
@@ -60,6 +65,7 @@ const MODELS: ModelDef[] = [
     provider: 'ANTHROPIC',
     modelId: 'claude-sonnet-4-20250514',
     displayName: 'Claude Sonnet 4',
+    contextWindow: 200_000,
     supportsStreaming: true,
     supportsTools: true,
     supportsStructuredOutput: true,
@@ -70,6 +76,7 @@ const MODELS: ModelDef[] = [
     provider: 'ANTHROPIC',
     modelId: 'claude-haiku-4-5-20251001',
     displayName: 'Claude Haiku 4.5',
+    contextWindow: 200_000,
     supportsStreaming: true,
     supportsTools: true,
     supportsStructuredOutput: true,
@@ -95,6 +102,7 @@ export async function seedModelCatalog(prisma: PrismaClient) {
       },
       update: {
         displayName: model.displayName,
+        contextWindow: model.contextWindow,
         supportsStreaming: model.supportsStreaming,
         supportsTools: model.supportsTools,
         supportsStructuredOutput: model.supportsStructuredOutput,
@@ -105,6 +113,7 @@ export async function seedModelCatalog(prisma: PrismaClient) {
         provider: model.provider,
         modelId: model.modelId,
         displayName: model.displayName,
+        contextWindow: model.contextWindow,
         supportsStreaming: model.supportsStreaming,
         supportsTools: model.supportsTools,
         supportsStructuredOutput: model.supportsStructuredOutput,

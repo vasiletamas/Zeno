@@ -10,6 +10,7 @@
 import type { LLMToolDefinition } from '@/lib/llm/providers/types'
 import type { ToolDefinition, ToolHandler, ToolContext, ToolResult } from './types'
 import { prisma } from '@/lib/db'
+import { LRUCache } from '@/lib/cache/lru-cache'
 
 // --- Handler imports ---
 import { checkDntStatus, startDntQuestionnaire, saveDntAnswer, signDnt } from './handlers/dnt-handlers'
@@ -59,11 +60,17 @@ export function isAlwaysAllowed(name: string): boolean {
   return definitions.get(name)?.alwaysAllowed ?? false
 }
 
+const toolsCache = new LRUCache<string, LLMToolDefinition[]>(5, 5 * 60 * 1000) // 5 min TTL
+
 /**
  * Convert registered tools to LLM function-calling format.
  * Optionally filter to a subset of tool names.
  */
 export function getToolsForLLM(allowedTools?: string[]): LLMToolDefinition[] {
+  const cacheKey = allowedTools ? allowedTools.sort().join(',') : '__all__'
+  const cached = toolsCache.get(cacheKey)
+  if (cached) return cached
+
   const result: LLMToolDefinition[] = []
   for (const [name, def] of definitions) {
     if (allowedTools && !allowedTools.includes(name)) continue
@@ -76,6 +83,8 @@ export function getToolsForLLM(allowedTools?: string[]): LLMToolDefinition[] {
       },
     })
   }
+
+  toolsCache.set(cacheKey, result)
   return result
 }
 

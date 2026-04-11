@@ -1,23 +1,27 @@
 /**
- * Sliding Window — Message Window Management + Summarizer Trigger
+ * Sliding Window — Dynamic Message Window Management + Summarizer Trigger
  *
  * Manages the conversation message window for LLM calls.
- * When conversations exceed 20 messages, loads only the last 20 and
- * generates/retrieves a summary of older messages.
+ * When a token budget is provided, loads messages from newest to oldest
+ * until the budget is exhausted. Without a budget, falls back to loading
+ * the last 20 messages. Generates/retrieves a summary of older messages
+ * when the window doesn't cover the full conversation.
  *
  * Exports:
- * - buildSlidingWindow(conversationId, totalMessages) — build the message window
+ * - buildSlidingWindow(conversationId, totalMessages, availableTokenBudget?) — build the message window
  */
 
 import { prisma } from '@/lib/db'
 import { gateway } from '@/lib/llm/gateway'
+import { estimateTokens } from '@/lib/chat/token-budget'
 import type { Message } from '@/lib/llm/providers/types'
 
 // ==============================================
 // CONSTANTS
 // ==============================================
 
-const WINDOW_SIZE = 20
+const FALLBACK_WINDOW_SIZE = 20
+const MIN_WINDOW_SIZE = 4
 
 // ==============================================
 // DB MESSAGE → LLM MESSAGE CONVERSION
@@ -52,45 +56,77 @@ function dbMessageToLLM(msg: {
 /**
  * Build the sliding window of messages for the LLM call.
  *
- * - If totalMessages <= 20: load all messages, no summary
- * - If totalMessages > 20: load last 20 + generate/retrieve summary of older
+ * - If availableTokenBudget is provided: loads messages from newest to oldest
+ *   until the budget is exhausted, guaranteeing at least MIN_WINDOW_SIZE messages.
+ * - If no budget: falls back to loading the last FALLBACK_WINDOW_SIZE messages.
+ * - When the window doesn't cover all messages, generates/retrieves a summary.
  *
  * Returns messages in chronological order (oldest first).
  */
 export async function buildSlidingWindow(
   conversationId: string,
   totalMessages: number,
+  availableTokenBudget?: number,
 ): Promise<{ messages: Message[]; summaryPrefix: string | null }> {
-  if (totalMessages <= WINDOW_SIZE) {
+  const useTokenBudget = availableTokenBudget !== undefined && availableTokenBudget > 0
+  const maxToLoad = useTokenBudget ? totalMessages : Math.min(totalMessages, FALLBACK_WINDOW_SIZE)
+
+  if (totalMessages <= MIN_WINDOW_SIZE) {
     // Load all messages in chronological order
     const dbMessages = await prisma.message.findMany({
       where: { conversationId },
       orderBy: { createdAt: 'asc' },
     })
 
-    const messages = dbMessages.map(dbMessageToLLM)
-    return { messages, summaryPrefix: null }
+    return { messages: dbMessages.map(dbMessageToLLM), summaryPrefix: null }
   }
 
-  // totalMessages > 20: load last 20 (desc then reverse)
-  const last20Desc = await prisma.message.findMany({
+  // Load messages (desc then reverse for chronological order)
+  const dbMessagesDesc = await prisma.message.findMany({
     where: { conversationId },
     orderBy: { createdAt: 'desc' },
-    take: WINDOW_SIZE,
+    take: maxToLoad,
   })
-  const last20 = last20Desc.reverse()
-  const messages = last20.map(dbMessageToLLM)
+
+  const dbMessagesAsc = dbMessagesDesc.reverse()
+  const allMessages = dbMessagesAsc.map(dbMessageToLLM)
+
+  // Determine the window of messages to include
+  let windowMessages: Message[]
+  if (useTokenBudget) {
+    // Walk from newest to oldest, accumulating tokens
+    let tokenCount = 0
+    let startIndex = allMessages.length
+
+    for (let i = allMessages.length - 1; i >= 0; i--) {
+      const msgTokens = estimateTokens(allMessages[i].content, 'en')
+      if (tokenCount + msgTokens > availableTokenBudget && startIndex < allMessages.length - MIN_WINDOW_SIZE + 1) {
+        break
+      }
+      tokenCount += msgTokens
+      startIndex = i
+    }
+
+    windowMessages = allMessages.slice(startIndex)
+  } else {
+    windowMessages = allMessages.slice(-FALLBACK_WINDOW_SIZE)
+  }
+
+  // If window covers all messages, no summary needed
+  if (windowMessages.length >= totalMessages) {
+    return { messages: windowMessages, summaryPrefix: null }
+  }
 
   // Check for existing summary
+  const olderCount = totalMessages - windowMessages.length
+
   const existingSummary = await prisma.conversationSummary.findUnique({
     where: { conversationId },
   })
 
-  const olderCount = totalMessages - WINDOW_SIZE
-
   if (existingSummary && existingSummary.messagesUpTo >= olderCount) {
     // Summary is current — use it
-    return { messages, summaryPrefix: existingSummary.summary }
+    return { messages: windowMessages, summaryPrefix: existingSummary.summary }
   }
 
   // No summary or stale — load older messages and trigger summarizer
@@ -107,7 +143,7 @@ export async function buildSlidingWindow(
     olderCount,
   )
 
-  return { messages, summaryPrefix: summaryText }
+  return { messages: windowMessages, summaryPrefix: summaryText }
 }
 
 // ==============================================

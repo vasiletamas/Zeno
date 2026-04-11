@@ -14,7 +14,16 @@
 
 import { prisma } from '@/lib/db'
 import { getToolDefinition } from '@/lib/tools/registry'
+import { estimateTokens } from '@/lib/chat/token-budget'
+import { LRUCache } from '@/lib/cache/lru-cache'
 import type { PromptSections } from './prompt-builder'
+
+// ==============================================
+// CACHES
+// ==============================================
+
+const productContextCache = new LRUCache<string, string | null>(5, 10 * 60 * 1000) // 10 min
+const coachingBriefingCache = new LRUCache<string, string | null>(5, 10 * 60 * 1000)
 
 // ==============================================
 // TYPES
@@ -95,6 +104,10 @@ export async function loadProductContext(
   productId: string,
   language: 'en' | 'ro',
 ): Promise<string | null> {
+  const cacheKey = `${productId}:${language}`
+  const cached = productContextCache.get(cacheKey)
+  if (cached !== undefined) return cached
+
   const product = await prisma.product.findUnique({
     where: { id: productId },
     include: {
@@ -118,7 +131,10 @@ export async function loadProductContext(
     },
   })
 
-  if (!product) return null
+  if (!product) {
+    productContextCache.set(cacheKey, null)
+    return null
+  }
 
   const name = (product.name as unknown as LocalizedText)[language]
   const description = (product.description as unknown as LocalizedText)[language]
@@ -177,7 +193,9 @@ export async function loadProductContext(
     }
   }
 
-  return parts.join('\n')
+  const result = parts.join('\n')
+  productContextCache.set(cacheKey, result)
+  return result
 }
 
 /**
@@ -187,12 +205,17 @@ export async function loadProductContext(
 export async function loadCoachingBriefing(
   productId: string,
 ): Promise<string | null> {
+  const cached = coachingBriefingCache.get(productId)
+  if (cached !== undefined) return cached
+
   const product = await prisma.product.findUnique({
     where: { id: productId },
     select: { defaultPlaybook: true },
   })
 
-  return product?.defaultPlaybook ?? null
+  const result = product?.defaultPlaybook ?? null
+  coachingBriefingCache.set(productId, result)
+  return result
 }
 
 /**
@@ -456,26 +479,98 @@ function calculateAge(dateOfBirth: Date): number {
   return age
 }
 
+const STALE_THRESHOLD_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
+const MAX_MEMORY_TOKENS = 500
+
 /**
  * Load customer memory section.
- * P2 placeholder — returns null.
+ * Queries CustomerInsight table and formats insights by category.
+ * Marks insights older than 30 days as (unverified).
  */
 export async function loadCustomerMemory(
-  _customerId: string,
+  customerId: string,
 ): Promise<string | null> {
-  // P2: Will be populated by the learning loop
-  return null
+  const insights = await prisma.customerInsight.findMany({
+    where: { customerId },
+    orderBy: [
+      { confidence: 'desc' },
+      { lastConfirmedAt: 'desc' },
+    ],
+  })
+
+  if (insights.length === 0) return null
+
+  const now = Date.now()
+  const byCategory = new Map<string, string[]>()
+
+  for (const insight of insights) {
+    const isStale = now - insight.lastConfirmedAt.getTime() > STALE_THRESHOLD_MS
+    const staleMark = isStale ? ' (unverified)' : ''
+    const line = `- ${insight.key}: ${insight.value}${staleMark}`
+
+    const existing = byCategory.get(insight.category) ?? []
+    existing.push(line)
+    byCategory.set(insight.category, existing)
+  }
+
+  const parts: string[] = []
+  for (const [category, lines] of byCategory) {
+    parts.push(`${category}:`)
+    parts.push(...lines)
+  }
+
+  const text = parts.join('\n')
+
+  const tokens = estimateTokens(text, 'en')
+  if (tokens > MAX_MEMORY_TOKENS) {
+    const truncated = parts.slice(0, Math.ceil(parts.length * (MAX_MEMORY_TOKENS / tokens)))
+    return truncated.join('\n')
+  }
+
+  return text
 }
+
+const MAX_KNOWLEDGE_TOKENS = 400
+const MIN_SAMPLE_SIZE = 5
+const MAX_PATTERNS = 5
 
 /**
  * Load agent knowledge section.
- * P2 placeholder — returns null.
+ * Queries AgentKnowledge for proven patterns with minimum evidence threshold.
  */
 export async function loadAgentKnowledge(
-  _productId: string | null,
+  productId: string | null,
+  workflowStepCode: string | null,
 ): Promise<string | null> {
-  // P2: Will be populated by the learning loop
-  return null
+  const knowledge = await prisma.agentKnowledge.findMany({
+    where: {
+      isActive: true,
+      sampleSize: { gte: MIN_SAMPLE_SIZE },
+      OR: [
+        { productId: productId ?? undefined },
+        { productId: null },
+      ],
+    },
+    orderBy: { successRate: 'desc' },
+    take: MAX_PATTERNS,
+  })
+
+  if (knowledge.length === 0) return null
+
+  let filtered = knowledge
+  if (workflowStepCode) {
+    const stepSpecific = knowledge.filter(
+      (k) => k.workflowStepCode === workflowStepCode || k.workflowStepCode === null,
+    )
+    if (stepSpecific.length > 0) filtered = stepSpecific
+  }
+
+  const lines = filtered.map((k) => {
+    const rate = Math.round(k.successRate * 100)
+    return `- [${k.trigger}] ${k.content} (success: ${rate}%, n=${k.sampleSize})`
+  })
+
+  return lines.join('\n')
 }
 
 // ==============================================
@@ -529,7 +624,7 @@ export async function loadAllSections(params: {
     loadQuestionnaireContext(conversationId, workflowStepCode, language),
     loadCustomerContext(customerId),
     loadCustomerMemory(customerId),
-    loadAgentKnowledge(productId),
+    loadAgentKnowledge(productId, workflowStepCode),
   ])
 
   return {

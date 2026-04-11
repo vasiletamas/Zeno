@@ -70,7 +70,7 @@ export class AnthropicProvider implements LLMProviderInterface {
    * 6. Conversation must start with user message
    */
   private convertMessages(messages: Message[]): {
-    system: string | undefined
+    system: Array<{ type: 'text'; text: string; cache_control: { type: 'ephemeral' } }> | undefined
     messages: MessageParam[]
   } {
     // 1. Extract system messages
@@ -85,7 +85,10 @@ export class AnthropicProvider implements LLMProviderInterface {
       }
     }
 
-    const system = systemParts.length > 0 ? systemParts.join('\n\n') : undefined
+    // Use content blocks with cache_control for prompt caching
+    const system = systemParts.length > 0
+      ? [{ type: 'text' as const, text: systemParts.join('\n\n'), cache_control: { type: 'ephemeral' as const } }]
+      : undefined
 
     // 2. Convert individual messages
     const converted: MessageParam[] = []
