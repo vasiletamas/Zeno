@@ -32,13 +32,30 @@ import { trackChatStarted } from '@/lib/analytics/events'
 import { estimateTokens, calculateMessageBudget } from '@/lib/chat/token-budget'
 import { compactMessages } from '@/lib/chat/compaction'
 import { isContextLengthError, parseTokenDeficit } from '@/lib/llm/errors'
-import { logError, logWarn } from '@/lib/errors/logger'
+import { logError, logWarn, logFatal } from '@/lib/errors/logger'
+import { CircuitOpenError, TimeoutError } from '@/lib/errors/types'
 
 // ==============================================
 // CONSTANTS
 // ==============================================
 
 const MAX_TOOL_ROUNDS = 5
+const PIPELINE_TIMEOUT_MS = 90_000
+
+async function withPipelineTimeout<T>(
+  fn: () => Promise<T>,
+  operation: string,
+): Promise<T> {
+  return Promise.race([
+    fn(),
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new TimeoutError(operation, PIPELINE_TIMEOUT_MS)),
+        PIPELINE_TIMEOUT_MS,
+      ),
+    ),
+  ])
+}
 
 // ==============================================
 // INPUT TYPE
@@ -112,46 +129,65 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // =============================================
   const step1Start = Date.now()
 
-  if (!state.customerId) {
-    const customer = await prisma.customer.create({
-      data: { isAnonymous: true, language: state.language },
-    })
-    state.customerId = customer.id
-  }
+  const resolveConversation = async () => {
+    if (!state.customerId) {
+      const customer = await prisma.customer.create({
+        data: { isAnonymous: true, language: state.language },
+      })
+      state.customerId = customer.id
+    }
 
-  if (!state.conversationId) {
-    const conversation = await prisma.conversation.create({
-      data: {
-        customerId: state.customerId,
-        language: state.language,
-        channel: 'web',
-      },
-    })
-    state.conversationId = conversation.id
-    trackChatStarted(state.customerId)
-  }
+    if (!state.conversationId) {
+      const conv = await prisma.conversation.create({
+        data: {
+          customerId: state.customerId,
+          language: state.language,
+          channel: 'web',
+        },
+      })
+      state.conversationId = conv.id
+      trackChatStarted(state.customerId)
+    }
 
-  // Load conversation state
-  const conversation = await prisma.conversation.findUniqueOrThrow({
-    where: { id: state.conversationId },
-    include: {
-      product: { select: { id: true } },
-      workflowSession: {
-        include: {
-          currentStep: {
-            select: {
-              id: true,
-              code: true,
-              name: true,
-              agentInstructions: true,
-              allowedTools: true,
-              autoTool: true,
+    return prisma.conversation.findUniqueOrThrow({
+      where: { id: state.conversationId },
+      include: {
+        product: { select: { id: true } },
+        workflowSession: {
+          include: {
+            currentStep: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                agentInstructions: true,
+                allowedTools: true,
+                autoTool: true,
+              },
             },
           },
         },
       },
-    },
-  })
+    })
+  }
+
+  let conversation: Awaited<ReturnType<typeof resolveConversation>>
+  try {
+    conversation = await resolveConversation()
+  } catch (err) {
+    const errorId = logFatal({
+      layer: 'orchestrator',
+      category: 'db_error',
+      message: 'Failed to resolve conversation',
+      context: { conversationId: state.conversationId, customerId: state.customerId },
+      error: err,
+    })
+    yield {
+      event: 'error',
+      data: { errorId, type: 'internal', message: 'Service temporarily unavailable', retryable: true },
+    }
+    return
+  }
 
   // Guard: conversation must be active
   if (conversation.status === 'COMPLETED' || conversation.status === 'ABANDONED') {
@@ -174,22 +210,37 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // =============================================
   const step2Start = Date.now()
 
-  const userMsg = await prisma.message.create({
-    data: {
-      conversationId: state.conversationId,
-      role: 'user',
-      content: input.message,
-    },
-  })
+  try {
+    const userMsg = await prisma.message.create({
+      data: {
+        conversationId: state.conversationId,
+        role: 'user',
+        content: input.message,
+      },
+    })
 
-  await prisma.conversation.update({
-    where: { id: state.conversationId },
-    data: {
-      messageCount: { increment: 1 },
-      lastActivityAt: new Date(),
-    },
-  })
-  state.messageCount += 1
+    await prisma.conversation.update({
+      where: { id: state.conversationId },
+      data: {
+        messageCount: { increment: 1 },
+        lastActivityAt: new Date(),
+      },
+    })
+    state.messageCount += 1
+  } catch (err) {
+    const errorId = logFatal({
+      layer: 'orchestrator',
+      category: 'db_error',
+      message: 'Failed to save user message',
+      context: { conversationId: state.conversationId, customerId: state.customerId },
+      error: err,
+    })
+    yield {
+      event: 'error',
+      data: { errorId, type: 'internal', message: 'Service temporarily unavailable', retryable: true },
+    }
+    return
+  }
   state.phases['step2_save_user'] = Date.now() - step2Start
 
   // =============================================
@@ -340,31 +391,56 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const agentConfig = await getAgentConfig('main-chat')
   const situationalBriefing = gateOutput ? formatGateBriefing(gateOutput) : null
 
-  // Build WorkflowSessionData from current conversation state
-  const workflowSessionData: WorkflowSessionData | null = conversation.workflowSession
-    ? {
-        currentStepCode: conversation.workflowSession.currentStep.code,
-        currentStepName: conversation.workflowSession.currentStep.name,
-        agentInstructions: conversation.workflowSession.currentStep.agentInstructions,
-        allowedTools: conversation.workflowSession.currentStep.allowedTools,
-        data: conversation.workflowSession.data,
-      }
-    : null
+  let sections: Awaited<ReturnType<typeof loadAllSections>>
+  try {
+    // Build WorkflowSessionData from current conversation state
+    const workflowSessionData: WorkflowSessionData | null = conversation.workflowSession
+      ? {
+          currentStepCode: conversation.workflowSession.currentStep.code,
+          currentStepName: conversation.workflowSession.currentStep.name,
+          agentInstructions: conversation.workflowSession.currentStep.agentInstructions,
+          allowedTools: conversation.workflowSession.currentStep.allowedTools,
+          data: conversation.workflowSession.data,
+        }
+      : null
 
-  // Determine allowed tools for this step
-  const stepAllowedTools = conversation.workflowSession?.currentStep.allowedTools ?? []
+    // Determine allowed tools for this step
+    const stepAllowedTools = conversation.workflowSession?.currentStep.allowedTools ?? []
 
-  const sections = await loadAllSections({
-    agentConfig: { systemPrompt: agentConfig.systemPrompt, constraints: agentConfig.constraints },
-    allowedTools: stepAllowedTools,
-    productId: state.productId,
-    conversationId: state.conversationId,
-    customerId: state.customerId,
-    workflowSession: workflowSessionData,
-    workflowStepCode: state.workflowStepCode,
-    situationalBriefing,
-    language: state.language,
-  })
+    sections = await loadAllSections({
+      agentConfig: { systemPrompt: agentConfig.systemPrompt, constraints: agentConfig.constraints },
+      allowedTools: stepAllowedTools,
+      productId: state.productId,
+      conversationId: state.conversationId,
+      customerId: state.customerId,
+      workflowSession: workflowSessionData,
+      workflowStepCode: state.workflowStepCode,
+      situationalBriefing,
+      language: state.language,
+    })
+  } catch (err) {
+    logWarn({
+      layer: 'orchestrator',
+      category: 'db_error',
+      message: 'Context assembly failed, using minimal context',
+      context: { conversationId: state.conversationId },
+      error: err,
+    })
+    // Minimal fallback — identity and constraints only
+    sections = {
+      agentIdentity: agentConfig.systemPrompt,
+      capabilityManifest: null,
+      constraints: agentConfig.constraints,
+      situationalBriefing: null,
+      customerMemory: null,
+      agentKnowledge: null,
+      customerContext: null,
+      coachingBriefing: null,
+      workflowInstructions: null,
+      questionnaireContext: null,
+      productContext: null,
+    }
+  }
 
   state.provider = agentConfig.provider
   state.model = agentConfig.model
@@ -401,11 +477,27 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // =============================================
   const step5Start = Date.now()
 
-  const { messages: windowMessages, summaryPrefix } = await buildSlidingWindow(
-    state.conversationId,
-    state.messageCount,
-    availableTokenBudget,
-  )
+  let windowMessages: Message[]
+  let summaryPrefix: string | null
+  try {
+    const windowResult = await buildSlidingWindow(
+      state.conversationId,
+      state.messageCount,
+      availableTokenBudget,
+    )
+    windowMessages = windowResult.messages
+    summaryPrefix = windowResult.summaryPrefix
+  } catch (err) {
+    logWarn({
+      layer: 'orchestrator',
+      category: 'db_error',
+      message: 'Sliding window failed, using empty window',
+      context: { conversationId: state.conversationId },
+      error: err,
+    })
+    windowMessages = []
+    summaryPrefix = null
+  }
 
   state.phases['step5_sliding_window'] = Date.now() - step5Start
 
@@ -567,6 +659,50 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
             toolChoice: toolChoice === 'none' ? undefined : toolChoice,
             overrideSystemPrompt: systemPrompt,
           })
+        } else if (err instanceof CircuitOpenError) {
+          // Queued retry with backoff: 5s, 10s, 20s
+          yield { event: 'status', data: { type: 'processing', message: 'Un moment, reconectez...' } }
+
+          const retryDelays = [5_000, 10_000, 20_000]
+          let retrySucceeded = false
+
+          for (const delay of retryDelays) {
+            await new Promise((r) => setTimeout(r, delay))
+            try {
+              stream = await gateway.stream('main-chat', {
+                messages,
+                tools: toolChoice === 'none' ? undefined : tools,
+                toolChoice: toolChoice === 'none' ? undefined : toolChoice,
+                overrideSystemPrompt: systemPrompt,
+              })
+              retrySucceeded = true
+              break
+            } catch (retryErr) {
+              if (!(retryErr instanceof CircuitOpenError)) {
+                throw retryErr
+              }
+              // CircuitOpenError — try next delay
+            }
+          }
+
+          if (!retrySucceeded) {
+            const errorId = logError({
+              layer: 'orchestrator',
+              category: 'circuit_open',
+              message: 'All providers unavailable after queued retry',
+              context: { conversationId: state.conversationId },
+            })
+            yield {
+              event: 'error',
+              data: {
+                errorId,
+                type: 'service_unavailable',
+                message: 'Zeno este temporar indisponibil. Te rugăm să încerci din nou în câteva minute.',
+                retryable: true,
+              },
+            }
+            break
+          }
         } else {
           throw err
         }
@@ -575,7 +711,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       let roundContent = ''
       let roundToolCalls: ToolCall[] = []
 
-      for await (const chunk of stream) {
+      for await (const chunk of stream!) {
         if (chunk.type === 'content' && chunk.content) {
           roundContent += chunk.content
           yield { event: 'content', data: { text: chunk.content } }
@@ -735,24 +871,35 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // =============================================
   const step8Start = Date.now()
 
-  const assistantRecord = await prisma.message.create({
-    data: {
-      conversationId: state.conversationId,
-      role: 'assistant',
-      content: finalContent,
-      tokenCount: state.totalOutputTokens || null,
-    },
-  })
+  try {
+    const assistantRecord = await prisma.message.create({
+      data: {
+        conversationId: state.conversationId,
+        role: 'assistant',
+        content: finalContent,
+        tokenCount: state.totalOutputTokens || null,
+      },
+    })
 
-  await prisma.conversation.update({
-    where: { id: state.conversationId },
-    data: {
-      messageCount: { increment: 1 },
-      lastActivityAt: new Date(),
-    },
-  })
-  state.messageCount += 1
-  state.savedMessageId = assistantRecord.id
+    await prisma.conversation.update({
+      where: { id: state.conversationId },
+      data: {
+        messageCount: { increment: 1 },
+        lastActivityAt: new Date(),
+      },
+    })
+    state.messageCount += 1
+    state.savedMessageId = assistantRecord.id
+  } catch (err) {
+    logError({
+      layer: 'orchestrator',
+      category: 'db_error',
+      message: 'Failed to save assistant message',
+      context: { conversationId: state.conversationId },
+      error: err,
+    })
+    // Don't yield error — response already streamed to user
+  }
   state.phases['step8_save_assistant'] = Date.now() - step8Start
 
   // =============================================
