@@ -9,6 +9,8 @@ import type { LLMProviderInterface } from './types'
 import { OpenAIProvider } from './openai'
 import { AnthropicProvider } from './anthropic'
 import { LLMError, classifyError, isRetryable, shouldFailover } from '@/lib/llm/errors'
+import { CircuitBreaker } from '@/lib/errors/circuit-breaker'
+import { CircuitOpenError } from '@/lib/errors/types'
 import { logWarn } from '@/lib/errors/logger'
 
 // ==============================================
@@ -46,6 +48,41 @@ export function getProvider(name: string): LLMProviderInterface {
 }
 
 // ==============================================
+// CIRCUIT BREAKERS (per provider)
+// ==============================================
+
+const providerCircuits = new Map<string, CircuitBreaker>()
+
+function getProviderCircuit(name: string): CircuitBreaker {
+  let cb = providerCircuits.get(name)
+  if (!cb) {
+    cb = new CircuitBreaker({
+      name: `provider:${name}`,
+      failureThreshold: 5,
+      resetTimeoutMs: 30_000,
+      monitorWindowMs: 60_000,
+    })
+    providerCircuits.set(name, cb)
+  }
+  return cb
+}
+
+// ==============================================
+// ADAPTIVE BACKOFF
+// ==============================================
+
+const BASE_DELAY_MS = 500
+const MAX_DELAY_MS = 10_000
+const MAX_JITTER_MS = 500
+
+export function calculateBackoff(attempt: number, retryAfterMs?: number): number {
+  if (retryAfterMs !== undefined) return retryAfterMs
+  const exponential = Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_DELAY_MS)
+  const jitter = Math.floor(Math.random() * MAX_JITTER_MS)
+  return exponential + jitter
+}
+
+// ==============================================
 // FAILOVER
 // ==============================================
 
@@ -68,31 +105,66 @@ export async function callWithFailover<T>(
   fn: (provider: LLMProviderInterface, model: string) => Promise<T>,
 ): Promise<T> {
   let lastError: unknown
+  const primaryName = primary.model.split('/')[0] ?? primary.model
+  const primaryCircuit = getProviderCircuit(primaryName)
 
-  // Attempt primary with retries
-  try {
-    return await executeWithRetries(
-      () => fn(primary.provider, primary.model),
-      2,         // maxRetries
-      [1000, 3000], // backoff delays
-    )
-  } catch (err) {
-    lastError = err
-    const errorClass = classifyError(err)
+  // Skip primary entirely if its circuit is open
+  if (primaryCircuit.state !== 'open') {
+    try {
+      return await primaryCircuit.execute(() =>
+        executeWithRetries(
+          () => fn(primary.provider, primary.model),
+          2, // maxRetries
+        ),
+      )
+    } catch (err) {
+      lastError = err
+      const errorClass = classifyError(err)
 
-    // If should failover and we have a fallback, try it
-    if (shouldFailover(errorClass) && fallback) {
-      logWarn({
-        layer: 'gateway',
-        category: 'failover',
-        message: `Primary provider down, failing over to fallback`,
-        context: { fallbackModel: fallback.model },
-      })
-      try {
-        return await fn(fallback.provider, fallback.model)
-      } catch (fallbackErr) {
-        lastError = fallbackErr
+      // If should failover and we have a fallback, try it
+      if (shouldFailover(errorClass) && fallback) {
+        logWarn({
+          layer: 'gateway',
+          category: 'failover',
+          message: `Primary provider down, failing over to fallback`,
+          context: { fallbackModel: fallback.model },
+        })
+      } else if (!fallback) {
+        throw new LLMError(
+          `All LLM providers failed`,
+          errorClass,
+          'registry',
+          undefined,
+          lastError,
+        )
+      } else {
+        throw err
       }
+    }
+  } else {
+    logWarn({
+      layer: 'gateway',
+      category: 'circuit_open',
+      message: `Primary provider circuit open, skipping to fallback`,
+      context: { provider: primaryName },
+    })
+  }
+
+  // Attempt fallback
+  if (fallback) {
+    const fallbackName = fallback.model.split('/')[0] ?? fallback.model
+    const fallbackCircuit = getProviderCircuit(fallbackName)
+
+    if (fallbackCircuit.state === 'open') {
+      throw new CircuitOpenError('all-providers')
+    }
+
+    try {
+      return await fallbackCircuit.execute(() =>
+        fn(fallback.provider, fallback.model),
+      )
+    } catch (fallbackErr) {
+      lastError = fallbackErr
     }
   }
 
@@ -113,7 +185,6 @@ export async function callWithFailover<T>(
 async function executeWithRetries<T>(
   fn: () => Promise<T>,
   maxRetries: number,
-  delays: number[],
 ): Promise<T> {
   let lastError: unknown
 
@@ -130,7 +201,16 @@ async function executeWithRetries<T>(
 
   // Retry attempts
   for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const delay = delays[attempt] ?? delays[delays.length - 1]
+    const retryAfterMs = extractRetryAfter(lastError)
+    const delay = calculateBackoff(attempt, retryAfterMs)
+
+    logWarn({
+      layer: 'gateway',
+      category: 'retry',
+      message: `Retrying after ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
+      context: { attempt, delay, retryAfterMs },
+    })
+
     await sleep(delay)
 
     try {
@@ -146,6 +226,32 @@ async function executeWithRetries<T>(
 
   // Retries exhausted
   throw lastError
+}
+
+/**
+ * Try to extract a retry-after value (in ms) from an error's headers.
+ * Both OpenAI and Anthropic SDK errors may include headers on the error object.
+ */
+function extractRetryAfter(error: unknown): number | undefined {
+  if (error === null || typeof error !== 'object') return undefined
+
+  const err = error as Record<string, unknown>
+
+  // Check for headers object (OpenAI/Anthropic SDK errors)
+  const headers = err.headers
+  if (headers && typeof headers === 'object') {
+    const h = headers as Record<string, unknown>
+    const retryAfter = h['retry-after']
+    if (typeof retryAfter === 'string') {
+      const seconds = parseFloat(retryAfter)
+      if (!isNaN(seconds)) return Math.ceil(seconds * 1000)
+    }
+    if (typeof retryAfter === 'number') {
+      return Math.ceil(retryAfter * 1000)
+    }
+  }
+
+  return undefined
 }
 
 function sleep(ms: number): Promise<void> {
