@@ -26,6 +26,7 @@ import type {
   ToolChoice,
   ReasoningConfig,
 } from './types'
+import { logWarn } from '@/lib/errors/logger'
 
 // ==============================================
 // MODEL QUIRKS
@@ -75,7 +76,11 @@ export class OpenAIProvider implements LLMProviderInterface {
   constructor() {
     const apiKey = process.env.OPENAI_API_KEY
     if (!apiKey) {
-      console.warn('[OpenAI] No API key configured. Set OPENAI_API_KEY.')
+      logWarn({
+        layer: 'provider',
+        category: 'config',
+        message: 'No API key configured. Set OPENAI_API_KEY.',
+      })
     }
 
     this.client = new OpenAI({

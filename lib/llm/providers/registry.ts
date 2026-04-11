@@ -9,6 +9,7 @@ import type { LLMProviderInterface } from './types'
 import { OpenAIProvider } from './openai'
 import { AnthropicProvider } from './anthropic'
 import { LLMError, classifyError, isRetryable, shouldFailover } from '@/lib/llm/errors'
+import { logWarn } from '@/lib/errors/logger'
 
 // ==============================================
 // PROVIDER REGISTRY
@@ -81,9 +82,12 @@ export async function callWithFailover<T>(
 
     // If should failover and we have a fallback, try it
     if (shouldFailover(errorClass) && fallback) {
-      console.warn(
-        `[Registry] Primary provider down, failing over to fallback (model: ${fallback.model})`,
-      )
+      logWarn({
+        layer: 'gateway',
+        category: 'failover',
+        message: `Primary provider down, failing over to fallback`,
+        context: { fallbackModel: fallback.model },
+      })
       try {
         return await fn(fallback.provider, fallback.model)
       } catch (fallbackErr) {

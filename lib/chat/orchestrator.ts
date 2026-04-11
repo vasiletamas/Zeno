@@ -32,6 +32,7 @@ import { trackChatStarted } from '@/lib/analytics/events'
 import { estimateTokens, calculateMessageBudget } from '@/lib/chat/token-budget'
 import { compactMessages } from '@/lib/chat/compaction'
 import { isContextLengthError, parseTokenDeficit } from '@/lib/llm/errors'
+import { logError, logWarn } from '@/lib/errors/logger'
 
 // ==============================================
 // CONSTANTS
@@ -314,7 +315,13 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       }
     } catch (err: unknown) {
       // Reasoning gate failure is non-fatal: use defaults
-      console.warn('[Orchestrator] Reasoning gate failed, using defaults:', err)
+      logWarn({
+        layer: 'orchestrator',
+        category: 'reasoning_gate',
+        message: 'Reasoning gate failed, using defaults',
+        context: { conversationId: state.conversationId },
+        error: err,
+      })
       gateSelection = { requiredSections: [], excludedSections: [], confidence: 0 }
       state.phases['reasoningGate'] = {
         durationMs: Date.now() - gateStart,
@@ -619,7 +626,13 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
                   workflowId: toolContext.workflowSession.workflowId,
                 }
               : null,
-          ).catch((err: unknown) => console.error('[Orchestrator] Background tool error:', err))
+          ).catch((err: unknown) => logError({
+            layer: 'orchestrator',
+            category: 'background_tool',
+            message: 'Background tool execution failed',
+            context: { conversationId: state.conversationId, tool: tc.name },
+            error: err,
+          }))
 
           // Add a placeholder tool result so the LLM loop continues
           messages.push({
@@ -795,7 +808,13 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           }
         }
       } catch (e) {
-        console.error('[Orchestrator] Profile extractor failed:', e)
+        logError({
+          layer: 'orchestrator',
+          category: 'profile_extractor',
+          message: 'Profile extractor failed',
+          context: { customerId: state.customerId, conversationId: state.conversationId },
+          error: e,
+        })
       }
     })()
   }
@@ -832,7 +851,13 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       model: state.model,
     },
   }).catch((err: unknown) => {
-    console.error('[Orchestrator] TurnTrace write error:', err)
+    logError({
+      layer: 'orchestrator',
+      category: 'turn_trace',
+      message: 'TurnTrace write error',
+      context: { conversationId: state.conversationId },
+      error: err,
+    })
   })
 
   // =============================================

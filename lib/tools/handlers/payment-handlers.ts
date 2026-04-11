@@ -9,6 +9,7 @@
 import { prisma } from '@/lib/db'
 import { getPaymentProvider } from '@/lib/payments'
 import type { ToolHandler, ToolResult } from '@/lib/tools/types'
+import { logError } from '@/lib/errors/logger'
 
 /**
  * initiate_payment — Creates a payment intent and returns the PaymentCard UI.
@@ -175,7 +176,13 @@ export const initiatePayment: ToolHandler = async (
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
-    console.error('[initiatePayment] Error:', message)
+    logError({
+      layer: 'tool',
+      category: 'initiate_payment',
+      message: `Payment initiation failed: ${message}`,
+      context: { conversationId: context.conversationId, customerId: context.customerId },
+      error,
+    })
     return {
       success: false,
       error: `Failed to initiate payment: ${message}`,

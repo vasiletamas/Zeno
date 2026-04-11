@@ -9,6 +9,7 @@ import type { ToolContext, ToolResult, UserRole } from './types'
 import { getToolHandler, getToolDefinition } from './registry'
 import { validateToolArgs } from './validation'
 import { checkPermission } from './permissions'
+import { logError } from '@/lib/errors/logger'
 
 /**
  * Execute a single tool by name.
@@ -75,7 +76,13 @@ export async function executeTool(
     return result
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Tool execution failed'
-    console.error(`[ToolExecutor] ${name} threw:`, err)
+    logError({
+      layer: 'tool',
+      category: 'executor',
+      message: `Tool "${name}" threw during execution`,
+      context: { toolName: name },
+      error: err,
+    })
     return {
       success: false,
       error: message,

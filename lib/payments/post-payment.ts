@@ -18,6 +18,7 @@ import { getEmailProvider } from '@/lib/email'
 import { purchaseConfirmationEmail } from '@/lib/email/templates/purchase-confirmation'
 import { generateDntReport } from '@/lib/compliance/dnt-report'
 import { trackPaymentCompleted } from '@/lib/analytics/events'
+import { logError } from '@/lib/errors/logger'
 
 export async function runPostPaymentFlow(
   paymentId: string,
@@ -73,10 +74,13 @@ export async function runPostPaymentFlow(
     console.log(`[PostPayment] DNT report generated for policy ${policy.id}`)
   } catch (error) {
     // PDF failure must not block the payment flow
-    console.error(
-      `[PostPayment] DNT report generation failed for policy ${policy.id}:`,
-      error instanceof Error ? error.message : error,
-    )
+    logError({
+      layer: 'tool',
+      category: 'post_payment',
+      message: `DNT report generation failed for policy ${policy.id}`,
+      context: { policyId: policy.id, paymentId },
+      error,
+    })
   }
 
   // ─── Step 4: Generate magic link ───────────────────────────
@@ -150,10 +154,13 @@ export async function runPostPaymentFlow(
       console.log(`[PostPayment] Email sent to ${customer.email} for payment ${paymentId}`)
     } catch (error) {
       // Email failure: log and continue. Payment already succeeded.
-      console.error(
-        `[PostPayment] Failed to send email for payment ${paymentId}:`,
-        error instanceof Error ? error.message : error,
-      )
+      logError({
+        layer: 'tool',
+        category: 'post_payment',
+        message: `Failed to send confirmation email for payment ${paymentId}`,
+        context: { paymentId, customerId: customer.id, email: customer.email },
+        error,
+      })
     }
   } else {
     console.log(`[PostPayment] No email on file for customer ${customer.id}, skipping email`)

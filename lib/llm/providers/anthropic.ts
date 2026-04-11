@@ -34,6 +34,7 @@ import type {
   LLMToolDefinition,
   ToolChoice,
 } from './types'
+import { logWarn } from '@/lib/errors/logger'
 
 // ==============================================
 // ANTHROPIC PROVIDER
@@ -45,7 +46,11 @@ export class AnthropicProvider implements LLMProviderInterface {
   constructor() {
     const apiKey = process.env.ANTHROPIC_API_KEY
     if (!apiKey) {
-      console.warn('[Anthropic] No API key configured. Set ANTHROPIC_API_KEY.')
+      logWarn({
+        layer: 'provider',
+        category: 'config',
+        message: 'No API key configured. Set ANTHROPIC_API_KEY.',
+      })
     }
 
     this.client = new Anthropic({

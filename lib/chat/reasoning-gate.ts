@@ -13,6 +13,7 @@
  */
 
 import { gateway } from '@/lib/llm/gateway'
+import { logWarn } from '@/lib/errors/logger'
 
 // ==============================================
 // TYPES
@@ -297,10 +298,12 @@ export async function executeReasoningGate(
 
     return parseGateResponse(response.content)
   } catch (err: unknown) {
-    console.warn(
-      '[Reasoning Gate] Failed, using fallback:',
-      err instanceof Error ? err.message : err,
-    )
+    logWarn({
+      layer: 'orchestrator',
+      category: 'reasoning_gate',
+      message: 'Reasoning gate failed, using fallback',
+      error: err,
+    })
     return { ...FALLBACK_OUTPUT }
   }
 }
