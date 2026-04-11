@@ -314,7 +314,7 @@ interface AgentDef {
   temperature: number
   maxTokens: number
   systemPrompt: string
-  constraints: string
+  constraints: string | null
 }
 
 const AGENTS: AgentDef[] = [
