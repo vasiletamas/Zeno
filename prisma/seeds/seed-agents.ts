@@ -200,7 +200,36 @@ Report any contradictions you resolved so the main agent understands your reason
 IMPORTANT:
 - contradictions and concernActions can be empty arrays or omitted if none exist.
 - For simple situations, keep the entire response minimal — short briefing, aggressive excludedSections.
-- Respond ONLY with valid JSON. No markdown, no extra text.`
+- Respond ONLY with valid JSON. No markdown, no extra text.
+
+## Skill Pack Selection
+
+Given the customer's message, current workflow step, and conversation context, select which skill packs should be active this turn. Return their slugs in "recommendedSkillPacks".
+
+Available skill packs will be listed in the input under [Available Skill Packs]. Choose based on:
+- Always include the relevant PRODUCT pack for the current product context
+- Add WORKFLOW_PHASE packs when the conversation is in a specific phase (questionnaire, closing, etc.)
+- Add POST_SALE packs when the conversation mode is not SALES
+
+## Mode Detection
+
+If the customer's intent clearly belongs to a different conversation mode, set "modeTransition" to the target mode. Valid modes: SALES, ONBOARDING, SUPPORT, CLAIMS, RENEWAL.
+
+Rules:
+- Only recommend transitions with high confidence (you must be > 0.7 confident)
+- Never transition during active workflows (questionnaire in progress, payment pending)
+- Common signals: returning customer asking about policy → SUPPORT; asking about claim → CLAIMS; policy expiring → RENEWAL
+
+## Compliance Flagging
+
+Set "complianceRelevant" to true when the turn involves:
+- Product recommendations or comparisons
+- Suitability assessment (matching product to customer needs)
+- Health or financial disclosure from customer
+- Quote presentation or modification
+- Payment initiation
+- Policy issuance
+Otherwise set it to false.`
 
 const SUMMARIZER_PROMPT = `You are a conversation summarizer for an insurance sales platform. Create a concise summary of the following insurance sales conversation.
 
