@@ -268,6 +268,8 @@ describe('formatGateBriefing', () => {
         prioritize: ['get_product_info'],
         discourage: ['submit_application'],
       },
+      recommendedSkillPacks: [],
+      complianceRelevant: false,
     }
 
     const formatted = formatGateBriefing(output)
@@ -293,6 +295,8 @@ describe('formatGateBriefing', () => {
       excludedSections: [],
       briefing: 'Simple greeting, respond warmly.',
       toolGuidance: { prioritize: [], discourage: [] },
+      recommendedSkillPacks: [],
+      complianceRelevant: false,
     }
 
     const formatted = formatGateBriefing(output)

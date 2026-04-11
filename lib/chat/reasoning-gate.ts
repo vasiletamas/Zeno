@@ -41,6 +41,10 @@ export interface ReasoningGateInput {
     quoteValue: number | null
     hasPolicy: boolean
   }
+  // Agent Extensibility fields (sub-project #4)
+  currentMode?: string
+  availableSkillPacks?: { slug: string; description: string }[]
+  activeSkillPacks?: string[]
 }
 
 export interface ReasoningGateOutput {
@@ -59,6 +63,10 @@ export interface ReasoningGateOutput {
   briefing: string
   toolGuidance: { prioritize: string[]; discourage: string[] }
   knowledgeGaps?: string[]
+  // New fields for Agent Extensibility (sub-project #4)
+  recommendedSkillPacks: string[]
+  modeTransition?: string
+  complianceRelevant: boolean
 }
 
 // ==============================================
@@ -75,6 +83,8 @@ const FALLBACK_OUTPUT: ReasoningGateOutput = {
   excludedSections: [],
   briefing: '',
   toolGuidance: { prioritize: [], discourage: [] },
+  recommendedSkillPacks: [],
+  complianceRelevant: false,
 }
 
 // ==============================================
@@ -141,6 +151,23 @@ export function buildGateContextMessage(input: ReasoningGateInput): string {
   parts.push(
     `BUSINESS STATE: ${stateParts.length > 0 ? stateParts.join(' | ') : 'none'}`,
   )
+
+  // Conversation mode and skill packs (Agent Extensibility sub-project #4)
+  if (input.currentMode) {
+    parts.push(`\n[Conversation Mode] ${input.currentMode}`)
+  }
+
+  if (input.activeSkillPacks && input.activeSkillPacks.length > 0) {
+    parts.push(`[Active Skill Packs] ${input.activeSkillPacks.join(', ')}`)
+  }
+
+  if (input.availableSkillPacks && input.availableSkillPacks.length > 0) {
+    parts.push(
+      `[Available Skill Packs]\n${input.availableSkillPacks
+        .map((p) => `- ${p.slug}: ${p.description}`)
+        .join('\n')}`,
+    )
+  }
 
   // Current message (last for recency)
   parts.push(`\nCURRENT CUSTOMER MESSAGE: ${input.lastUserMessage}`)
@@ -254,6 +281,20 @@ function parseGateResponse(content: string): ReasoningGateOutput {
       )
     : undefined
 
+  // Parse recommended skill packs
+  const recommendedSkillPacks = Array.isArray(parsed.recommendedSkillPacks)
+    ? parsed.recommendedSkillPacks.filter((s: unknown) => typeof s === 'string')
+    : []
+
+  // Parse mode transition (optional)
+  const modeTransition =
+    typeof parsed.modeTransition === 'string'
+      ? parsed.modeTransition
+      : undefined
+
+  // Parse compliance relevant flag
+  const complianceRelevant = parsed.complianceRelevant === true
+
   return {
     situationType:
       typeof parsed.situationType === 'string'
@@ -271,6 +312,9 @@ function parseGateResponse(content: string): ReasoningGateOutput {
     toolGuidance,
     knowledgeGaps:
       knowledgeGaps && knowledgeGaps.length > 0 ? knowledgeGaps : undefined,
+    recommendedSkillPacks,
+    modeTransition,
+    complianceRelevant,
   }
 }
 
