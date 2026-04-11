@@ -56,6 +56,10 @@ export function getAllToolNames(): string[] {
   return Array.from(definitions.keys())
 }
 
+export function getRegisteredToolNames(): string[] {
+  return Array.from(definitions.keys()).sort()
+}
+
 export function isAlwaysAllowed(name: string): boolean {
   return definitions.get(name)?.alwaysAllowed ?? false
 }

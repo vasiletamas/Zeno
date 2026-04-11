@@ -9,6 +9,7 @@ import {
   MessageCircle,
   Settings,
   Users,
+  Layers,
   Menu,
   X,
 } from 'lucide-react'
@@ -24,6 +25,7 @@ const NAV_ITEMS = [
   { href: '/admin/policies', label: 'Polite', icon: Shield, adminOnly: false },
   { href: '/admin/conversations', label: 'Conversatii', icon: MessageCircle, adminOnly: true },
   { href: '/admin/agents', label: 'Agenti AI', icon: Settings, adminOnly: true },
+  { href: '/admin/skill-packs', label: 'Skill Packs', icon: Layers, adminOnly: true },
   { href: '/admin/users', label: 'Utilizatori', icon: Users, adminOnly: true },
 ]
 
