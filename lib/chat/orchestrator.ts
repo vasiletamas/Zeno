@@ -58,6 +58,38 @@ async function withPipelineTimeout<T>(
 }
 
 // ==============================================
+// TOOL CALL PARTITIONING
+// ==============================================
+
+/**
+ * Partition tool calls into three groups for execution ordering.
+ * - readOnly: sideEffects=false — can run in parallel
+ * - writing: sideEffects=true (default) — must run sequentially
+ * - background: executionMode='background' — fire-and-forget
+ */
+export function partitionToolCalls(
+  toolCalls: ToolCall[],
+): { readOnly: ToolCall[]; writing: ToolCall[]; background: ToolCall[] } {
+  const readOnly: ToolCall[] = []
+  const writing: ToolCall[] = []
+  const background: ToolCall[] = []
+
+  for (const tc of toolCalls) {
+    const def = getToolDefinition(tc.name)
+
+    if (def?.executionMode === 'background') {
+      background.push(tc)
+    } else if (def?.sideEffects === false) {
+      readOnly.push(tc)
+    } else {
+      writing.push(tc)
+    }
+  }
+
+  return { readOnly, writing, background }
+}
+
+// ==============================================
 // INPUT TYPE
 // ==============================================
 
@@ -742,44 +774,96 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       }
       messages.push(assistantMsg)
 
-      let transitionOccurred = false
+      // Partition tool calls into execution groups
+      const { readOnly, writing, background } = partitionToolCalls(roundToolCalls)
 
-      for (const tc of roundToolCalls) {
-        const def = getToolDefinition(tc.name)
-        const isBlocking = def?.executionMode === 'blocking'
-        const isBackground = def?.executionMode === 'background'
+      // Results map to preserve original order for message history
+      const resultMap = new Map<string, { pipelineResult: PipelineResult; def: ReturnType<typeof getToolDefinition> }>()
 
-        if (isBackground) {
-          // Fire-and-forget for background tools
-          void executeToolWithPipeline(
-            tc.name,
-            tc.arguments,
-            toolContext,
-            toolContext.workflowSession
-              ? {
-                  id: toolContext.workflowSession.id,
-                  currentStepId: toolContext.workflowSession.currentStepId,
-                  workflowId: toolContext.workflowSession.workflowId,
-                }
-              : null,
-          ).catch((err: unknown) => logError({
-            layer: 'orchestrator',
-            category: 'background_tool',
-            message: 'Background tool execution failed',
-            context: { conversationId: state.conversationId, tool: tc.name },
-            error: err,
-          }))
+      // --- Phase 0: Fire-and-forget background tools ---
+      for (const tc of background) {
+        void executeToolWithPipeline(
+          tc.name,
+          tc.arguments,
+          toolContext,
+          toolContext.workflowSession
+            ? {
+                id: toolContext.workflowSession.id,
+                currentStepId: toolContext.workflowSession.currentStepId,
+                workflowId: toolContext.workflowSession.workflowId,
+              }
+            : null,
+        ).catch((err: unknown) => logError({
+          layer: 'orchestrator',
+          category: 'background_tool',
+          message: 'Background tool execution failed',
+          context: { conversationId: state.conversationId, tool: tc.name },
+          error: err,
+        }))
 
-          // Add a placeholder tool result so the LLM loop continues
-          messages.push({
-            role: 'tool',
-            content: JSON.stringify({ success: true, message: 'Processing in background.' }),
-            toolCallId: tc.id,
-          })
-          continue
+        resultMap.set(tc.id, {
+          pipelineResult: { toolResult: { success: true, message: 'Processing in background.' } },
+          def: getToolDefinition(tc.name),
+        })
+      }
+
+      // --- Phase 1: Execute read-only tools in parallel ---
+      if (readOnly.length > 0) {
+        for (const tc of readOnly) {
+          const def = getToolDefinition(tc.name)
+          if (def?.executionMode === 'blocking' && def?.statusMessage) {
+            const status = pickStatusMessage(def.statusMessage, state.language, lastStatusMessage)
+            if (status) {
+              lastStatusMessage = status
+              yield { event: 'tool_start', data: { tool: tc.name, status } }
+            }
+          }
         }
 
-        // Blocking tool execution
+        const parallelResults = await Promise.all(
+          readOnly.map(async (tc) => {
+            try {
+              return await executeToolWithPipeline(
+                tc.name,
+                tc.arguments,
+                toolContext,
+                toolContext.workflowSession
+                  ? {
+                      id: toolContext.workflowSession.id,
+                      currentStepId: toolContext.workflowSession.currentStepId,
+                      workflowId: toolContext.workflowSession.workflowId,
+                    }
+                  : null,
+              )
+            } catch (err: unknown) {
+              const errMsg = err instanceof Error ? err.message : 'Tool execution failed'
+              return { toolResult: { success: false, error: errMsg } } as PipelineResult
+            }
+          }),
+        )
+
+        for (let i = 0; i < readOnly.length; i++) {
+          const tc = readOnly[i]
+          const pipelineResult = parallelResults[i]
+          const def = getToolDefinition(tc.name)
+          resultMap.set(tc.id, { pipelineResult, def })
+
+          if (def?.executionMode === 'blocking') {
+            yield {
+              event: 'tool_complete',
+              data: { tool: tc.name, success: pipelineResult.toolResult.success },
+            }
+          }
+        }
+      }
+
+      // --- Phase 2: Execute writing tools sequentially ---
+      let transitionOccurred = false
+
+      for (const tc of writing) {
+        const def = getToolDefinition(tc.name)
+        const isBlocking = def?.executionMode === 'blocking'
+
         if (isBlocking && def?.statusMessage) {
           const status = pickStatusMessage(def.statusMessage, state.language, lastStatusMessage)
           if (status) {
@@ -809,12 +893,26 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           }
         }
 
+        resultMap.set(tc.id, { pipelineResult, def })
+
         if (isBlocking) {
           yield {
             event: 'tool_complete',
             data: { tool: tc.name, success: pipelineResult.toolResult.success },
           }
         }
+
+        if (pipelineResult.transition) {
+          transitionOccurred = true
+        }
+      }
+
+      // --- Emit results in original tool call order ---
+      for (const tc of roundToolCalls) {
+        const entry = resultMap.get(tc.id)
+        if (!entry) continue
+
+        const { pipelineResult } = entry
 
         if (pipelineResult.toolResult.uiAction) {
           yield {
@@ -823,7 +921,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           }
         }
 
-        // Add tool result message
         messages.push({
           role: 'tool',
           content: JSON.stringify({
@@ -835,9 +932,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           toolCallId: tc.id,
         })
 
-        // Handle workflow transitions
         if (pipelineResult.transition) {
-          transitionOccurred = true
           const trParts = [
             `[Workflow Transition]`,
             `Previous step: "${pipelineResult.transition.previousStepCode}"`,
