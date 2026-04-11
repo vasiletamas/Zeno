@@ -463,6 +463,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       agentIdentity: agentConfig.systemPrompt,
       capabilityManifest: null,
       constraints: agentConfig.constraints,
+      complianceGuidance: null,
       situationalBriefing: null,
       customerMemory: null,
       agentKnowledge: null,

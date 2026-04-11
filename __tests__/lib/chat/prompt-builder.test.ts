@@ -18,6 +18,7 @@ function makeSections(
     agentIdentity: 'You are Zeno, an AI insurance agent.',
     capabilityManifest: 'I can help you find the right policy.',
     constraints: 'Never give medical advice.',
+    complianceGuidance: null,
     situationalBriefing: 'Customer is asking about pricing.',
     customerMemory: null,
     agentKnowledge: null,

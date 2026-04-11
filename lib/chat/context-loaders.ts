@@ -631,6 +631,7 @@ export async function loadAllSections(params: {
     agentIdentity,
     capabilityManifest,
     constraints,
+    complianceGuidance: null, // injected by orchestrator when compliance checker runs
     situationalBriefing,
     customerMemory,
     agentKnowledge,
