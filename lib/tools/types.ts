@@ -94,4 +94,5 @@ export interface PipelineResult {
     newStepInstructions: string | null
     newStepAutoTool: string | null
   }
+  transitionError?: boolean
 }

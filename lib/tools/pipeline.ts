@@ -16,6 +16,7 @@ import type { ToolContext, ToolResult, PipelineResult } from './types'
 import { isAlwaysAllowed, getToolDefinition } from './registry'
 import { executeTool } from './executor'
 import { prisma } from '@/lib/db'
+import { logError, logWarn } from '@/lib/errors/logger'
 
 // ==============================================
 // WORKFLOW SESSION TYPE (minimal, for pipeline input)
@@ -83,8 +84,14 @@ export async function executeToolWithPipeline(
     return { toolResult, transition: transition ?? undefined }
   } catch (err: unknown) {
     // Transition evaluation errors must not fail the tool result
-    console.error('[Pipeline] Transition evaluation error:', err)
-    return { toolResult }
+    logError({
+      layer: 'tool',
+      category: 'transition_error',
+      message: `Transition evaluation failed after tool "${name}"`,
+      context: { toolName: name },
+      error: err,
+    })
+    return { toolResult, transitionError: true }
   }
 }
 
@@ -128,9 +135,15 @@ async function checkWorkflowGate(
       reason: `Tool "${toolName}" is not allowed at step "${step.code}". Allowed: ${step.allowedTools.join(', ')}.`,
     }
   } catch (err: unknown) {
-    console.error('[Pipeline] Gate check error:', err)
-    // On DB error, allow through to avoid blocking the conversation
-    return { allowed: true }
+    logError({
+      layer: 'tool',
+      category: 'db_error',
+      message: `Workflow gate check failed for tool "${toolName}"`,
+      context: { toolName, currentStepId },
+      error: err,
+    })
+    // On DB error, deny access — fail closed for security
+    return { allowed: false }
   }
 }
 
