@@ -24,10 +24,13 @@ import { executeToolWithPipeline } from '@/lib/tools/pipeline'
 import { buildToolContext } from './context-builder'
 import { createSSEStream, pickStatusMessage, type SSEEvent } from './stream-handler'
 import type { ToolContext, PipelineResult } from '@/lib/tools/types'
-import { buildPrompt, detectFastPath, FAST_PATH_GATE, type GateSelection } from './prompt-builder'
+import { buildPrompt, detectFastPath, FAST_PATH_GATE, type GateSelection, type PromptSections } from './prompt-builder'
 import { executeReasoningGate, formatGateBriefing, type ReasoningGateInput, type ReasoningGateOutput } from './reasoning-gate'
 import { buildSlidingWindow } from './sliding-window'
 import { loadAllSections, type WorkflowSessionData } from './context-loaders'
+import { resolveAgent } from './agent-resolver'
+import { getActiveSkillPacks, mergeSkillPackSections, computeAllowedTools } from '@/lib/skills/skill-pack-loader'
+import { executeComplianceCheck, type ComplianceCheckResult } from './compliance-checker'
 import { trackChatStarted } from '@/lib/analytics/events'
 import { estimateTokens, calculateMessageBudget } from '@/lib/chat/token-budget'
 import { compactMessages } from '@/lib/chat/compaction'
@@ -120,6 +123,9 @@ interface TurnState {
   model: string | null
   startMs: number
   phases: Record<string, unknown>
+  conversationMode: string
+  activeSkillPacks: string[]
+  complianceResult: ComplianceCheckResult | null
 }
 
 // ==============================================
@@ -154,6 +160,9 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     model: null,
     startMs: Date.now(),
     phases: {},
+    conversationMode: 'SALES',
+    activeSkillPacks: [],
+    complianceResult: null,
   }
 
   // =============================================
@@ -235,6 +244,8 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   state.productId = conversation.productId
   state.workflowSessionId = conversation.workflowSession?.id ?? null
   state.workflowStepCode = conversation.workflowSession?.currentStep.code ?? null
+  state.conversationMode = (conversation.mode as string) ?? 'SALES'
+  state.activeSkillPacks = (conversation.activeSkillPacks as string[]) ?? []
   state.phases['step1_resolve'] = Date.now() - step1Start
 
   // =============================================
@@ -343,6 +354,12 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         },
       })
 
+      // Load available skill packs for gate context
+      const allSkillPacks = await prisma.skillPack.findMany({
+        where: { isActive: true },
+        select: { slug: true, description: true },
+      })
+
       // Available tools: filter by workflow step's allowed tools if applicable
       const gateStepTools = conversation.workflowSession?.currentStep.allowedTools ?? []
       const availableToolDefs = getToolsForLLM(gateStepTools.length > 0 ? gateStepTools : undefined)
@@ -382,6 +399,9 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           quoteValue: application?.quote?.premiumAnnual ?? null,
           hasPolicy: !!application?.quote?.policy,
         },
+        currentMode: state.conversationMode,
+        availableSkillPacks: allSkillPacks,
+        activeSkillPacks: state.activeSkillPacks,
       }
 
       gateOutput = await executeReasoningGate(gateInput)
@@ -420,8 +440,12 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // =============================================
   const step4Start = Date.now()
 
-  const agentConfig = await getAgentConfig('main-chat')
+  const agentSlug = resolveAgent(state.conversationMode)
+  const agentConfig = await getAgentConfig(agentSlug)
   const situationalBriefing = gateOutput ? formatGateBriefing(gateOutput) : null
+
+  // Determine allowed tools for this step (hoisted for use in skill pack scoping)
+  const stepAllowedTools = conversation.workflowSession?.currentStep.allowedTools ?? []
 
   let sections: Awaited<ReturnType<typeof loadAllSections>>
   try {
@@ -435,9 +459,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           data: conversation.workflowSession.data,
         }
       : null
-
-    // Determine allowed tools for this step
-    const stepAllowedTools = conversation.workflowSession?.currentStep.allowedTools ?? []
 
     sections = await loadAllSections({
       agentConfig: { systemPrompt: agentConfig.systemPrompt, constraints: agentConfig.constraints },
@@ -475,11 +496,78 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     }
   }
 
+  // --- Skill pack loading and merging ---
+  const recommendedSlugs = gateOutput?.recommendedSkillPacks ?? []
+  const activePacks = recommendedSlugs.length > 0
+    ? await getActiveSkillPacks(recommendedSlugs)
+    : []
+
+  state.activeSkillPacks = activePacks.map((p) => p.slug)
+
+  // Merge skill pack sections into base sections
+  const mergedSections: PromptSections = activePacks.length > 0
+    ? mergeSkillPackSections(sections as unknown as Record<string, string | null>, activePacks) as unknown as PromptSections
+    : sections
+
+  // --- Mode transition from gate output ---
+  if (
+    gateOutput?.modeTransition &&
+    gateOutput.confidence > 0.7 &&
+    gateOutput.modeTransition !== state.conversationMode
+  ) {
+    state.conversationMode = gateOutput.modeTransition
+    await prisma.conversation.update({
+      where: { id: state.conversationId },
+      data: { mode: gateOutput.modeTransition },
+    })
+  }
+
+  // --- Conditional compliance check (parallel with remaining Step 4 work) ---
+  let compliancePromise: Promise<ComplianceCheckResult> | null = null
+  if (gateOutput?.complianceRelevant) {
+    // Load recent messages for compliance check context
+    const recentForCompliance = await prisma.message.findMany({
+      where: { conversationId: state.conversationId },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      select: { role: true, content: true },
+    })
+    const complianceMessages: Message[] = recentForCompliance
+      .reverse()
+      .map((m) => ({ role: m.role as Message['role'], content: m.content }))
+
+    compliancePromise = executeComplianceCheck({
+      messages: complianceMessages,
+      workflowStepCode: state.workflowStepCode,
+      customerProfile: null,
+    }).catch(() => ({
+      passed: true as const,
+      gaps: [] as string[],
+      suggestions: [] as string[],
+    }))
+  }
+
+  if (compliancePromise) {
+    const complianceResult = await compliancePromise
+    state.complianceResult = complianceResult
+    if (!complianceResult.passed && complianceResult.gaps.length > 0) {
+      const guidanceText = [
+        '[COMPLIANCE GUIDANCE - Address before responding]',
+        'The following compliance gaps were detected:',
+        ...complianceResult.gaps.map((g) => `- ${g}`),
+        '',
+        'Suggested actions:',
+        ...complianceResult.suggestions.map((s) => `- ${s}`),
+      ].join('\n')
+      mergedSections.complianceGuidance = guidanceText
+    }
+  }
+
   state.provider = agentConfig.provider
   state.model = agentConfig.model
 
-  // Build prompt early — needed for token budget calculation
-  const buildResult = buildPrompt(sections, gateSelection)
+  // Build prompt — needed for token budget calculation
+  const buildResult = buildPrompt(mergedSections, gateSelection)
   const { prompt: systemPrompt } = buildResult
 
   state.phases['step4_context'] = Date.now() - step4Start
@@ -559,7 +647,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const step7Start = Date.now()
 
   let toolContext = await buildToolContext(state.customerId, state.conversationId, state.language)
-  const tools: LLMToolDefinition[] = getToolsForLLM()
+  const effectiveTools = activePacks.length > 0
+    ? computeAllowedTools(stepAllowedTools, activePacks)
+    : stepAllowedTools
+  const tools: LLMToolDefinition[] = getToolsForLLM(effectiveTools.length > 0 ? effectiveTools : undefined)
   let finalContent = ''
   let lastStatusMessage: string | undefined
 
@@ -647,7 +738,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     }
 
     // Stream a natural language response
-    const responseStream = await gateway.stream('main-chat', {
+    const responseStream = await gateway.stream(agentSlug, {
       messages,
       overrideSystemPrompt: systemPrompt,
     })
@@ -671,7 +762,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
       let stream: AsyncIterable<import('@/lib/llm/providers/types').StreamChunk>
       try {
-        stream = await gateway.stream('main-chat', {
+        stream = await gateway.stream(agentSlug, {
           messages,
           tools: toolChoice === 'none' ? undefined : tools,
           toolChoice: toolChoice === 'none' ? undefined : toolChoice,
@@ -686,7 +777,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           messages.push(...compactedMessages)
           state.phases['reactiveCompaction'] = { deficit, originalLength: messages.length }
 
-          stream = await gateway.stream('main-chat', {
+          stream = await gateway.stream(agentSlug, {
             messages,
             tools: toolChoice === 'none' ? undefined : tools,
             toolChoice: toolChoice === 'none' ? undefined : toolChoice,
@@ -702,7 +793,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           for (const delay of retryDelays) {
             await new Promise((r) => setTimeout(r, delay))
             try {
-              stream = await gateway.stream('main-chat', {
+              stream = await gateway.stream(agentSlug, {
                 messages,
                 tools: toolChoice === 'none' ? undefined : tools,
                 toolChoice: toolChoice === 'none' ? undefined : toolChoice,
@@ -1066,6 +1157,12 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
   state.phases['step9_background'] = Date.now() - step9Start
 
+  // Persist active skill packs on conversation
+  await prisma.conversation.update({
+    where: { id: state.conversationId },
+    data: { activeSkillPacks: state.activeSkillPacks },
+  })
+
   // =============================================
   // STEP 10 — Turn trace (fire-and-forget)
   // =============================================
@@ -1079,6 +1176,13 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     fastPath: gateSelection === FAST_PATH_GATE,
     includedSections: buildResult.includedSections,
     excludedSections: buildResult.excludedSections,
+  }
+
+  // Agent extensibility trace metadata
+  state.phases['agentExtensibility'] = {
+    activeSkillPacks: state.activeSkillPacks,
+    conversationMode: state.conversationMode,
+    complianceResult: state.complianceResult,
   }
 
   void prisma.turnTrace.create({
