@@ -25,6 +25,9 @@ export interface ToolDefinition {
   statusMessage: { ro: string[]; en: string[] } | null
   alwaysAllowed: boolean
   allowedRoles: UserRole[]
+  sideEffects?: boolean     // default true — tools with no side effects can run in parallel
+  cacheable?: boolean       // default false — opt-in to result caching
+  cacheTtlMs?: number       // default 300_000 (5 minutes) — TTL for cached results
 }
 
 // ==============================================
