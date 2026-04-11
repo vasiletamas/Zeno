@@ -5,6 +5,8 @@
  * can decide whether to retry, failover, or surface the error.
  */
 
+import { CircuitOpenError, TimeoutError } from '@/lib/errors/types'
+
 // ==============================================
 // ERROR TYPES
 // ==============================================
@@ -56,6 +58,12 @@ export function classifyError(error: unknown): ErrorClass {
   // Check message for connection keywords as fallback
   const message = error instanceof Error ? error.message : String(error)
   if (/ECONNREFUSED|ETIMEDOUT|ECONNRESET|ENOTFOUND/i.test(message)) return 'provider_down'
+
+  // Circuit breaker errors
+  if (error instanceof CircuitOpenError) return 'provider_down'
+
+  // Timeout errors
+  if (error instanceof TimeoutError) return 'transient'
 
   return 'unknown'
 }
