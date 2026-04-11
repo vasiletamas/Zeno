@@ -9,7 +9,48 @@ import type { ToolContext, ToolResult, UserRole } from './types'
 import { getToolHandler, getToolDefinition } from './registry'
 import { validateToolArgs } from './validation'
 import { checkPermission } from './permissions'
-import { logError } from '@/lib/errors/logger'
+import { CircuitBreaker } from '@/lib/errors/circuit-breaker'
+import { TimeoutError } from '@/lib/errors/types'
+import { logError, logWarn } from '@/lib/errors/logger'
+
+// ==============================================
+// PER-TOOL CIRCUIT BREAKERS
+// ==============================================
+
+const toolCircuits = new Map<string, CircuitBreaker>()
+
+function getToolCircuit(name: string): CircuitBreaker {
+  let cb = toolCircuits.get(name)
+  if (!cb) {
+    cb = new CircuitBreaker({
+      name: `tool:${name}`,
+      failureThreshold: 3,
+      resetTimeoutMs: 20_000,
+      monitorWindowMs: 30_000,
+    })
+    toolCircuits.set(name, cb)
+  }
+  return cb
+}
+
+// ==============================================
+// TIMEOUT UTILITY
+// ==============================================
+
+const TOOL_TIMEOUT_MS = 15_000
+
+export async function withTimeout<T>(
+  fn: () => Promise<T>,
+  operation: string,
+  timeoutMs: number = TOOL_TIMEOUT_MS,
+): Promise<T> {
+  return Promise.race([
+    fn(),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new TimeoutError(operation, timeoutMs)), timeoutMs),
+    ),
+  ])
+}
 
 /**
  * Execute a single tool by name.
@@ -61,11 +102,31 @@ export async function executeTool(
     }
   }
 
-  // 4. Execute handler
+  // 4. Circuit breaker gate
+  const circuit = getToolCircuit(name)
+  if (circuit.state === 'open') {
+    logWarn({
+      layer: 'tool',
+      category: 'circuit_open',
+      message: `Tool "${name}" circuit is open — rejecting call`,
+      context: { toolName: name },
+    })
+    return {
+      success: false,
+      error: 'Tool temporarily unavailable. Please try a different approach or try again shortly.',
+    }
+  }
+
+  // 5. Execute handler with timeout
   try {
     const startMs = Date.now()
-    const result = await handler(validation.data ?? {}, context)
+    const result = await withTimeout(
+      () => handler(validation.data ?? {}, context),
+      `tool:${name}`,
+    )
     const durationMs = Date.now() - startMs
+
+    circuit.recordSuccess()
 
     if (process.env.NODE_ENV !== 'production') {
       console.log(
@@ -75,6 +136,8 @@ export async function executeTool(
 
     return result
   } catch (err: unknown) {
+    circuit.recordFailure(err)
+
     const message = err instanceof Error ? err.message : 'Tool execution failed'
     logError({
       layer: 'tool',
