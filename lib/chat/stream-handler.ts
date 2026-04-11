@@ -10,7 +10,7 @@
 // ==============================================
 
 export interface SSEEvent {
-  event: 'content' | 'tool_start' | 'tool_complete' | 'ui_action' | 'error' | 'done'
+  event: 'content' | 'tool_start' | 'tool_complete' | 'ui_action' | 'error' | 'done' | 'status'
   data: Record<string, unknown>
 }
 
