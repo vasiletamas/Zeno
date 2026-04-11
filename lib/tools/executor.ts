@@ -9,6 +9,7 @@ import type { ToolContext, ToolResult, UserRole } from './types'
 import { getToolHandler, getToolDefinition } from './registry'
 import { validateToolArgs } from './validation'
 import { checkPermission } from './permissions'
+import { isToolCacheable, getCachedResult, setCachedResult } from './cache'
 import { CircuitBreaker } from '@/lib/errors/circuit-breaker'
 import { TimeoutError } from '@/lib/errors/types'
 import { logError, logWarn } from '@/lib/errors/logger'
@@ -102,6 +103,17 @@ export async function executeTool(
     }
   }
 
+  // 3b. Cache check (before circuit breaker — cache hits don't need circuit)
+  if (isToolCacheable(name)) {
+    const cached = getCachedResult(name, validation.data ?? {})
+    if (cached) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[ToolExecutor] ${name} cache hit`)
+      }
+      return cached
+    }
+  }
+
   // 4. Circuit breaker gate
   const circuit = getToolCircuit(name)
   if (circuit.state === 'open') {
@@ -127,6 +139,11 @@ export async function executeTool(
     const durationMs = Date.now() - startMs
 
     circuit.recordSuccess()
+
+    // Cache successful results for cacheable tools
+    if (result.success && isToolCacheable(name)) {
+      setCachedResult(name, validation.data ?? {}, result)
+    }
 
     if (process.env.NODE_ENV !== 'production') {
       console.log(
