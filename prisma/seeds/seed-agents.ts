@@ -277,7 +277,7 @@ IMPORTANT:
 interface AgentDef {
   slug: string
   name: string
-  type: 'MAIN_CHAT' | 'REASONING_GATE' | 'SUMMARIZER' | 'PROFILE_EXTRACTOR'
+  role: string
   provider: 'OPENAI' | 'ANTHROPIC'
   model: string
   fallbackProvider: 'OPENAI' | 'ANTHROPIC'
@@ -292,7 +292,7 @@ const AGENTS: AgentDef[] = [
   {
     slug: 'main-chat',
     name: 'Main Chat Agent',
-    type: 'MAIN_CHAT',
+    role: 'main-chat',
     provider: 'OPENAI',
     model: 'gpt-5.4',
     fallbackProvider: 'ANTHROPIC',
@@ -311,7 +311,7 @@ const AGENTS: AgentDef[] = [
   {
     slug: 'reasoning-gate',
     name: 'Reasoning Gate',
-    type: 'REASONING_GATE',
+    role: 'reasoning-gate',
     provider: 'OPENAI',
     model: 'gpt-5.4-mini',
     fallbackProvider: 'ANTHROPIC',
@@ -329,7 +329,7 @@ const AGENTS: AgentDef[] = [
   {
     slug: 'summarizer',
     name: 'Conversation Summarizer',
-    type: 'SUMMARIZER',
+    role: 'summarizer',
     provider: 'OPENAI',
     model: 'gpt-5.4-mini',
     fallbackProvider: 'ANTHROPIC',
@@ -346,7 +346,7 @@ const AGENTS: AgentDef[] = [
   {
     slug: 'profile-extractor',
     name: 'Profile Extractor',
-    type: 'PROFILE_EXTRACTOR',
+    role: 'profile-extractor',
     provider: 'OPENAI',
     model: 'gpt-5.4-mini',
     fallbackProvider: 'ANTHROPIC',
@@ -374,7 +374,7 @@ export async function seedAgents(prisma: PrismaClient) {
       where: { slug: agent.slug },
       update: {
         name: agent.name,
-        type: agent.type,
+        role: agent.role,
         provider: agent.provider,
         model: agent.model,
         fallbackProvider: agent.fallbackProvider,
@@ -387,7 +387,7 @@ export async function seedAgents(prisma: PrismaClient) {
       create: {
         slug: agent.slug,
         name: agent.name,
-        type: agent.type,
+        role: agent.role,
         provider: agent.provider,
         model: agent.model,
         fallbackProvider: agent.fallbackProvider,
@@ -399,7 +399,7 @@ export async function seedAgents(prisma: PrismaClient) {
       },
     })
 
-    console.log(`    Agent "${agent.slug}" (${agent.type}) upserted`)
+    console.log(`    Agent "${agent.slug}" (${agent.role}) upserted`)
   }
 
   console.log(`  ${AGENTS.length} agents seeded.`)

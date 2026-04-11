@@ -58,13 +58,6 @@ enum WorkflowSessionStatus {
   CANCELLED
 }
 
-enum AgentType {
-  MAIN_CHAT
-  REASONING_GATE
-  SUMMARIZER
-  PROFILE_EXTRACTOR
-}
-
 enum LLMProvider {
   OPENAI
   ANTHROPIC
@@ -285,19 +278,21 @@ model Customer {
 }
 
 model Conversation {
-  id             String             @id @default(cuid())
-  customerId     String
-  productId      String?
-  status         ConversationStatus @default(ACTIVE)
-  channel        String             @default("web")
-  language       String             @default("ro")
-  messageCount   Int                @default(0)
-  startedAt      DateTime           @default(now())
-  completedAt    DateTime?
-  lastActivityAt DateTime           @default(now())
-  metadata       Json?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  id               String             @id @default(cuid())
+  customerId       String
+  productId        String?
+  status           ConversationStatus @default(ACTIVE)
+  channel          String             @default("web")
+  language         String             @default("ro")
+  messageCount     Int                @default(0)
+  startedAt        DateTime           @default(now())
+  completedAt      DateTime?
+  lastActivityAt   DateTime           @default(now())
+  metadata         Json?
+  mode             String             @default("SALES")
+  activeSkillPacks String[]
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
 
   customer        Customer             @relation(fields: [customerId], references: [id])
   product         Product?             @relation(fields: [productId], references: [id])
@@ -559,21 +554,39 @@ model Payment {
 // ==========================================
 
 model Agent {
-  id               String       @id @default(cuid())
-  slug             String       @unique
+  id               String      @id @default(cuid())
+  slug             String      @unique
   name             String
-  type             AgentType
-  provider         LLMProvider  @default(OPENAI)
+  role             String      // replaces AgentType enum
+  provider         LLMProvider @default(OPENAI)
   model            String
   fallbackProvider LLMProvider? @default(ANTHROPIC)
   fallbackModel    String?
-  temperature      Float        @default(0.7)
-  maxTokens        Int          @default(4096)
-  systemPrompt     String?      @db.Text
-  constraints      String?      @db.Text
-  isActive         Boolean      @default(true)
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  temperature      Float       @default(0.7)
+  maxTokens        Int         @default(4096)
+  systemPrompt     String?     @db.Text
+  constraints      String?     @db.Text
+  isActive         Boolean     @default(true)
+  skillPacks       SkillPack[]
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+}
+
+model SkillPack {
+  id             String   @id @default(cuid())
+  slug           String   @unique
+  name           String
+  category       String   // PRODUCT, WORKFLOW_PHASE, POST_SALE
+  description    String
+  promptSections Json     // { sectionKey: content }
+  allowedTools   String[]
+  constraints    String?  @db.Text
+  flags          Json?    // { persuasive: boolean, ... }
+  isActive       Boolean  @default(true)
+  priority       Int      @default(0)
+  agents         Agent[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
 model ModelCatalog {

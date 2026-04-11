@@ -7,7 +7,7 @@ interface AgentData {
   id: string
   slug: string
   name: string
-  type: string
+  role: string
   provider: string
   model: string
   fallbackProvider: string | null
@@ -89,7 +89,7 @@ export default function AgentConfigRow({ agent, models }: AgentConfigRowProps) {
         <div>
           <h3 className="text-base font-medium text-night">{agent.name}</h3>
           <p className="text-xs text-muted">
-            {agent.slug} — {agent.type}
+            {agent.slug} — {agent.role}
           </p>
         </div>
         <label className="flex items-center gap-2">

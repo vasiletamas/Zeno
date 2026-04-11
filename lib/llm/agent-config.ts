@@ -6,7 +6,7 @@
  */
 
 import { prisma } from '@/lib/db'
-import type { Agent, AgentType, LLMProvider } from '@/lib/generated/prisma/client'
+import type { Agent, LLMProvider } from '@/lib/generated/prisma/client'
 
 // ==============================================
 // AGENT CONFIG TYPE
@@ -15,7 +15,7 @@ import type { Agent, AgentType, LLMProvider } from '@/lib/generated/prisma/clien
 export interface AgentConfig {
   slug: string
   name: string
-  type: AgentType
+  role: string
   provider: LLMProvider
   model: string
   fallbackProvider: LLMProvider | null
@@ -68,7 +68,7 @@ export async function getAgentConfig(slug: string): Promise<AgentConfig> {
   const config: AgentConfig = {
     slug: agent.slug,
     name: agent.name,
-    type: agent.type,
+    role: agent.role,
     provider: agent.provider,
     model: agent.model,
     fallbackProvider: agent.fallbackProvider,

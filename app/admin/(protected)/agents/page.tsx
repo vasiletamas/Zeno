@@ -44,7 +44,7 @@ export default async function AgentsPage() {
           id: string
           slug: string
           name: string
-          type: string
+          role: string
           provider: string
           model: string
           fallbackProvider: string | null
