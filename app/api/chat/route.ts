@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { handleChatTurn } from '@/lib/chat/orchestrator'
 import { adaptAction } from '@/lib/chat/action-adapter'
+import { logError, logFatal } from '@/lib/errors/logger'
 
 // ==============================================
 // REQUEST VALIDATION
@@ -32,6 +33,13 @@ const requestSchema = z
   })
 
 // ==============================================
+// CONCURRENCY GUARD
+// ==============================================
+
+const inFlightRequests = new Map<string, number>()
+const MAX_CONCURRENT_PER_CONVERSATION = 3
+
+// ==============================================
 // ROUTE HANDLER
 // ==============================================
 
@@ -39,6 +47,18 @@ export async function POST(request: NextRequest) {
   try {
     const body: unknown = await request.json()
     const parsed = requestSchema.parse(body)
+
+    const conversationId = parsed.conversationId
+    if (conversationId) {
+      const current = inFlightRequests.get(conversationId) ?? 0
+      if (current >= MAX_CONCURRENT_PER_CONVERSATION) {
+        return Response.json(
+          { error: 'Too many concurrent requests for this conversation' },
+          { status: 429 },
+        )
+      }
+      inFlightRequests.set(conversationId, current + 1)
+    }
 
     let syntheticToolCall = undefined
     let message = parsed.message ?? ''
@@ -54,13 +74,44 @@ export async function POST(request: NextRequest) {
       message = message || `[Action: ${parsed.action.type}]`
     }
 
-    const stream = handleChatTurn({
-      conversationId: parsed.conversationId,
-      customerId: parsed.customerId,
-      message,
-      language: parsed.language,
-      syntheticToolCall,
-    })
+    let stream: ReadableStream<Uint8Array>
+    try {
+      stream = handleChatTurn({
+        conversationId: parsed.conversationId,
+        customerId: parsed.customerId,
+        message,
+        language: parsed.language,
+        syntheticToolCall,
+      })
+    } catch (err) {
+      const errorId = logFatal({
+        layer: 'api',
+        category: 'internal',
+        message: 'handleChatTurn threw synchronously',
+        context: { conversationId },
+        error: err,
+      })
+      if (conversationId) {
+        const current = inFlightRequests.get(conversationId) ?? 1
+        if (current <= 1) inFlightRequests.delete(conversationId)
+        else inFlightRequests.set(conversationId, current - 1)
+      }
+      return Response.json(
+        { error: 'Internal server error', errorId },
+        { status: 500 },
+      )
+    }
+
+    if (conversationId) {
+      const cleanup = new TransformStream({
+        flush() {
+          const current = inFlightRequests.get(conversationId) ?? 1
+          if (current <= 1) inFlightRequests.delete(conversationId)
+          else inFlightRequests.set(conversationId, current - 1)
+        },
+      })
+      stream = stream.pipeThrough(cleanup)
+    }
 
     return new Response(stream, {
       headers: {
@@ -76,9 +127,14 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       )
     }
-    console.error('[POST /api/chat] Unexpected error:', error)
+    const errorId = logError({
+      layer: 'api',
+      category: 'internal',
+      message: 'Unexpected error in POST /api/chat',
+      error,
+    })
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', errorId },
       { status: 500 },
     )
   }
