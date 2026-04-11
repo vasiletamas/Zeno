@@ -8,6 +8,7 @@ import { seedAgents } from './seed-agents'
 import { seedModelCatalog } from './seed-model-catalog'
 import { seedUsers } from './seed-users'
 import { seedAgentKnowledge } from './seed-agent-knowledge'
+import { seedSkillPacks } from './seed-skill-packs'
 
 async function main() {
   const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! })
@@ -21,6 +22,7 @@ async function main() {
     await seedObjections(prisma)
     await seedWorkflows(prisma)
     await seedAgents(prisma)
+    await seedSkillPacks(prisma)
     await seedModelCatalog(prisma)
     await seedAgentKnowledge(prisma)
     await seedUsers(prisma)

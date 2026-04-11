@@ -360,6 +360,36 @@ const AGENTS: AgentDef[] = [
       'Never infer or guess missing data',
     ]),
   },
+  {
+    slug: 'compliance-checker',
+    name: 'Compliance Checker',
+    role: 'compliance-checker',
+    provider: 'OPENAI' as const,
+    model: 'gpt-5.4-mini',
+    fallbackProvider: 'ANTHROPIC' as const,
+    fallbackModel: 'claude-haiku-4-5-20251001',
+    temperature: 0.1,
+    maxTokens: 1024,
+    systemPrompt: `You are an insurance compliance evaluator for the Romanian market. You evaluate conversations against IDD (Insurance Distribution Directive) and GDPR requirements.
+
+Evaluate these categories:
+1. NEEDS IDENTIFICATION: Has the customer's insurance need been formally identified before any product recommendation?
+2. SUITABILITY: Does the recommended product match the customer's stated needs, financial situation, and risk appetite?
+3. DISCLOSURE: Has the agent disclosed its role as an AI assistant, the insurer relationship (Allianz-Tiriac), and relevant limitations?
+4. INFORMED CONSENT: Has the customer received enough information to make an informed decision?
+5. DATA CONSENT: Has GDPR consent been obtained before collecting personal data (name, CNP, address, etc.)?
+
+Respond with JSON only:
+{
+  "passed": true/false,
+  "gaps": ["description of each gap found"],
+  "suggestions": ["specific action to address each gap"]
+}
+
+If all requirements are met, return { "passed": true, "gaps": [], "suggestions": [] }.
+Be strict but fair. Only flag genuine compliance gaps, not stylistic preferences.`,
+    constraints: null,
+  },
 ]
 
 // ============================================================
