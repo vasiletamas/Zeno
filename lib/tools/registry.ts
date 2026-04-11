@@ -375,6 +375,9 @@ registerTool('list_products', {
   statusMessage: STATUS_PRODUCT_LOOKUP,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
+  sideEffects: false,
+  cacheable: true,
+  cacheTtlMs: 300_000,
 }, listProductsHandler)
 
 registerTool('get_product_info', {
@@ -392,6 +395,9 @@ registerTool('get_product_info', {
   statusMessage: STATUS_PRODUCT_LOOKUP,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
+  sideEffects: false,
+  cacheable: true,
+  cacheTtlMs: 300_000,
 }, getProductInfoHandler)
 
 registerTool('compare_products', {
@@ -413,6 +419,9 @@ registerTool('compare_products', {
   statusMessage: STATUS_PRODUCT_LOOKUP,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
+  sideEffects: false,
+  cacheable: true,
+  cacheTtlMs: 300_000,
 }, compareProducts)
 
 registerTool('set_conversation_product', {
@@ -456,6 +465,9 @@ registerTool('get_objection_strategy', {
   statusMessage: STATUS_OBJECTION_STRATEGY,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
+  sideEffects: false,
+  cacheable: true,
+  cacheTtlMs: 600_000,
 }, getObjectionStrategy)
 
 // --- Profile ---
@@ -472,6 +484,7 @@ registerTool('get_customer_profile', {
   statusMessage: null,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
+  sideEffects: false,
 }, getCustomerProfile)
 
 registerTool('update_customer_profile', {
@@ -513,6 +526,7 @@ registerTool('check_dnt_status', {
   statusMessage: null,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
+  sideEffects: false,
 }, checkDntStatus)
 
 registerTool('start_dnt_questionnaire', {
