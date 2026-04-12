@@ -165,35 +165,37 @@ AUTONOMOUS LAYER
 
 ---
 
-### Sub-Project #5: Observability & Hooks — NOT STARTED
+### Sub-Project #5: Observability & Hooks — COMPLETE
 
-**Spec:** Not yet written
-**Plan:** Not yet written
-**Status:** Next up. Brainstorm started but context was cleared.
+**Spec:** `docs/superpowers/specs/2026-04-12-observability-hooks-design.md`
+**Plan:** `docs/superpowers/plans/2026-04-12-observability-hooks.md`
+**Commits:** `c149b54` through `83f43ff` (9 commits)
 
-**Claude Code patterns to adopt:**
-- **Hook system** (Claude Code: `src/utils/hooks.ts`) — ~15 lifecycle events: `pre_tool_use`, `post_tool_use`, `session_start`, `session_end`, `config_change`, `subagent_start/stop`, `task_created/completed`
-- **OpenTelemetry spans** (Claude Code: `startHookSpan()`/`endHookSpan()`) — distributed tracing with lazy loading
-- **Three-layer observability** (Claude Code: OTel tracing + analytics events + cost tracking)
-- **Analytics with metadata sanitization** (Claude Code: `AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS`)
-- **Cost tracking** (Claude Code: `cost-tracker.ts` — per-turn token counting, `getTotalCost()`, `maxBudgetUsd`)
+**Claude Code patterns adopted:**
+- **Hook system** (Claude Code: `src/utils/hooks.ts`) — Typed lifecycle event bus with 12 events (turn, phase, LLM, tool, mode, skillpack, compliance)
+- **OpenTelemetry spans** (Claude Code: `startHookSpan()`/`endHookSpan()`) — Full OTel tracing with lazy SDK loading, span tree per turn
+- **Three-layer observability** (Claude Code: OTel tracing + analytics events + cost tracking) — OTel subscriber + Sentry bridge + cost calculator + anomaly detector + PostHog enrichment
+- **Cost tracking** (Claude Code: `cost-tracker.ts`) — Per-turn cost accumulated from ModelCatalog pricing, persisted in TurnTrace.cost
 
-**Expected deliverables (to be designed):**
-- Lifecycle event bus — typed events for pipeline phases, mode transitions, skill pack changes, tool executions
-- Sentry integration with pipeline context — connect structured logger to Sentry with errorId, layer, phases
-- Cost calculation — use ModelCatalog pricing + actual token counts to fill TurnTrace.cost
-- Anomaly detection — fill TurnTrace.anomalies (unusual latency, high token use, error patterns)
-- Metrics aggregation — latency percentiles, error rates, token cost distributions, skill pack usage
-- Request/trace ID propagation — correlate logs across async operations
-- Hook subscribers — composable handlers that react to lifecycle events
+**What was delivered:**
+- Event types (`lib/events/types.ts`) — ZenoEvent discriminated union with 12 lifecycle event types, Anomaly interface
+- Event bus (`lib/events/event-bus.ts`) — Singleton with emit/on/once, fire-and-forget, handler errors caught
+- OTel setup (`lib/events/otel-setup.ts`) — Lazy SDK initialization (~1.1MB only when OTEL_ENABLED=true), SentrySpanProcessor bridge
+- OTel subscriber (`lib/events/otel-subscriber.ts`) — Creates span tree per turn: root → phase → LLM/tool child spans, business events as span events
+- Cost subscriber (`lib/events/cost-subscriber.ts`) — Accumulates per-turn cost from ModelCatalog with LRU-cached pricing lookups
+- Anomaly subscriber (`lib/events/anomaly-subscriber.ts`) — Threshold-based detection (latency, cost, error patterns, behavioral) with RollingStats
+- Sentry transport in logger (`lib/errors/logger.ts`) — error/fatal → Sentry with errorId, layer, category tags
+- PostHog enrichment (`lib/analytics/events.ts`) — enrichEventProps helper adds cost/mode/skillpacks to funnel events
+- Barrel export (`lib/events/index.ts`) — initObservability() registers all subscribers
+- Orchestrator instrumented (`lib/chat/orchestrator.ts`) — traceId in TurnState, phase:start/end around all 10 steps, business events emitted
+- Gateway instrumented (`lib/llm/gateway.ts`) — traceId threading, llm:call:start/end emits
+- Tool executor instrumented (`lib/tools/executor.ts`) — traceId threading, tool:start/end emits with cached flag
+- Sentry server config updated (`sentry.server.config.ts`) — skipOpenTelemetrySetup for custom OTel management
 
-**Existing infrastructure to build on:**
-- Structured logger (`lib/errors/logger.ts`) — writes JSON, needs Sentry transport
-- TurnTrace model — phases JSON captures all 10 steps, anomalies field unused, cost field always null
-- Sentry configured (`sentry.*.config.ts`) — basic init, not integrated with pipeline
-- PostHog (`lib/analytics/posthog.ts`) — 7 funnel events, needs expansion
-- Gateway call records (`lib/llm/gateway.ts`) — volatile 200-entry ring buffer, not persisted
-- ModelCatalog — has `costPer1kInputTokens`/`costPer1kOutputTokens`, not used for calculation
+**Files added:** 7 new files in `lib/events/`, 7 test files
+**Files modified:** 6 files (orchestrator, gateway, executor, logger, analytics events, sentry config)
+
+**Deferred to #7:** Relative anomaly thresholds (RollingStats infra built, fixed thresholds for now), admin metrics dashboard, alerting rules
 
 ---
 
@@ -247,12 +249,12 @@ AUTONOMOUS LAYER
 | 2 | Error Recovery | COMPLETE | 10 | 2026-04-11 | 2026-04-11 |
 | 3 | Tool System | COMPLETE | 5 | 2026-04-11 | 2026-04-11 |
 | 4 | Agent Extensibility | COMPLETE | 13 | 2026-04-11 | 2026-04-11 |
-| **5** | **Observability & Hooks** | **NEXT** | 0 | — | — |
-| 6 | Performance | Planned | 0 | — | — |
+| 5 | Observability & Hooks | COMPLETE | 9 | 2026-04-12 | 2026-04-12 |
+| **6** | **Performance** | **NEXT** | 0 | — | — |
 | 7 | Self-Improvement Engine | Planned | 0 | — | — |
 
-**Completed:** 4 of 7 sub-projects (29 commits)
-**Next:** Sub-project #5 (Observability & Hooks)
+**Completed:** 5 of 7 sub-projects (38 commits)
+**Next:** Sub-project #6 (Performance)
 
 ---
 
@@ -276,10 +278,10 @@ Key architectural patterns already adopted or planned for adoption:
 | Skill/command registration | `buildTool()`, command registry | Adopted (SkillPack model) | #4 |
 | Multi-agent coordination | `coordinatorMode.ts`, `AgentTool` | Adopted (compliance checker, agent resolver) | #4 |
 | Permission/capability scoping | `useCanUseTool()`, wildcard rules | Adopted (tool scoping per skill pack) | #4 |
-| **Hook system (~15 lifecycle events)** | `src/utils/hooks.ts` | **Planned** | **#5** |
-| **OpenTelemetry spans** | `startHookSpan()`/`endHookSpan()` | **Planned** | **#5** |
-| **Three-layer observability** | OTel + analytics + cost tracking | **Planned** | **#5** |
-| **Cost tracking** | `cost-tracker.ts`, `getTotalCost()` | **Planned** | **#5** |
+| Hook system (12 lifecycle events) | `src/utils/hooks.ts` | Adopted (EventBus + typed events) | #5 |
+| OpenTelemetry spans | `startHookSpan()`/`endHookSpan()` | Adopted (lazy OTel SDK + span subscriber) | #5 |
+| Three-layer observability | OTel + analytics + cost tracking | Adopted (OTel + Sentry + cost + anomaly + PostHog) | #5 |
+| Cost tracking | `cost-tracker.ts`, `getTotalCost()` | Adopted (ModelCatalog pricing → TurnTrace.cost) | #5 |
 | **Feature flags** | GrowthBook + `bun:bundle` feature() | **Planned** | **#7** |
 | **Lazy module loading** | OTel loaded only when enabled | **Planned** | **#6** |
 | **Parallel prefetch** | Startup preconnect | **Planned** | **#6** |
