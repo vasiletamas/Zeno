@@ -7,6 +7,7 @@
  */
 
 import { getPostHog } from './posthog'
+import { getTurnCost } from '@/lib/events/cost-subscriber'
 
 // ─── Generic capture helper ───────────────────────────────────
 
@@ -24,10 +25,35 @@ function trackEvent(
   }
 }
 
+// ==============================================
+// OBSERVABILITY ENRICHMENT
+// ==============================================
+
+export function enrichEventProps(
+  traceId: string | null,
+  base: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!traceId) return base
+  const turnCost = getTurnCost(traceId)
+  return {
+    ...base,
+    ...(turnCost !== null ? { turnCost } : {}),
+  }
+}
+
 // ─── Funnel events ────────────────────────────────────────────
 
-export function trackChatStarted(customerId: string): void {
-  trackEvent('chat_started', customerId)
+export function trackChatStarted(
+  customerId: string,
+  enrichment?: { conversationMode?: string; activeSkillPacks?: string[]; traceId?: string },
+): void {
+  trackEvent('chat_started', customerId, enrichEventProps(
+    enrichment?.traceId ?? null,
+    {
+      ...(enrichment?.conversationMode ? { conversationMode: enrichment.conversationMode } : {}),
+      ...(enrichment?.activeSkillPacks ? { activeSkillPacks: enrichment.activeSkillPacks } : {}),
+    },
+  ))
 }
 
 export function trackProductSelected(
