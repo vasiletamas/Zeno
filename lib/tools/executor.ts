@@ -13,6 +13,7 @@ import { isToolCacheable, getCachedResult, setCachedResult } from './cache'
 import { CircuitBreaker } from '@/lib/errors/circuit-breaker'
 import { TimeoutError } from '@/lib/errors/types'
 import { logError, logWarn } from '@/lib/errors/logger'
+import { eventBus } from '@/lib/events'
 
 // ==============================================
 // PER-TOOL CIRCUIT BREAKERS
@@ -60,6 +61,7 @@ export async function withTimeout<T>(
  * @param args     - Raw arguments (will be validated)
  * @param context  - Execution context (customer, conversation, etc.)
  * @param userRole - Caller's role for permission check (defaults to CUSTOMER)
+ * @param traceId  - Optional trace ID for event bus instrumentation
  * @returns ToolResult — always resolves, never throws
  */
 export async function executeTool(
@@ -67,6 +69,7 @@ export async function executeTool(
   args: unknown,
   context: ToolContext,
   userRole: UserRole = 'CUSTOMER',
+  traceId?: string,
 ): Promise<ToolResult> {
   // 1. Check tool exists
   const definition = getToolDefinition(name)
@@ -110,6 +113,11 @@ export async function executeTool(
       if (process.env.NODE_ENV !== 'production') {
         console.log(`[ToolExecutor] ${name} cache hit`)
       }
+      if (traceId) {
+        const now = Date.now()
+        eventBus.emit({ type: 'tool:start', traceId, toolName: name, args: (validation.data ?? {}) as Record<string, unknown> })
+        eventBus.emit({ type: 'tool:end', traceId, toolName: name, durationMs: 0, success: cached.success, cached: true })
+      }
       return cached
     }
   }
@@ -130,15 +138,23 @@ export async function executeTool(
   }
 
   // 5. Execute handler with timeout
+  const execStart = Date.now()
+  if (traceId) {
+    eventBus.emit({ type: 'tool:start', traceId, toolName: name, args: (validation.data ?? {}) as Record<string, unknown> })
+  }
+
   try {
-    const startMs = Date.now()
     const result = await withTimeout(
       () => handler(validation.data ?? {}, context),
       `tool:${name}`,
     )
-    const durationMs = Date.now() - startMs
+    const durationMs = Date.now() - execStart
 
     circuit.recordSuccess()
+
+    if (traceId) {
+      eventBus.emit({ type: 'tool:end', traceId, toolName: name, durationMs, success: result.success, cached: false })
+    }
 
     // Cache successful results for cacheable tools
     if (result.success && isToolCacheable(name)) {
@@ -153,7 +169,12 @@ export async function executeTool(
 
     return result
   } catch (err: unknown) {
+    const durationMs = Date.now() - execStart
     circuit.recordFailure(err)
+
+    if (traceId) {
+      eventBus.emit({ type: 'tool:end', traceId, toolName: name, durationMs, success: false, cached: false })
+    }
 
     const message = err instanceof Error ? err.message : 'Tool execution failed'
     logError({

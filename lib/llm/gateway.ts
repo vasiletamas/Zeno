@@ -21,6 +21,7 @@ import type {
   GatewayCallRecord,
   ReasoningConfig,
 } from '@/lib/llm/providers/types'
+import { eventBus } from '@/lib/events'
 
 // ==============================================
 // GATEWAY OPTIONS
@@ -37,6 +38,8 @@ export interface GatewayCallOptions {
   temperature?: number
   /** Override maxTokens for this call. */
   maxTokens?: number
+  /** Trace ID for event bus instrumentation. */
+  traceId?: string
 }
 
 // ==============================================
@@ -94,6 +97,16 @@ export const gateway = {
 
     const startMs = Date.now()
 
+    if (options.traceId) {
+      eventBus.emit({
+        type: 'llm:call:start',
+        traceId: options.traceId,
+        provider: config.provider,
+        model: config.model,
+        agentSlug,
+      })
+    }
+
     const result = await callWithFailover(
       primary,
       fallback,
@@ -120,6 +133,18 @@ export const gateway = {
     )
 
     const durationMs = Date.now() - startMs
+
+    if (options.traceId) {
+      eventBus.emit({
+        type: 'llm:call:end',
+        traceId: options.traceId,
+        provider: config.provider,
+        model: config.model,
+        inputTokens: result.usage.promptTokens,
+        outputTokens: result.usage.completionTokens,
+        durationMs,
+      })
+    }
 
     // Record for tracing
     recordCall({
@@ -165,6 +190,16 @@ export const gateway = {
 
     const startMs = Date.now()
 
+    if (options.traceId) {
+      eventBus.emit({
+        type: 'llm:call:start',
+        traceId: options.traceId,
+        provider: config.provider,
+        model: config.model,
+        agentSlug,
+      })
+    }
+
     const iterable = await callWithFailover(
       primary,
       fallback,
@@ -196,6 +231,7 @@ export const gateway = {
       provider: config.provider,
       model: config.model,
       startMs,
+      traceId: options.traceId,
     })
   },
 }
@@ -223,7 +259,7 @@ function buildMessages(messages: Message[], systemPrompt: string | null): Messag
  */
 async function* trackStreamCompletion(
   iterable: AsyncIterable<StreamChunk>,
-  meta: { agentSlug: string; provider: string; model: string; startMs: number },
+  meta: { agentSlug: string; provider: string; model: string; startMs: number; traceId?: string },
 ): AsyncIterable<StreamChunk> {
   let usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
 
@@ -235,6 +271,18 @@ async function* trackStreamCompletion(
   }
 
   const durationMs = Date.now() - meta.startMs
+
+  if (meta.traceId) {
+    eventBus.emit({
+      type: 'llm:call:end',
+      traceId: meta.traceId,
+      provider: meta.provider,
+      model: meta.model,
+      inputTokens: usage.promptTokens,
+      outputTokens: usage.completionTokens,
+      durationMs,
+    })
+  }
 
   recordCall({
     agentSlug: meta.agentSlug,

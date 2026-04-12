@@ -37,6 +37,7 @@ import { compactMessages } from '@/lib/chat/compaction'
 import { isContextLengthError, parseTokenDeficit } from '@/lib/llm/errors'
 import { logError, logWarn, logFatal } from '@/lib/errors/logger'
 import { CircuitOpenError, TimeoutError } from '@/lib/errors/types'
+import { eventBus, initObservability, getTurnCost, getTurnAnomalies } from '@/lib/events'
 
 // ==============================================
 // CONSTANTS
@@ -122,6 +123,7 @@ interface TurnState {
   provider: string | null
   model: string | null
   startMs: number
+  traceId: string
   phases: Record<string, unknown>
   conversationMode: string
   activeSkillPacks: string[]
@@ -145,6 +147,8 @@ export function handleChatTurn(input: ChatTurnInput): ReadableStream<Uint8Array>
 // ==============================================
 
 async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent> {
+  initObservability()
+
   const state: TurnState = {
     conversationId: input.conversationId ?? '',
     customerId: input.customerId ?? '',
@@ -159,15 +163,25 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     provider: null,
     model: null,
     startMs: Date.now(),
+    traceId: crypto.randomUUID(),
     phases: {},
     conversationMode: 'SALES',
     activeSkillPacks: [],
     complianceResult: null,
   }
 
+  eventBus.emit({
+    type: 'turn:start',
+    traceId: state.traceId,
+    conversationId: state.conversationId,
+    messageIndex: state.messageCount,
+    timestamp: state.startMs,
+  })
+
   // =============================================
   // STEP 1 — Resolve conversation
   // =============================================
+  eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'resolve', timestamp: Date.now() })
   const step1Start = Date.now()
 
   const resolveConversation = async () => {
@@ -247,10 +261,12 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   state.conversationMode = (conversation.mode as string) ?? 'SALES'
   state.activeSkillPacks = (conversation.activeSkillPacks as string[]) ?? []
   state.phases['step1_resolve'] = Date.now() - step1Start
+  eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'resolve', durationMs: Date.now() - step1Start })
 
   // =============================================
   // STEP 2 — Save user message
   // =============================================
+  eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'save_user', timestamp: Date.now() })
   const step2Start = Date.now()
 
   try {
@@ -285,10 +301,12 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     return
   }
   state.phases['step2_save_user'] = Date.now() - step2Start
+  eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'save_user', durationMs: Date.now() - step2Start })
 
   // =============================================
   // STEP 3 — Reasoning gate (skip for synthetic tool calls)
   // =============================================
+  eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'reasoning_gate', timestamp: Date.now() })
   const step3Start = Date.now()
 
   // Determine if fast path applies
@@ -434,10 +452,12 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   }
 
   state.phases['step3_reasoning_gate'] = Date.now() - step3Start
+  eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'reasoning_gate', durationMs: Date.now() - step3Start })
 
   // =============================================
   // STEP 4 — Context assembly
   // =============================================
+  eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'context', timestamp: Date.now() })
   const step4Start = Date.now()
 
   const agentSlug = resolveAgent(state.conversationMode)
@@ -504,6 +524,15 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
   state.activeSkillPacks = activePacks.map((p) => p.slug)
 
+  if (state.activeSkillPacks.length > 0) {
+    eventBus.emit({
+      type: 'skillpack:activated',
+      traceId: state.traceId,
+      slugs: state.activeSkillPacks,
+      conversationId: state.conversationId,
+    })
+  }
+
   // Merge skill pack sections into base sections
   const mergedSections: PromptSections = activePacks.length > 0
     ? mergeSkillPackSections(sections as unknown as Record<string, string | null>, activePacks) as unknown as PromptSections
@@ -515,10 +544,18 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     gateOutput.confidence > 0.7 &&
     gateOutput.modeTransition !== state.conversationMode
   ) {
+    const previousMode = state.conversationMode
     state.conversationMode = gateOutput.modeTransition
     await prisma.conversation.update({
       where: { id: state.conversationId },
       data: { mode: gateOutput.modeTransition },
+    })
+    eventBus.emit({
+      type: 'mode:transition',
+      traceId: state.traceId,
+      from: previousMode,
+      to: state.conversationMode,
+      conversationId: state.conversationId,
     })
   }
 
@@ -563,6 +600,16 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     }
   }
 
+  if (state.complianceResult) {
+    eventBus.emit({
+      type: 'compliance:result',
+      traceId: state.traceId,
+      passed: state.complianceResult.passed,
+      gaps: state.complianceResult.gaps ?? [],
+      conversationId: state.conversationId,
+    })
+  }
+
   state.provider = agentConfig.provider
   state.model = agentConfig.model
 
@@ -571,10 +618,13 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const { prompt: systemPrompt } = buildResult
 
   state.phases['step4_context'] = Date.now() - step4Start
+  eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'context', durationMs: Date.now() - step4Start })
 
   // =============================================
   // STEP 4b — Calculate token budget
   // =============================================
+  eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'token_budget', timestamp: Date.now() })
+  const step4bStart = Date.now()
   const contextWindow = agentConfig.provider === 'ANTHROPIC' ? 200_000 : 128_000
   const systemPromptTokens = estimateTokens(buildResult.prompt, state.language)
   const toolDefs = getToolsForLLM()
@@ -593,9 +643,12 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     availableTokenBudget,
   }
 
+  eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'token_budget', durationMs: Date.now() - step4bStart })
+
   // =============================================
   // STEP 5 — Sliding window
   // =============================================
+  eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'sliding_window', timestamp: Date.now() })
   const step5Start = Date.now()
 
   let windowMessages: Message[]
@@ -621,10 +674,12 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   }
 
   state.phases['step5_sliding_window'] = Date.now() - step5Start
+  eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'sliding_window', durationMs: Date.now() - step5Start })
 
   // =============================================
   // STEP 6 — Build messages array
   // =============================================
+  eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'build_messages', timestamp: Date.now() })
   const step6Start = Date.now()
 
   const messages: Message[] = [
@@ -640,10 +695,12 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   messages.push({ role: 'user' as const, content: input.message })
 
   state.phases['step6_build_messages'] = Date.now() - step6Start
+  eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'build_messages', durationMs: Date.now() - step6Start })
 
   // =============================================
   // STEP 7 — Main LLM call + tool loop
   // =============================================
+  eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'llm_tools', timestamp: Date.now() })
   const step7Start = Date.now()
 
   let toolContext = await buildToolContext(state.customerId, state.conversationId, state.language)
@@ -682,6 +739,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
             workflowId: toolContext.workflowSession.workflowId,
           }
         : null,
+      state.traceId,
     )
 
     if (isBlocking) {
@@ -741,6 +799,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     const responseStream = await gateway.stream(agentSlug, {
       messages,
       overrideSystemPrompt: systemPrompt,
+      traceId: state.traceId,
     })
 
     for await (const chunk of responseStream) {
@@ -767,6 +826,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           tools: toolChoice === 'none' ? undefined : tools,
           toolChoice: toolChoice === 'none' ? undefined : toolChoice,
           overrideSystemPrompt: systemPrompt,
+          traceId: state.traceId,
         })
       } catch (err) {
         if (round === 0 && isContextLengthError(err)) {
@@ -782,6 +842,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
             tools: toolChoice === 'none' ? undefined : tools,
             toolChoice: toolChoice === 'none' ? undefined : toolChoice,
             overrideSystemPrompt: systemPrompt,
+            traceId: state.traceId,
           })
         } else if (err instanceof CircuitOpenError) {
           // Queued retry with backoff: 5s, 10s, 20s
@@ -798,6 +859,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
                 tools: toolChoice === 'none' ? undefined : tools,
                 toolChoice: toolChoice === 'none' ? undefined : toolChoice,
                 overrideSystemPrompt: systemPrompt,
+                traceId: state.traceId,
               })
               retrySucceeded = true
               break
@@ -885,6 +947,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
                 workflowId: toolContext.workflowSession.workflowId,
               }
             : null,
+          state.traceId,
         ).catch((err: unknown) => logError({
           layer: 'orchestrator',
           category: 'background_tool',
@@ -926,6 +989,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
                       workflowId: toolContext.workflowSession.workflowId,
                     }
                   : null,
+                state.traceId,
               )
             } catch (err: unknown) {
               const errMsg = err instanceof Error ? err.message : 'Tool execution failed'
@@ -977,6 +1041,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
                   workflowId: toolContext.workflowSession.workflowId,
                 }
               : null,
+            state.traceId,
           )
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : 'Tool execution failed'
@@ -1052,10 +1117,12 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   }
 
   state.phases['step7_llm_tools'] = Date.now() - step7Start
+  eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'llm_tools', durationMs: Date.now() - step7Start })
 
   // =============================================
   // STEP 8 — Save assistant message
   // =============================================
+  eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'save_assistant', timestamp: Date.now() })
   const step8Start = Date.now()
 
   try {
@@ -1088,10 +1155,12 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     // Don't yield error — response already streamed to user
   }
   state.phases['step8_save_assistant'] = Date.now() - step8Start
+  eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'save_assistant', durationMs: Date.now() - step8Start })
 
   // =============================================
   // STEP 9 — Background agents (fire-and-forget)
   // =============================================
+  eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'background', timestamp: Date.now() })
   const step9Start = Date.now()
 
   // Profile extractor: detect potential personal info (Romanian and English patterns)
@@ -1101,6 +1170,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       try {
         const response = await gateway.call('profile-extractor', {
           messages: [{ role: 'user' as const, content: input.message }],
+          traceId: state.traceId,
         })
         if (response.content) {
           const extracted = JSON.parse(response.content) as Record<string, unknown>
@@ -1156,6 +1226,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // Summarizer: handled by buildSlidingWindow (step 5) — no separate trigger needed
 
   state.phases['step9_background'] = Date.now() - step9Start
+  eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'background', durationMs: Date.now() - step9Start })
 
   // Persist active skill packs on conversation
   await prisma.conversation.update({
@@ -1192,10 +1263,13 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       phases: JSON.parse(JSON.stringify(state.phases)),
       inputTokens: state.totalInputTokens || null,
       outputTokens: state.totalOutputTokens || null,
-      cost: null, // Cost calculation deferred to tracing layer
+      cost: getTurnCost(state.traceId),
       latencyMs,
       provider: state.provider,
       model: state.model,
+      anomalies: getTurnAnomalies(state.traceId).length > 0
+        ? JSON.parse(JSON.stringify(getTurnAnomalies(state.traceId)))
+        : undefined,
     },
   }).catch((err: unknown) => {
     logError({
@@ -1205,6 +1279,15 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       context: { conversationId: state.conversationId },
       error: err,
     })
+  })
+
+  eventBus.emit({
+    type: 'turn:end',
+    traceId: state.traceId,
+    conversationId: state.conversationId,
+    cost: getTurnCost(state.traceId),
+    latencyMs,
+    anomalies: getTurnAnomalies(state.traceId),
   })
 
   // =============================================

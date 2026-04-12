@@ -39,6 +39,7 @@ interface WorkflowSessionInput {
  * @param args             - Raw arguments
  * @param context          - Tool context
  * @param workflowSession  - Active workflow session (null if no workflow)
+ * @param traceId          - Optional trace ID for event bus instrumentation
  * @returns PipelineResult — tool result + optional transition
  */
 export async function executeToolWithPipeline(
@@ -46,6 +47,7 @@ export async function executeToolWithPipeline(
   args: unknown,
   context: ToolContext,
   workflowSession?: WorkflowSessionInput | null,
+  traceId?: string,
 ): Promise<PipelineResult> {
   // -----------------------------------------------
   // 1. Workflow gate
@@ -66,7 +68,7 @@ export async function executeToolWithPipeline(
   // -----------------------------------------------
   // 2. Execute tool
   // -----------------------------------------------
-  const toolResult = await executeTool(name, args, context)
+  const toolResult = await executeTool(name, args, context, 'CUSTOMER', traceId)
 
   // -----------------------------------------------
   // 3. Evaluate transitions (only on success + active workflow)
