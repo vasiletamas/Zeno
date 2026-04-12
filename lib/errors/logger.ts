@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid'
+import * as Sentry from '@sentry/nextjs'
 import type { ErrorSeverity, ErrorLayer } from './types'
 
 // ==============================================
@@ -46,6 +47,22 @@ function emitLog(severity: ErrorSeverity, input: ErrorInput): string {
   }
 
   console.error(JSON.stringify(entry))
+
+  // Sentry transport: send errors and fatals
+  if ((severity === 'error' || severity === 'fatal') && process.env.SENTRY_DSN) {
+    try {
+      Sentry.captureException(
+        input.error instanceof Error ? input.error : new Error(input.message),
+        {
+          tags: { layer: input.layer, category: input.category, errorId },
+          extra: input.context ?? {},
+          level: severity === 'fatal' ? 'fatal' : 'error',
+        },
+      )
+    } catch {
+      // Sentry transport failure must never break the logger
+    }
+  }
 
   return errorId
 }

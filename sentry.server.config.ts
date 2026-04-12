@@ -5,5 +5,6 @@ if (process.env.SENTRY_DSN) {
     dsn: process.env.SENTRY_DSN,
     environment: process.env.NODE_ENV,
     tracesSampleRate: 0.1,
+    skipOpenTelemetrySetup: true, // we manage OTel ourselves via otel-setup.ts
   })
 }
