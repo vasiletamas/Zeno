@@ -22,6 +22,7 @@ import type { Message } from '@/lib/llm/providers/types'
 
 const FALLBACK_WINDOW_SIZE = 20
 const MIN_WINDOW_SIZE = 4
+const STALE_MESSAGE_THRESHOLD = 10
 
 // ==============================================
 // DB MESSAGE → LLM MESSAGE CONVERSION
@@ -117,19 +118,23 @@ export async function buildSlidingWindow(
     return { messages: windowMessages, summaryPrefix: null }
   }
 
-  // Check for existing summary
+  // Check for existing summary — stale-while-revalidate strategy
   const olderCount = totalMessages - windowMessages.length
 
   const existingSummary = await prisma.conversationSummary.findUnique({
     where: { conversationId },
   })
 
-  if (existingSummary && existingSummary.messagesUpTo >= olderCount) {
-    // Summary is current — use it
+  if (existingSummary) {
+    // Any existing summary — use it immediately (stale-while-revalidate)
+    if (olderCount - existingSummary.messagesUpTo > STALE_MESSAGE_THRESHOLD) {
+      // Stale: fire background refresh (non-blocking)
+      void refreshSummaryInBackground(conversationId, olderCount)
+    }
     return { messages: windowMessages, summaryPrefix: existingSummary.summary }
   }
 
-  // No summary or stale — load older messages and trigger summarizer
+  // No summary at all — must block on summarizer to generate one
   const olderMessages = await prisma.message.findMany({
     where: { conversationId },
     orderBy: { createdAt: 'asc' },
@@ -201,4 +206,85 @@ async function triggerSummarizer(
   })
 
   return summaryText
+}
+
+// ==============================================
+// BACKGROUND REFRESH (Incremental Summarization)
+// ==============================================
+
+/**
+ * Refresh the summary in the background using incremental summarization.
+ * Fire-and-forget — errors are silently swallowed.
+ */
+async function refreshSummaryInBackground(
+  conversationId: string,
+  targetMessagesUpTo: number,
+): Promise<void> {
+  try {
+    const existingSummary = await prisma.conversationSummary.findUnique({
+      where: { conversationId },
+    })
+
+    if (!existingSummary) return
+
+    // Load only NEW messages since the last summary
+    const newMessages = await prisma.message.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: 'asc' },
+      skip: existingSummary.messagesUpTo,
+      take: targetMessagesUpTo - existingSummary.messagesUpTo,
+    })
+
+    if (newMessages.length === 0) return
+
+    const newMessagesFormatted = formatMessagesForSummary(newMessages.map(dbMessageToLLM))
+
+    const incrementalPrompt = `Existing summary of the conversation so far:\n${existingSummary.summary}\n\nNew messages since then:\n${newMessagesFormatted}\n\nExtend the summary to include the new messages. Keep it concise.`
+
+    const response = await gateway.call('summarizer', {
+      messages: [{ role: 'user', content: incrementalPrompt }],
+    })
+
+    const updatedSummary = response.content ?? ''
+
+    await prisma.conversationSummary.upsert({
+      where: { conversationId },
+      update: {
+        summary: updatedSummary,
+        messagesUpTo: targetMessagesUpTo,
+      },
+      create: {
+        conversationId,
+        summary: updatedSummary,
+        messagesUpTo: targetMessagesUpTo,
+      },
+    })
+  } catch {
+    // Background operation — silently swallow errors
+  }
+}
+
+// ==============================================
+// PROACTIVE STALENESS CHECK (called from orchestrator)
+// ==============================================
+
+/**
+ * Check if the conversation summary is stale and trigger a background refresh if needed.
+ * Called from orchestrator Step 9 as a fire-and-forget operation.
+ */
+export async function updateSummaryIfStale(
+  conversationId: string,
+  currentMessageCount: number,
+): Promise<void> {
+  const existingSummary = await prisma.conversationSummary.findUnique({
+    where: { conversationId },
+  })
+
+  // No summary exists — will be created on demand by buildSlidingWindow
+  if (!existingSummary) return
+
+  const gap = currentMessageCount - existingSummary.messagesUpTo
+  if (gap > STALE_MESSAGE_THRESHOLD) {
+    await refreshSummaryInBackground(conversationId, currentMessageCount)
+  }
 }

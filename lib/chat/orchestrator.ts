@@ -26,7 +26,7 @@ import { createSSEStream, pickStatusMessage, type SSEEvent } from './stream-hand
 import type { ToolContext, PipelineResult } from '@/lib/tools/types'
 import { buildPrompt, detectFastPath, FAST_PATH_GATE, type GateSelection, type PromptSections } from './prompt-builder'
 import { executeReasoningGate, formatGateBriefing, type ReasoningGateInput, type ReasoningGateOutput } from './reasoning-gate'
-import { buildSlidingWindow } from './sliding-window'
+import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
 import { loadAllSections, type WorkflowSessionData } from './context-loaders'
 import { loadTurnContext, type TurnContext } from './turn-context'
 import { resolveAgent } from './agent-resolver'
@@ -1184,7 +1184,16 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     })()
   }
 
-  // Summarizer: handled by buildSlidingWindow (step 5) — no separate trigger needed
+  // Proactive summary refresh: keep summary warm for next turn
+  void updateSummaryIfStale(state.conversationId, state.messageCount).catch((err: unknown) =>
+    logWarn({
+      layer: 'orchestrator',
+      category: 'summary',
+      message: 'Proactive summary refresh failed',
+      context: { conversationId: state.conversationId },
+      error: err,
+    }),
+  )
 
   state.phases['step9_background'] = Date.now() - step9Start
   eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'background', durationMs: Date.now() - step9Start })
