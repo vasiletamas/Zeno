@@ -28,6 +28,7 @@ import { buildPrompt, detectFastPath, FAST_PATH_GATE, type GateSelection, type P
 import { executeReasoningGate, formatGateBriefing, type ReasoningGateInput, type ReasoningGateOutput } from './reasoning-gate'
 import { buildSlidingWindow } from './sliding-window'
 import { loadAllSections, type WorkflowSessionData } from './context-loaders'
+import { loadTurnContext, type TurnContext } from './turn-context'
 import { resolveAgent } from './agent-resolver'
 import { getActiveSkillPacks, mergeSkillPackSections, computeAllowedTools } from '@/lib/skills/skill-pack-loader'
 import { executeComplianceCheck, type ComplianceCheckResult } from './compliance-checker'
@@ -184,7 +185,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'resolve', timestamp: Date.now() })
   const step1Start = Date.now()
 
-  const resolveConversation = async () => {
+  const resolveConversation = async (): Promise<TurnContext> => {
     if (!state.customerId) {
       const customer = await prisma.customer.create({
         data: { isAnonymous: true, language: state.language },
@@ -204,31 +205,12 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       trackChatStarted(state.customerId)
     }
 
-    return prisma.conversation.findUniqueOrThrow({
-      where: { id: state.conversationId },
-      include: {
-        product: { select: { id: true } },
-        workflowSession: {
-          include: {
-            currentStep: {
-              select: {
-                id: true,
-                code: true,
-                name: true,
-                agentInstructions: true,
-                allowedTools: true,
-                autoTool: true,
-              },
-            },
-          },
-        },
-      },
-    })
+    return loadTurnContext(state.conversationId, state.customerId)
   }
 
-  let conversation: Awaited<ReturnType<typeof resolveConversation>>
+  let turnCtx: TurnContext
   try {
-    conversation = await resolveConversation()
+    turnCtx = await resolveConversation()
   } catch (err) {
     const errorId = logFatal({
       layer: 'orchestrator',
@@ -245,8 +227,8 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   }
 
   // Guard: conversation must be active
-  if (conversation.status === 'COMPLETED' || conversation.status === 'ABANDONED') {
-    throw new Error(`Conversation ${state.conversationId} is ${conversation.status}`)
+  if (turnCtx.conversation.status === 'COMPLETED' || turnCtx.conversation.status === 'ABANDONED') {
+    throw new Error(`Conversation ${state.conversationId} is ${turnCtx.conversation.status}`)
   }
 
   // Guard: must have content
@@ -254,12 +236,12 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     throw new Error('Either message or syntheticToolCall is required')
   }
 
-  state.messageCount = conversation.messageCount
-  state.productId = conversation.productId
-  state.workflowSessionId = conversation.workflowSession?.id ?? null
-  state.workflowStepCode = conversation.workflowSession?.currentStep.code ?? null
-  state.conversationMode = (conversation.mode as string) ?? 'SALES'
-  state.activeSkillPacks = (conversation.activeSkillPacks as string[]) ?? []
+  state.messageCount = turnCtx.conversation.messageCount
+  state.productId = turnCtx.conversation.productId
+  state.workflowSessionId = turnCtx.conversation.workflowSession?.id ?? null
+  state.workflowStepCode = turnCtx.conversation.workflowSession?.currentStep.code ?? null
+  state.conversationMode = turnCtx.conversation.mode ?? 'SALES'
+  state.activeSkillPacks = turnCtx.conversation.activeSkillPacks ?? []
   state.phases['step1_resolve'] = Date.now() - step1Start
   eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'resolve', durationMs: Date.now() - step1Start })
 
@@ -304,217 +286,210 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'save_user', durationMs: Date.now() - step2Start })
 
   // =============================================
-  // STEP 3 — Reasoning gate (skip for synthetic tool calls)
+  // STEPS 3+4 — Reasoning gate + Context assembly (parallel)
   // =============================================
-  eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'reasoning_gate', timestamp: Date.now() })
-  const step3Start = Date.now()
 
   // Determine if fast path applies
   const hasActiveQuestionnaire = !!(state.workflowStepCode &&
     (['dnt_questionnaire', 'application_fill'].includes(state.workflowStepCode) ||
       state.workflowStepCode.includes('bd')))
 
-  let gateOutput: ReasoningGateOutput | null = null
-  let gateSelection: GateSelection
+  // Determine allowed tools for this step (hoisted for use in gate + skill pack scoping)
+  const stepAllowedTools = turnCtx.conversation.workflowSession?.currentStep.allowedTools ?? []
 
-  if (detectFastPath(input.message, hasActiveQuestionnaire) && !input.syntheticToolCall) {
-    // Fast path: skip reasoning gate
-    gateSelection = FAST_PATH_GATE
-    state.phases['reasoningGate'] = { skipped: true, fastPath: true, durationMs: 0 }
-  } else if (input.syntheticToolCall) {
-    // Synthetic tool call: skip gate
-    gateSelection = { requiredSections: [], excludedSections: [], confidence: 0 }
-    state.phases['reasoningGate'] = { skipped: true, syntheticAction: true, durationMs: 0 }
-  } else {
-    // Full reasoning gate
-    const gateStart = Date.now()
+  // --- gatePromise: Step 3 — Reasoning gate ---
+  const gatePromise = (async (): Promise<{
+    gateOutput: ReasoningGateOutput | null
+    gateSelection: GateSelection
+  }> => {
+    eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'reasoning_gate', timestamp: Date.now() })
+    const gatePhaseStart = Date.now()
 
+    let gateOutput: ReasoningGateOutput | null = null
+    let gateSelection: GateSelection
+
+    if (detectFastPath(input.message, hasActiveQuestionnaire) && !input.syntheticToolCall) {
+      // Fast path: skip reasoning gate
+      gateSelection = FAST_PATH_GATE
+      state.phases['reasoningGate'] = { skipped: true, fastPath: true, durationMs: 0 }
+    } else if (input.syntheticToolCall) {
+      // Synthetic tool call: skip gate
+      gateSelection = { requiredSections: [], excludedSections: [], confidence: 0 }
+      state.phases['reasoningGate'] = { skipped: true, syntheticAction: true, durationMs: 0 }
+    } else {
+      // Full reasoning gate — read from turnCtx instead of querying DB
+      const gateStart = Date.now()
+
+      try {
+        // Recent messages from turnCtx (already chronological)
+        const last3Messages = turnCtx.recentMessages
+          .slice(-3)
+          .map((m) => ({ role: m.role, content: m.content.slice(0, 300) }))
+
+        // Customer profile from turnCtx
+        const extractedProfile = turnCtx.customer.extractedProfile
+        const customerAge = turnCtx.customer.dateOfBirth
+          ? Math.floor((Date.now() - turnCtx.customer.dateOfBirth.getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+          : null
+
+        // Application from turnCtx
+        const application = turnCtx.conversation.application
+
+        // Skill packs from turnCtx
+        const allSkillPacks = turnCtx.activeSkillPacks
+
+        // Available tools: filter by workflow step's allowed tools if applicable
+        const gateStepTools = turnCtx.conversation.workflowSession?.currentStep.allowedTools ?? []
+        const availableToolDefs = getToolsForLLM(gateStepTools.length > 0 ? gateStepTools : undefined)
+        const availableToolNames = availableToolDefs.map((t) => t.function.name)
+
+        // Current questionnaire question text (for gate context)
+        const currentQuestionText: string | null = null
+        // We'll leave this null since loading questionnaire context is handled in context assembly
+
+        const gateInput: ReasoningGateInput = {
+          lastUserMessage: input.message,
+          last3Messages,
+          hasActiveQuestionnaire,
+          currentQuestionText,
+          workflowStepCode: state.workflowStepCode,
+          availableTools: availableToolNames,
+          customerProfile: {
+            name: turnCtx.customer.name ?? null,
+            age: customerAge,
+            family: typeof extractedProfile.familySize === 'number'
+              ? `family of ${extractedProfile.familySize}`
+              : typeof extractedProfile.hasChildren === 'boolean'
+                ? (extractedProfile.hasChildren ? 'has children' : 'no children')
+                : null,
+            occupation: typeof extractedProfile.occupation === 'string'
+              ? extractedProfile.occupation
+              : null,
+            isReturningCustomer: false, // P2: returning customer detection
+          },
+          businessState: {
+            selectedProduct: turnCtx.conversation.product?.id ?? null,
+            dntProgress: null, // Simplified: DNT progress tracked via questionnaire
+            applicationProgress: application
+              ? `${application.currentQuestionIndex}/${application.totalQuestions} (${application.status})`
+              : null,
+            hasQuote: !!application?.quote,
+            quoteValue: application?.quote?.premiumAnnual ?? null,
+            hasPolicy: !!application?.quote?.policy,
+          },
+          currentMode: state.conversationMode,
+          availableSkillPacks: allSkillPacks,
+          activeSkillPacks: state.activeSkillPacks,
+        }
+
+        gateOutput = await executeReasoningGate(gateInput)
+        gateSelection = {
+          requiredSections: gateOutput.requiredSections,
+          excludedSections: gateOutput.excludedSections,
+          confidence: gateOutput.confidence,
+        }
+        state.phases['reasoningGate'] = {
+          durationMs: Date.now() - gateStart,
+          complexity: gateOutput.complexity,
+          situationType: gateOutput.situationType,
+          confidence: gateOutput.confidence,
+        }
+      } catch (err: unknown) {
+        // Reasoning gate failure is non-fatal: use defaults
+        logWarn({
+          layer: 'orchestrator',
+          category: 'reasoning_gate',
+          message: 'Reasoning gate failed, using defaults',
+          context: { conversationId: state.conversationId },
+          error: err,
+        })
+        gateSelection = { requiredSections: [], excludedSections: [], confidence: 0 }
+        state.phases['reasoningGate'] = {
+          durationMs: Date.now() - gateStart,
+          error: true,
+        }
+      }
+    }
+
+    state.phases['step3_reasoning_gate'] = Date.now() - gatePhaseStart
+    eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'reasoning_gate', durationMs: Date.now() - gatePhaseStart })
+
+    return { gateOutput, gateSelection }
+  })()
+
+  // --- contextPromise: Step 4 — Context assembly (without situationalBriefing, patched after gate) ---
+  const contextPromise = (async () => {
+    eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'context', timestamp: Date.now() })
+    const ctxPhaseStart = Date.now()
+
+    const agentSlug = resolveAgent(state.conversationMode)
+    const agentConfig = await getAgentConfig(agentSlug)
+
+    let sections: Awaited<ReturnType<typeof loadAllSections>>
     try {
-      // Load recent messages for gate context
-      const recentMsgs = await prisma.message.findMany({
-        where: { conversationId: state.conversationId },
-        orderBy: { createdAt: 'desc' },
-        take: 3,
-        select: { role: true, content: true },
-      })
-      const last3Messages = recentMsgs
-        .reverse()
-        .map((m) => ({ role: m.role, content: m.content.slice(0, 300) }))
-
-      // Load customer profile for gate input
-      const customer = await prisma.customer.findUnique({
-        where: { id: state.customerId },
-        select: {
-          name: true,
-          dateOfBirth: true,
-          extractedProfile: true,
-        },
-      })
-      const extractedProfile = (customer?.extractedProfile as Record<string, unknown>) ?? {}
-      const customerAge = customer?.dateOfBirth
-        ? Math.floor((Date.now() - customer.dateOfBirth.getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+      // Build WorkflowSessionData from turnCtx
+      const workflowSessionData: WorkflowSessionData | null = turnCtx.conversation.workflowSession
+        ? {
+            currentStepCode: turnCtx.conversation.workflowSession.currentStep.code,
+            currentStepName: turnCtx.conversation.workflowSession.currentStep.name,
+            agentInstructions: turnCtx.conversation.workflowSession.currentStep.agentInstructions,
+            allowedTools: turnCtx.conversation.workflowSession.currentStep.allowedTools,
+            data: turnCtx.conversation.workflowSession.data,
+          }
         : null
 
-      // Derive business state from conversation
-      const application = await prisma.application.findUnique({
-        where: { conversationId: state.conversationId },
-        select: {
-          status: true,
-          currentQuestionIndex: true,
-          totalQuestions: true,
-          quote: {
-            select: {
-              status: true,
-              premiumAnnual: true,
-              policy: { select: { id: true } },
-            },
-          },
-        },
-      })
-
-      // Load available skill packs for gate context
-      const allSkillPacks = await prisma.skillPack.findMany({
-        where: { isActive: true },
-        select: { slug: true, description: true },
-      })
-
-      // Available tools: filter by workflow step's allowed tools if applicable
-      const gateStepTools = conversation.workflowSession?.currentStep.allowedTools ?? []
-      const availableToolDefs = getToolsForLLM(gateStepTools.length > 0 ? gateStepTools : undefined)
-      const availableToolNames = availableToolDefs.map((t) => t.function.name)
-
-      // Current questionnaire question text (for gate context)
-      let currentQuestionText: string | null = null
-      // We'll leave this null since loading questionnaire context is handled in step 4
-
-      const gateInput: ReasoningGateInput = {
-        lastUserMessage: input.message,
-        last3Messages,
-        hasActiveQuestionnaire,
-        currentQuestionText,
+      sections = await loadAllSections({
+        agentConfig: { systemPrompt: agentConfig.systemPrompt, constraints: agentConfig.constraints },
+        allowedTools: stepAllowedTools,
+        productId: state.productId,
+        conversationId: state.conversationId,
+        customerId: state.customerId,
+        workflowSession: workflowSessionData,
         workflowStepCode: state.workflowStepCode,
-        availableTools: availableToolNames,
-        customerProfile: {
-          name: customer?.name ?? null,
-          age: customerAge,
-          family: typeof extractedProfile.familySize === 'number'
-            ? `family of ${extractedProfile.familySize}`
-            : typeof extractedProfile.hasChildren === 'boolean'
-              ? (extractedProfile.hasChildren ? 'has children' : 'no children')
-              : null,
-          occupation: typeof extractedProfile.occupation === 'string'
-            ? extractedProfile.occupation
-            : null,
-          isReturningCustomer: false, // P2: returning customer detection
-        },
-        businessState: {
-          selectedProduct: conversation.product?.id ?? null,
-          dntProgress: null, // Simplified: DNT progress tracked via questionnaire
-          applicationProgress: application
-            ? `${application.currentQuestionIndex}/${application.totalQuestions} (${application.status})`
-            : null,
-          hasQuote: !!application?.quote,
-          quoteValue: application?.quote?.premiumAnnual ?? null,
-          hasPolicy: !!application?.quote?.policy,
-        },
-        currentMode: state.conversationMode,
-        availableSkillPacks: allSkillPacks,
-        activeSkillPacks: state.activeSkillPacks,
-      }
-
-      gateOutput = await executeReasoningGate(gateInput)
-      gateSelection = {
-        requiredSections: gateOutput.requiredSections,
-        excludedSections: gateOutput.excludedSections,
-        confidence: gateOutput.confidence,
-      }
-      state.phases['reasoningGate'] = {
-        durationMs: Date.now() - gateStart,
-        complexity: gateOutput.complexity,
-        situationType: gateOutput.situationType,
-        confidence: gateOutput.confidence,
-      }
-    } catch (err: unknown) {
-      // Reasoning gate failure is non-fatal: use defaults
+        situationalBriefing: null, // patched after gate completes
+        language: state.language,
+        prefetchedCustomer: turnCtx.customer,
+      })
+    } catch (err) {
       logWarn({
         layer: 'orchestrator',
-        category: 'reasoning_gate',
-        message: 'Reasoning gate failed, using defaults',
+        category: 'db_error',
+        message: 'Context assembly failed, using minimal context',
         context: { conversationId: state.conversationId },
         error: err,
       })
-      gateSelection = { requiredSections: [], excludedSections: [], confidence: 0 }
-      state.phases['reasoningGate'] = {
-        durationMs: Date.now() - gateStart,
-        error: true,
+      // Minimal fallback — identity and constraints only
+      sections = {
+        agentIdentity: agentConfig.systemPrompt,
+        capabilityManifest: null,
+        constraints: agentConfig.constraints,
+        complianceGuidance: null,
+        situationalBriefing: null,
+        customerMemory: null,
+        agentKnowledge: null,
+        customerContext: null,
+        coachingBriefing: null,
+        workflowInstructions: null,
+        questionnaireContext: null,
+        productContext: null,
       }
     }
-  }
 
-  state.phases['step3_reasoning_gate'] = Date.now() - step3Start
-  eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'reasoning_gate', durationMs: Date.now() - step3Start })
+    state.phases['step4_context'] = Date.now() - ctxPhaseStart
+    eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'context', durationMs: Date.now() - ctxPhaseStart })
 
-  // =============================================
-  // STEP 4 — Context assembly
-  // =============================================
-  eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'context', timestamp: Date.now() })
-  const step4Start = Date.now()
+    return { agentSlug, agentConfig, sections }
+  })()
 
-  const agentSlug = resolveAgent(state.conversationMode)
-  const agentConfig = await getAgentConfig(agentSlug)
+  // --- Await both in parallel ---
+  const [gateResult, contextResult] = await Promise.all([gatePromise, contextPromise])
+
+  const { gateOutput, gateSelection } = gateResult
+  const { agentSlug, agentConfig, sections } = contextResult
+
+  // Patch situationalBriefing from gate output
   const situationalBriefing = gateOutput ? formatGateBriefing(gateOutput) : null
-
-  // Determine allowed tools for this step (hoisted for use in skill pack scoping)
-  const stepAllowedTools = conversation.workflowSession?.currentStep.allowedTools ?? []
-
-  let sections: Awaited<ReturnType<typeof loadAllSections>>
-  try {
-    // Build WorkflowSessionData from current conversation state
-    const workflowSessionData: WorkflowSessionData | null = conversation.workflowSession
-      ? {
-          currentStepCode: conversation.workflowSession.currentStep.code,
-          currentStepName: conversation.workflowSession.currentStep.name,
-          agentInstructions: conversation.workflowSession.currentStep.agentInstructions,
-          allowedTools: conversation.workflowSession.currentStep.allowedTools,
-          data: conversation.workflowSession.data,
-        }
-      : null
-
-    sections = await loadAllSections({
-      agentConfig: { systemPrompt: agentConfig.systemPrompt, constraints: agentConfig.constraints },
-      allowedTools: stepAllowedTools,
-      productId: state.productId,
-      conversationId: state.conversationId,
-      customerId: state.customerId,
-      workflowSession: workflowSessionData,
-      workflowStepCode: state.workflowStepCode,
-      situationalBriefing,
-      language: state.language,
-    })
-  } catch (err) {
-    logWarn({
-      layer: 'orchestrator',
-      category: 'db_error',
-      message: 'Context assembly failed, using minimal context',
-      context: { conversationId: state.conversationId },
-      error: err,
-    })
-    // Minimal fallback — identity and constraints only
-    sections = {
-      agentIdentity: agentConfig.systemPrompt,
-      capabilityManifest: null,
-      constraints: agentConfig.constraints,
-      complianceGuidance: null,
-      situationalBriefing: null,
-      customerMemory: null,
-      agentKnowledge: null,
-      customerContext: null,
-      coachingBriefing: null,
-      workflowInstructions: null,
-      questionnaireContext: null,
-      productContext: null,
-    }
-  }
+  sections.situationalBriefing = situationalBriefing
 
   // --- Skill pack loading and merging ---
   const recommendedSlugs = gateOutput?.recommendedSkillPacks ?? []
@@ -559,44 +534,33 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     })
   }
 
-  // --- Conditional compliance check (parallel with remaining Step 4 work) ---
-  let compliancePromise: Promise<ComplianceCheckResult> | null = null
+  // --- Conditional compliance check ---
   if (gateOutput?.complianceRelevant) {
-    // Load recent messages for compliance check context
-    const recentForCompliance = await prisma.message.findMany({
-      where: { conversationId: state.conversationId },
-      orderBy: { createdAt: 'desc' },
-      take: 10,
-      select: { role: true, content: true },
-    })
-    const complianceMessages: Message[] = recentForCompliance
-      .reverse()
+    // Use recent messages from turnCtx instead of querying DB again
+    const complianceMessages: Message[] = turnCtx.recentMessages
+      .slice(-10)
       .map((m) => ({ role: m.role as Message['role'], content: m.content }))
 
-    compliancePromise = executeComplianceCheck({
-      messages: complianceMessages,
-      workflowStepCode: state.workflowStepCode,
-      customerProfile: null,
-    }).catch(() => ({
-      passed: true as const,
-      gaps: [] as string[],
-      suggestions: [] as string[],
-    }))
-  }
-
-  if (compliancePromise) {
-    const complianceResult = await compliancePromise
-    state.complianceResult = complianceResult
-    if (!complianceResult.passed && complianceResult.gaps.length > 0) {
-      const guidanceText = [
-        '[COMPLIANCE GUIDANCE - Address before responding]',
-        'The following compliance gaps were detected:',
-        ...complianceResult.gaps.map((g) => `- ${g}`),
-        '',
-        'Suggested actions:',
-        ...complianceResult.suggestions.map((s) => `- ${s}`),
-      ].join('\n')
-      mergedSections.complianceGuidance = guidanceText
+    try {
+      const complianceResult = await executeComplianceCheck({
+        messages: complianceMessages,
+        workflowStepCode: state.workflowStepCode,
+        customerProfile: null,
+      })
+      state.complianceResult = complianceResult
+      if (!complianceResult.passed && complianceResult.gaps.length > 0) {
+        const guidanceText = [
+          '[COMPLIANCE GUIDANCE - Address before responding]',
+          'The following compliance gaps were detected:',
+          ...complianceResult.gaps.map((g) => `- ${g}`),
+          '',
+          'Suggested actions:',
+          ...complianceResult.suggestions.map((s) => `- ${s}`),
+        ].join('\n')
+        mergedSections.complianceGuidance = guidanceText
+      }
+    } catch {
+      state.complianceResult = { passed: true, gaps: [], suggestions: [] }
     }
   }
 
@@ -616,9 +580,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // Build prompt — needed for token budget calculation
   const buildResult = buildPrompt(mergedSections, gateSelection)
   const { prompt: systemPrompt } = buildResult
-
-  state.phases['step4_context'] = Date.now() - step4Start
-  eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'context', durationMs: Date.now() - step4Start })
 
   // =============================================
   // STEP 4b — Calculate token budget
