@@ -229,23 +229,32 @@ AUTONOMOUS LAYER
 
 ---
 
-### Sub-Project #7: Self-Improvement Engine — NOT STARTED
+### Sub-Project #7: Self-Improvement Engine — COMPLETE
 
-**Spec:** Not yet written
-**Plan:** Not yet written
+**Spec:** `docs/superpowers/specs/2026-04-13-self-improvement-design.md`
+**Plan:** `docs/superpowers/plans/2026-04-13-self-improvement.md`
+**Commits:** `b5d628a` through `0a9228f` (17 commits)
 
-**Claude Code patterns to adopt:**
-- **Feature flags for safe rollout** (Claude Code: GrowthBook integration, build-time feature flags via `bun:bundle`)
-- **Scratchpad / shared knowledge store** (Claude Code: durable cross-worker knowledge directory)
-- **Multi-agent coordination** (Claude Code: coordinator spawns workers, results arrive async, never fabricated)
+**Claude Code patterns adopted:**
+- **Multi-agent coordination** (Claude Code: coordinator spawns workers, results arrive async) — 4-agent daily batch pipeline (Scorer → Analyzer → Proposer → Tracker)
+- **Scratchpad / shared knowledge store** (Claude Code: durable cross-worker knowledge directory) — AgentKnowledge successRate/sampleSize updated from conversation outcomes
+- **Human-in-the-loop approval** — Admin reviews and approves/rejects LLM-generated improvement proposals
 
-**Expected deliverables (to be designed):**
-- Debrief agent — analyzes conversation outcomes after each session
-- Daily batch analysis — aggregate learnings, identify patterns across conversations
-- AgentKnowledge writer — propose new objection responses, tool sequences, conversation patterns
-- Human-in-the-loop approval — admin reviews + approves/rejects proposed changes
-- Feedback loop — track effectiveness of adopted improvements
-- A/B testing — skill pack variations with conversion tracking
+**What was delivered:**
+- Weighted conversation scoring (`lib/self-improvement/scorer.ts`) — quote (0.3) + application (0.6) + purchase (1.0), normalized to 0–1
+- Pattern analyzer (`lib/self-improvement/analyzer.ts`) — skill pack grouping, knowledge successRate updates via weighted moving average, message-count pattern detection
+- LLM-powered proposer (`lib/self-improvement/proposer.ts`) — analyzes top/bottom conversations, generates structured improvement proposals
+- Regression tracker (`lib/self-improvement/tracker.ts`) — monitors adopted changes, flags >10% score drops
+- Batch runner (`lib/self-improvement/batch-runner.ts`) — sequential pipeline orchestration with partial failure handling
+- A/B test assigner (`lib/self-improvement/ab-test-assigner.ts`) — random variant assignment at orchestrator Step 3, reloads skill pack content for swapped variants
+- Admin proposals queue (`/admin/proposals`) — list, filter, detail, approve/reject with apply logic
+- Admin A/B tests page (`/admin/ab-tests`) — create, list, end tests, score comparison
+- Admin self-improvement dashboard (`/admin/self-improvement`) — stats, trends, top/bottom performers, regression alerts, batch trigger
+- 7 API routes for proposals CRUD, A/B tests CRUD, dashboard stats, batch trigger
+- 3 new Prisma models: ConversationScore, ImprovementProposal, ABTestVariant
+
+**Files added:** 22 new files (6 pipeline modules, 3 admin pages, 5 client components, 7 API routes, 1 types file)
+**Files modified:** 5 files (schema, orchestrator, sidebar, cost-subscriber, error types)
 
 **Depends on:** Sub-project #1 (AgentKnowledge model), #3 (tool system), #4 (skill pack system), #5 (lifecycle events to observe)
 
@@ -261,10 +270,10 @@ AUTONOMOUS LAYER
 | 4 | Agent Extensibility | COMPLETE | 13 | 2026-04-11 | 2026-04-11 |
 | 5 | Observability & Hooks | COMPLETE | 9 | 2026-04-12 | 2026-04-12 |
 | 6 | Performance | COMPLETE | 11 | 2026-04-13 | 2026-04-13 |
-| **7** | **Self-Improvement Engine** | **NEXT** | 0 | — | — |
+| 7 | Self-Improvement Engine | COMPLETE | 17 | 2026-04-13 | 2026-04-13 |
 
-**Completed:** 6 of 7 sub-projects (49 commits)
-**Next:** Sub-project #7 (Self-Improvement Engine)
+**Completed:** 7 of 7 sub-projects (66 commits)
+**All transformation sub-projects complete.**
 
 ---
 
