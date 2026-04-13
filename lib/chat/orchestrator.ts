@@ -39,6 +39,7 @@ import { isContextLengthError, parseTokenDeficit } from '@/lib/llm/errors'
 import { logError, logWarn, logFatal } from '@/lib/errors/logger'
 import { CircuitOpenError, TimeoutError } from '@/lib/errors/types'
 import { eventBus, initObservability, getTurnCost, getTurnAnomalies } from '@/lib/events'
+import { applyABTestVariant } from '@/lib/self-improvement/ab-test-assigner'
 
 // ==============================================
 // CONSTANTS
@@ -506,6 +507,14 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       slugs: state.activeSkillPacks,
       conversationId: state.conversationId,
     })
+  }
+
+  // A/B test variant assignment
+  if (state.activeSkillPacks.length > 0) {
+    state.activeSkillPacks = await applyABTestVariant(
+      state.activeSkillPacks,
+      state.conversationId,
+    )
   }
 
   // Merge skill pack sections into base sections
