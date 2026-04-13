@@ -12,6 +12,9 @@ import {
   Layers,
   Menu,
   X,
+  Lightbulb,
+  FlaskConical,
+  TrendingUp,
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -27,6 +30,9 @@ const NAV_ITEMS = [
   { href: '/admin/agents', label: 'Agenti AI', icon: Settings, adminOnly: true },
   { href: '/admin/skill-packs', label: 'Skill Packs', icon: Layers, adminOnly: true },
   { href: '/admin/users', label: 'Utilizatori', icon: Users, adminOnly: true },
+  { href: '/admin/proposals', label: 'Proposals', icon: Lightbulb, adminOnly: true },
+  { href: '/admin/ab-tests', label: 'A/B Tests', icon: FlaskConical, adminOnly: true },
+  { href: '/admin/self-improvement', label: 'Self-Improve', icon: TrendingUp, adminOnly: true },
 ]
 
 export default function AdminSidebar({ role }: AdminSidebarProps) {
