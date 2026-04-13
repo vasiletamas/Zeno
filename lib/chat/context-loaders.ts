@@ -463,6 +463,81 @@ export async function loadCustomerContext(
   return parts.length > 0 ? parts.join('\n') : null
 }
 
+/** Shape of pre-fetched customer data (matches TurnContextCustomer) */
+export interface PrefetchedCustomer {
+  name: string | null
+  dateOfBirth: Date | null
+  extractedProfile: Record<string, unknown>
+  language: string
+  isAnonymous: boolean
+}
+
+/**
+ * Load customer context section from pre-fetched data.
+ * Same formatting logic as loadCustomerContext but takes data directly
+ * instead of querying the DB.
+ */
+export function loadCustomerContextFromData(
+  data: PrefetchedCustomer,
+): string | null {
+  const parts: string[] = []
+
+  // Basic info
+  if (data.name) {
+    parts.push(`Name: ${data.name}`)
+  }
+  parts.push(`Language: ${data.language}`)
+
+  if (data.dateOfBirth) {
+    const age = calculateAge(data.dateOfBirth)
+    parts.push(`Age: ${age}`)
+  }
+
+  if (data.isAnonymous) {
+    parts.push('Status: Anonymous visitor')
+  }
+
+  // Extracted profile
+  const profile = data.extractedProfile
+
+  // Demographics
+  if (profile.occupation && typeof profile.occupation === 'string') {
+    parts.push(`Occupation: ${profile.occupation}`)
+  }
+  if (profile.incomeLevel && typeof profile.incomeLevel === 'string') {
+    parts.push(`Income level: ${profile.incomeLevel}`)
+  }
+  if (profile.education && typeof profile.education === 'string') {
+    parts.push(`Education: ${profile.education}`)
+  }
+
+  // Family
+  if (profile.familySize != null) {
+    parts.push(`Family size: ${String(profile.familySize)}`)
+  }
+  if (profile.hasSpouse != null) {
+    parts.push(`Has spouse: ${String(profile.hasSpouse)}`)
+  }
+  if (profile.hasChildren != null) {
+    parts.push(`Has children: ${String(profile.hasChildren)}`)
+  }
+  if (profile.minorChildren != null) {
+    parts.push(`Minor children: ${String(profile.minorChildren)}`)
+  }
+
+  // Motivations and interests
+  if (Array.isArray(profile.motivations) && profile.motivations.length > 0) {
+    parts.push(
+      `Motivations: ${(profile.motivations as string[]).join(', ')}`,
+    )
+  }
+  if (Array.isArray(profile.interests) && profile.interests.length > 0) {
+    parts.push(`Interests: ${(profile.interests as string[]).join(', ')}`)
+  }
+
+  return parts.length > 0 ? parts.join('\n') : null
+}
+
 /**
  * Calculate age from date of birth.
  */
@@ -591,6 +666,7 @@ export async function loadAllSections(params: {
   workflowStepCode: string | null
   situationalBriefing: string | null
   language: 'en' | 'ro'
+  prefetchedCustomer?: PrefetchedCustomer
 }): Promise<PromptSections> {
   const {
     agentConfig,
@@ -602,6 +678,7 @@ export async function loadAllSections(params: {
     workflowStepCode,
     situationalBriefing,
     language,
+    prefetchedCustomer,
   } = params
 
   // Synchronous loaders
@@ -622,7 +699,9 @@ export async function loadAllSections(params: {
     productId ? loadProductContext(productId, language) : null,
     productId ? loadCoachingBriefing(productId) : null,
     loadQuestionnaireContext(conversationId, workflowStepCode, language),
-    loadCustomerContext(customerId),
+    prefetchedCustomer
+      ? Promise.resolve(loadCustomerContextFromData(prefetchedCustomer))
+      : loadCustomerContext(customerId),
     loadCustomerMemory(customerId),
     loadAgentKnowledge(productId, workflowStepCode),
   ])
