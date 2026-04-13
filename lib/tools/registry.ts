@@ -88,6 +88,9 @@ export function getToolsForLLM(allowedTools?: string[]): LLMToolDefinition[] {
     })
   }
 
+  // Deterministic sort for stable serialization (prompt cache optimization)
+  result.sort((a, b) => a.function.name.localeCompare(b.function.name))
+
   toolsCache.set(cacheKey, result)
   return result
 }
