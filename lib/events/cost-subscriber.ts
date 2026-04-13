@@ -22,7 +22,7 @@ async function getModelPricing(provider: string, model: string): Promise<ModelPr
 
   try {
     const catalog = await prisma.modelCatalog.findFirst({
-      where: { provider, modelId: model },
+      where: { provider: provider as 'OPENAI' | 'ANTHROPIC', modelId: model },
       select: { costPer1kInputTokens: true, costPer1kOutputTokens: true },
     })
 

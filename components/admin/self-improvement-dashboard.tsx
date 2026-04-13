@@ -8,7 +8,7 @@ interface DashboardData {
   avgScore7d: number
   scoreCount7d: number
   proposals: { pending: number; approved: number; rejected: number }
-  topSkillPacks: { skillPackSlugs: string[]; _avg: { score: number }; _count: { _all: number } }[]
+  topSkillPacks: { skillPackSlugs: string[]; _avg: { score: number | null }; _count: { _all: number } }[]
   lowKnowledge: { id: string; category: string; trigger: string; successRate: number; sampleSize: number }[]
   activeRegressions: { id: string; title: string; description: string; createdAt: string }[]
   batchRunning: boolean

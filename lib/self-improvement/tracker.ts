@@ -16,7 +16,7 @@ export async function trackAdoptedProposals(): Promise<number> {
     where: {
       status: 'APPROVED',
       appliedAt: { not: null },
-      baselineMetrics: { not: null },
+      // baselineMetrics is always set when approving — filter in-memory
     },
   })
 
@@ -58,12 +58,12 @@ export async function trackAdoptedProposals(): Promise<number> {
             `Score dropped ${Math.round(dropPct * 100)}% after adopting "${proposal.title}" ` +
             `(baseline: ${baseline.avgScore.toFixed(3)}, current: ${postAvg.toFixed(3)}, ` +
             `sample: ${postCount} conversations). Consider reverting this change.`,
-          diff: { insight: { observation: `Regression from proposal ${proposal.id}` } },
+          diff: { insight: { observation: `Regression from proposal ${proposal.id}` } } as object,
           evidence: {
-            conversationIds: [],
+            conversationIds: [] as string[],
             sampleSize: postCount,
             confidence: Math.min(postCount / 100, 1.0),
-          },
+          } as object,
           status: 'PENDING',
         },
       })

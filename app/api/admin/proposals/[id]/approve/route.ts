@@ -36,7 +36,7 @@ export async function POST(
     const diff = proposal.diff as ProposalDiff
 
     // Compute baseline metrics before applying
-    let baselineMetrics: Record<string, unknown> = {}
+    let baselineMetrics: { avgScore: number; sampleSize: number } | Record<string, never> = {}
 
     // Apply the change based on type
     switch (proposal.type) {

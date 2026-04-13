@@ -36,7 +36,7 @@ export async function applyABTestVariant(
         data: {
           metadata: {
             abTest: { testId: test.id, variant: 'B' },
-          },
+          } as object,
         },
       })
     } else {

@@ -166,12 +166,12 @@ Generate 1-5 proposals. Only propose changes you are confident about (>0.6).`
         type: proposal.type as 'KNOWLEDGE_CREATE' | 'KNOWLEDGE_UPDATE' | 'SKILLPACK_UPDATE' | 'INSIGHT',
         title: proposal.title,
         description: proposal.description,
-        diff: proposal.diff as Record<string, unknown>,
+        diff: proposal.diff as object,
         evidence: {
           conversationIds: allConvIds,
           sampleSize: allConvIds.length,
           confidence: proposal.confidence,
-        },
+        } as object,
         status: 'PENDING',
       },
     })
