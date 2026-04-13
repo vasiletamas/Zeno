@@ -199,23 +199,33 @@ AUTONOMOUS LAYER
 
 ---
 
-### Sub-Project #6: Performance — NOT STARTED
+### Sub-Project #6: Performance — COMPLETE
 
-**Spec:** Not yet written
-**Plan:** Not yet written
+**Spec:** `docs/superpowers/specs/2026-04-13-performance-design.md`
+**Plan:** `docs/superpowers/plans/2026-04-13-performance.md`
+**Commits:** `a3ea8df` through `a65ee40` (11 commits)
 
-**Claude Code patterns to adopt:**
-- **Lazy module loading** (Claude Code: OpenTelemetry ~1.1MB loaded only when enabled)
-- **Parallel prefetch on startup** (Claude Code: MDM, keychain, API preconnect in parallel)
-- **Memoization** (Claude Code: memoized git status, CLAUDE.md content)
+**Claude Code patterns adopted:**
+- **Parallel prefetch** (Claude Code: MDM, keychain, API preconnect in parallel) — Steps 3+4 run concurrently, consolidated turn context query (4 parallel DB queries replace ~10 sequential)
+- **Session memory / proactive summarization** (Claude Code: incremental background extraction) — Stale-while-revalidate summaries, proactive background refresh in Step 9, incremental summarization
+- **Prompt cache optimization** (Claude Code: prompt caching strategy) — Generic `CacheHint` on `Message` type, Anthropic adapter maps to `cache_control` on separate system content blocks, `cache:status` event for hit rate tracking
+- **Memoization** (Claude Code: memoized git status, CLAUDE.md content) — Deterministic tool sort for stable prompt prefix serialization
 
-**Expected deliverables (to be designed):**
-- Prompt caching optimization — fine-tune stable/dynamic prefix split for max cache hits
-- LRU cache tuning — monitor hit rates, adjust TTLs based on data volatility
-- Database query optimization — N+1 elimination, connection pooling
-- Response latency optimization — identify and fix slowest pipeline phases using TurnTrace data
+**What was delivered:**
+- Pipeline parallelization — Steps 3 (reasoning gate) + 4 (context assembly) run concurrently via `Promise.all`
+- Consolidated turn context query (`lib/chat/turn-context.ts`) — 4 parallel queries replace ~10 sequential DB round trips
+- `loadAllSections` accepts `prefetchedCustomer` to skip redundant customer DB query
+- Proactive summarizer — stale-while-revalidate in `buildSlidingWindow`, background refresh via `updateSummaryIfStale` in Step 9, incremental summarization prompt
+- Generic `CacheHint` interface on `Message` type (`lib/llm/providers/types.ts`)
+- Anthropic adapter creates separate system content blocks with `cache_control` based on `cacheHint`
+- `cache:status` event in `ZenoEvent` union with `parseCacheUsage` in gateway (Anthropic + OpenAI)
+- Deterministic alphabetical sort in `getToolsForLLM` for stable prompt prefix
+- Performance benchmark suite (`__tests__/performance/`) — 4 scenarios with timing assertions, mock LLM provider, phase timing collector
 
-**Depends on:** Sub-project #1 (prompt caching infra), Sub-project #5 (metrics to identify bottlenecks)
+**Files added:** `lib/chat/turn-context.ts`, `__tests__/performance/bench-helpers.ts`, `__tests__/performance/bench-pipeline.test.ts`, + 6 test files
+**Files modified:** `lib/chat/orchestrator.ts`, `lib/chat/context-loaders.ts`, `lib/chat/sliding-window.ts`, `lib/llm/providers/types.ts`, `lib/llm/providers/anthropic.ts`, `lib/llm/gateway.ts`, `lib/events/types.ts`, `lib/tools/registry.ts`
+
+**Depends on:** Sub-project #1 (prompt caching infra, LRU cache), Sub-project #5 (event bus for timing)
 
 ---
 
@@ -250,11 +260,11 @@ AUTONOMOUS LAYER
 | 3 | Tool System | COMPLETE | 5 | 2026-04-11 | 2026-04-11 |
 | 4 | Agent Extensibility | COMPLETE | 13 | 2026-04-11 | 2026-04-11 |
 | 5 | Observability & Hooks | COMPLETE | 9 | 2026-04-12 | 2026-04-12 |
-| **6** | **Performance** | **NEXT** | 0 | — | — |
-| 7 | Self-Improvement Engine | Planned | 0 | — | — |
+| 6 | Performance | COMPLETE | 11 | 2026-04-13 | 2026-04-13 |
+| **7** | **Self-Improvement Engine** | **NEXT** | 0 | — | — |
 
-**Completed:** 5 of 7 sub-projects (38 commits)
-**Next:** Sub-project #6 (Performance)
+**Completed:** 6 of 7 sub-projects (49 commits)
+**Next:** Sub-project #7 (Self-Improvement Engine)
 
 ---
 
@@ -283,8 +293,10 @@ Key architectural patterns already adopted or planned for adoption:
 | Three-layer observability | OTel + analytics + cost tracking | Adopted (OTel + Sentry + cost + anomaly + PostHog) | #5 |
 | Cost tracking | `cost-tracker.ts`, `getTotalCost()` | Adopted (ModelCatalog pricing → TurnTrace.cost) | #5 |
 | **Feature flags** | GrowthBook + `bun:bundle` feature() | **Planned** | **#7** |
-| **Lazy module loading** | OTel loaded only when enabled | **Planned** | **#6** |
-| **Parallel prefetch** | Startup preconnect | **Planned** | **#6** |
+| Lazy module loading | OTel loaded only when enabled | Adopted (Sub-project #5) | #5 |
+| Parallel prefetch / pipeline parallelization | Startup preconnect | Adopted (Steps 3+4 concurrent, turn context) | #6 |
+| Prompt cache optimization | Prompt caching strategy | Adopted (CacheHint, Anthropic adapter, cache:status event) | #6 |
+| Proactive summarization | Session memory extraction | Adopted (stale-while-revalidate, background refresh) | #6 |
 
 ---
 
