@@ -75,25 +75,41 @@ export class AnthropicProvider implements LLMProviderInterface {
    * 6. Conversation must start with user message
    */
   private convertMessages(messages: Message[]): {
-    system: Array<{ type: 'text'; text: string; cache_control: { type: 'ephemeral' } }> | undefined
+    system: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }> | undefined
     messages: MessageParam[]
   } {
-    // 1. Extract system messages
-    const systemParts: string[] = []
+    // 1. Extract system messages — each becomes a separate text block (supports per-block cache hints)
+    const systemBlocks: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }> = []
     const nonSystemMessages: Message[] = []
 
     for (const msg of messages) {
       if (msg.role === 'system') {
-        if (msg.content) systemParts.push(msg.content)
+        if (msg.content) {
+          if (msg.cacheHint) {
+            systemBlocks.push({
+              type: 'text' as const,
+              text: msg.content,
+              cache_control: { type: 'ephemeral' as const },
+            })
+          } else {
+            systemBlocks.push({
+              type: 'text' as const,
+              text: msg.content,
+            })
+          }
+        }
       } else {
         nonSystemMessages.push(msg)
       }
     }
 
-    // Use content blocks with cache_control for prompt caching
-    const system = systemParts.length > 0
-      ? [{ type: 'text' as const, text: systemParts.join('\n\n'), cache_control: { type: 'ephemeral' as const } }]
-      : undefined
+    // Backward compat: if there's exactly one system block without cache_control,
+    // add it (preserves existing behavior for callers not using cache hints)
+    if (systemBlocks.length === 1 && !systemBlocks[0].cache_control) {
+      systemBlocks[0].cache_control = { type: 'ephemeral' as const }
+    }
+
+    const system = systemBlocks.length > 0 ? systemBlocks : undefined
 
     // 2. Convert individual messages
     const converted: MessageParam[] = []
