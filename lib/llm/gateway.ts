@@ -24,6 +24,30 @@ import type {
 import { eventBus } from '@/lib/events'
 
 // ==============================================
+// CACHE USAGE
+// ==============================================
+
+export interface CacheUsage {
+  cacheRead: number
+  cacheWrite: number
+  cacheHit: boolean
+}
+
+export function parseCacheUsage(provider: string, usage: Record<string, unknown>): CacheUsage {
+  if (provider === 'ANTHROPIC') {
+    const cacheRead = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0
+    const cacheWrite = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0
+    return { cacheRead, cacheWrite, cacheHit: cacheRead > 0 }
+  }
+  if (provider === 'OPENAI') {
+    const details = usage.prompt_tokens_details as Record<string, unknown> | undefined
+    const cached = typeof details?.cached_tokens === 'number' ? details.cached_tokens : 0
+    return { cacheRead: cached, cacheWrite: 0, cacheHit: cached > 0 }
+  }
+  return { cacheRead: 0, cacheWrite: 0, cacheHit: false }
+}
+
+// ==============================================
 // GATEWAY OPTIONS
 // ==============================================
 
@@ -157,6 +181,16 @@ export const gateway = {
       durationMs,
       timestamp: new Date(),
     })
+
+    if (options.traceId) {
+      const cacheUsage = parseCacheUsage(config.provider, result.usage as unknown as Record<string, unknown>)
+      eventBus.emit({
+        type: 'cache:status',
+        traceId: options.traceId,
+        provider: config.provider,
+        ...cacheUsage,
+      })
+    }
 
     return result
   },
@@ -294,4 +328,14 @@ async function* trackStreamCompletion(
     durationMs,
     timestamp: new Date(),
   })
+
+  if (meta.traceId) {
+    const cacheUsage = parseCacheUsage(meta.provider, usage as unknown as Record<string, unknown>)
+    eventBus.emit({
+      type: 'cache:status',
+      traceId: meta.traceId,
+      provider: meta.provider,
+      ...cacheUsage,
+    })
+  }
 }
