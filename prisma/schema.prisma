@@ -84,6 +84,19 @@ enum KnowledgeCategory {
   PROMPT_FRAGMENT
 }
 
+enum ProposalType {
+  KNOWLEDGE_CREATE
+  KNOWLEDGE_UPDATE
+  SKILLPACK_UPDATE
+  INSIGHT
+}
+
+enum ProposalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 // ==========================================
 // DOMAIN: CORE PRODUCT
 // ==========================================
@@ -302,6 +315,7 @@ model Conversation {
   answers         Answer[]
   application     Application?
   turnTraces      TurnTrace[]
+  score           ConversationScore?
 }
 
 model Message {
@@ -697,4 +711,63 @@ model AgentKnowledge {
 
   @@index([category, isActive])
   @@index([productId, workflowStepCode])
+}
+
+// ==========================================
+// DOMAIN: SELF-IMPROVEMENT
+// ==========================================
+
+model ConversationScore {
+  id                   String   @id @default(cuid())
+  conversationId       String   @unique
+  quoteGenerated       Boolean
+  applicationSubmitted Boolean
+  policyPurchased      Boolean
+  score                Float
+  messageCount         Int
+  totalCost            Float
+  totalLatencyMs       Int
+  anomalyCount         Int
+  mode                 String
+  skillPackSlugs       String[]
+  scoredAt             DateTime @default(now())
+  createdAt            DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+
+  @@index([scoredAt])
+  @@index([score])
+}
+
+model ImprovementProposal {
+  id              String         @id @default(cuid())
+  type            ProposalType
+  title           String
+  description     String         @db.Text
+  diff            Json
+  evidence        Json
+  status          ProposalStatus @default(PENDING)
+  adminNotes      String?        @db.Text
+  appliedAt       DateTime?
+  baselineMetrics Json?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([status, createdAt])
+}
+
+model ABTestVariant {
+  id             String    @id @default(cuid())
+  name           String
+  skillPackSlugA String
+  skillPackSlugB String
+  splitRatio     Float
+  isActive       Boolean   @default(true)
+  startedAt      DateTime  @default(now())
+  endedAt        DateTime?
+  conversationsA Int       @default(0)
+  conversationsB Int       @default(0)
+  createdAt      DateTime  @default(now())
+
+  @@index([isActive])
 }
