@@ -509,17 +509,25 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     })
   }
 
-  // A/B test variant assignment
+  // A/B test variant assignment — may swap skill pack slugs
+  let effectivePacks = activePacks
   if (state.activeSkillPacks.length > 0) {
+    const originalSlugs = state.activeSkillPacks
     state.activeSkillPacks = await applyABTestVariant(
       state.activeSkillPacks,
       state.conversationId,
     )
+    // Reload packs if A/B test swapped any slugs
+    const slugsChanged = originalSlugs.length !== state.activeSkillPacks.length ||
+      originalSlugs.some((s, i) => s !== state.activeSkillPacks[i])
+    if (slugsChanged) {
+      effectivePacks = await getActiveSkillPacks(state.activeSkillPacks)
+    }
   }
 
   // Merge skill pack sections into base sections
-  const mergedSections: PromptSections = activePacks.length > 0
-    ? mergeSkillPackSections(sections as unknown as Record<string, string | null>, activePacks) as unknown as PromptSections
+  const mergedSections: PromptSections = effectivePacks.length > 0
+    ? mergeSkillPackSections(sections as unknown as Record<string, string | null>, effectivePacks) as unknown as PromptSections
     : sections
 
   // --- Mode transition from gate output ---
@@ -678,8 +686,8 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const step7Start = Date.now()
 
   let toolContext = await buildToolContext(state.customerId, state.conversationId, state.language)
-  const effectiveTools = activePacks.length > 0
-    ? computeAllowedTools(stepAllowedTools, activePacks)
+  const effectiveTools = effectivePacks.length > 0
+    ? computeAllowedTools(stepAllowedTools, effectivePacks)
     : stepAllowedTools
   const tools: LLMToolDefinition[] = getToolsForLLM(effectiveTools.length > 0 ? effectiveTools : undefined)
   let finalContent = ''
