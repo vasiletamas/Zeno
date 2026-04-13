@@ -54,6 +54,16 @@ export interface LLMToolDefinition {
 export type ToolChoice = 'auto' | 'none' | 'required' | { name: string }
 
 // ==============================================
+// CACHE HINTS
+// ==============================================
+
+/** Provider-agnostic cache hint for prompt caching optimization. */
+export interface CacheHint {
+  /** 'ephemeral' = cache for this session; 'persistent' = long-lived cache */
+  breakpoint: 'ephemeral' | 'persistent'
+}
+
+// ==============================================
 // MESSAGE FORMAT
 // ==============================================
 
@@ -67,6 +77,8 @@ export interface Message {
   toolCallId?: string
   /** Preserve native provider content blocks (e.g. Anthropic thinking). Pass-through only. */
   _providerContent?: unknown
+  /** Optional hint for provider-level prompt caching. */
+  cacheHint?: CacheHint
 }
 
 // ==============================================

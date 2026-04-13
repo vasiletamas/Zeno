@@ -643,9 +643,13 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'build_messages', timestamp: Date.now() })
   const step6Start = Date.now()
 
-  const messages: Message[] = [
-    { role: 'system' as const, content: systemPrompt },
-  ]
+  const messages: Message[] = []
+  if (buildResult.stablePrefix) {
+    messages.push({ role: 'system' as const, content: buildResult.stablePrefix, cacheHint: { breakpoint: 'ephemeral' } })
+  }
+  if (buildResult.dynamicSuffix) {
+    messages.push({ role: 'system' as const, content: buildResult.dynamicSuffix })
+  }
   if (summaryPrefix) {
     messages.push({
       role: 'system' as const,
@@ -759,7 +763,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     // Stream a natural language response
     const responseStream = await gateway.stream(agentSlug, {
       messages,
-      overrideSystemPrompt: systemPrompt,
       traceId: state.traceId,
     })
 
@@ -786,7 +789,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           messages,
           tools: toolChoice === 'none' ? undefined : tools,
           toolChoice: toolChoice === 'none' ? undefined : toolChoice,
-          overrideSystemPrompt: systemPrompt,
           traceId: state.traceId,
         })
       } catch (err) {
@@ -802,7 +804,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
             messages,
             tools: toolChoice === 'none' ? undefined : tools,
             toolChoice: toolChoice === 'none' ? undefined : toolChoice,
-            overrideSystemPrompt: systemPrompt,
             traceId: state.traceId,
           })
         } else if (err instanceof CircuitOpenError) {
@@ -819,7 +820,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
                 messages,
                 tools: toolChoice === 'none' ? undefined : tools,
                 toolChoice: toolChoice === 'none' ? undefined : toolChoice,
-                overrideSystemPrompt: systemPrompt,
                 traceId: state.traceId,
               })
               retrySucceeded = true
