@@ -79,6 +79,10 @@ export function logWarn(input: ErrorInput): string {
   return emitLog('warn', input)
 }
 
+export function logInfo(input: ErrorInput): string {
+  return emitLog('info', input)
+}
+
 export function logFatal(input: ErrorInput): string {
   return emitLog('fatal', input)
 }

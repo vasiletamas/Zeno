@@ -4,8 +4,8 @@
 // ERROR SEVERITY & LAYER
 // ==============================================
 
-export type ErrorSeverity = 'warn' | 'error' | 'fatal'
-export type ErrorLayer = 'provider' | 'gateway' | 'orchestrator' | 'tool' | 'api'
+export type ErrorSeverity = 'info' | 'warn' | 'error' | 'fatal'
+export type ErrorLayer = 'provider' | 'gateway' | 'orchestrator' | 'tool' | 'api' | 'self-improvement'
 
 // ==============================================
 // CUSTOM ERROR CLASSES
