@@ -27,6 +27,9 @@ export default async function SelfImprovementPage() {
     topSkillPacks,
     lowKnowledge,
     activeRegressions,
+    simulationRuns,
+    simulatedScores,
+    realScores,
   ] = await Promise.all([
     prisma.conversationScore.count(),
     prisma.conversationScore.findMany({
@@ -54,6 +57,27 @@ export default async function SelfImprovementPage() {
       where: { type: 'INSIGHT', status: 'PENDING', title: { startsWith: 'Regression' } },
       orderBy: { createdAt: 'desc' },
       take: 5,
+    }),
+    // Simulation runs (last 10)
+    prisma.simulationRun.findMany({
+      orderBy: { startedAt: 'desc' },
+      take: 10,
+    }),
+    // Simulated scores (7d)
+    prisma.conversationScore.findMany({
+      where: {
+        scoredAt: { gte: sevenDaysAgo },
+        conversation: { channel: 'simulation' },
+      },
+      select: { score: true },
+    }),
+    // Real scores (7d)
+    prisma.conversationScore.findMany({
+      where: {
+        scoredAt: { gte: sevenDaysAgo },
+        conversation: { channel: { not: 'simulation' } },
+      },
+      select: { score: true },
     }),
   ])
 
@@ -84,6 +108,27 @@ export default async function SelfImprovementPage() {
             createdAt: r.createdAt.toISOString(),
           })),
           batchRunning: isBatchRunning(),
+          simulationRuns: simulationRuns.map((r) => ({
+            id: r.id,
+            status: r.status,
+            trigger: r.trigger,
+            totalScenarios: r.totalScenarios,
+            completedCount: r.completedCount,
+            failedCount: r.failedCount,
+            avgScore: r.avgScore,
+            errors: r.errors as string[],
+            startedAt: r.startedAt.toISOString(),
+            completedAt: r.completedAt?.toISOString() ?? null,
+          })),
+          simulationRunning: false,
+          simulatedAvg7d: simulatedScores.length > 0
+            ? simulatedScores.reduce((s: number, x: { score: number }) => s + x.score, 0) / simulatedScores.length
+            : null,
+          simulatedCount7d: simulatedScores.length,
+          realAvg7d: realScores.length > 0
+            ? realScores.reduce((s: number, x: { score: number }) => s + x.score, 0) / realScores.length
+            : null,
+          realCount7d: realScores.length,
         }}
       />
     </div>

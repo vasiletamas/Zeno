@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import SimulationRunPanel from './simulation-run-panel'
+import SimulationErrorPanel from './simulation-error-panel'
 
 interface DashboardData {
   totalScored: number
@@ -12,6 +14,16 @@ interface DashboardData {
   lowKnowledge: { id: string; category: string; trigger: string; successRate: number; sampleSize: number }[]
   activeRegressions: { id: string; title: string; description: string; createdAt: string }[]
   batchRunning: boolean
+  simulationRuns: {
+    id: string; status: string; trigger: string; totalScenarios: number
+    completedCount: number; failedCount: number; avgScore: number | null
+    errors: string[]; startedAt: string; completedAt: string | null
+  }[]
+  simulationRunning: boolean
+  simulatedAvg7d: number | null
+  simulatedCount7d: number
+  realAvg7d: number | null
+  realCount7d: number
 }
 
 interface SelfImprovementDashboardProps {
@@ -119,6 +131,42 @@ export default function SelfImprovementDashboard({ data }: SelfImprovementDashbo
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Simulated vs Real comparison */}
+      {(data.simulatedCount7d > 0 || data.realCount7d > 0) && (
+        <div className="grid grid-cols-2 gap-4">
+          <StatCard
+            label="Simulated Avg (7d)"
+            value={data.simulatedAvg7d !== null ? `${(data.simulatedAvg7d * 100).toFixed(1)}%` : 'N/A'}
+            sub={`${data.simulatedCount7d} conversations`}
+          />
+          <StatCard
+            label="Real Avg (7d)"
+            value={data.realAvg7d !== null ? `${(data.realAvg7d * 100).toFixed(1)}%` : 'N/A'}
+            sub={`${data.realCount7d} conversations`}
+          />
+        </div>
+      )}
+
+      {/* Simulation */}
+      <div className="rounded-lg border border-warm-border bg-white p-4">
+        <SimulationRunPanel
+          runs={data.simulationRuns}
+          simulationRunning={data.simulationRunning}
+        />
+      </div>
+
+      {/* Simulation Errors */}
+      {data.simulationRuns.some(r => r.errors.length > 0) && (
+        <div className="rounded-lg border border-warm-border bg-white p-4">
+          <h3 className="text-sm font-medium text-night mb-3">Simulation Errors</h3>
+          <SimulationErrorPanel
+            errorsByRun={data.simulationRuns
+              .filter(r => r.errors.length > 0)
+              .map(r => ({ runId: r.id, runDate: r.startedAt, errors: r.errors }))}
+          />
         </div>
       )}
     </div>
