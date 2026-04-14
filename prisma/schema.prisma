@@ -303,7 +303,7 @@ model Conversation {
   lastActivityAt   DateTime           @default(now())
   metadata         Json?
   mode             String             @default("SALES")
-  activeSkillPacks String[]
+  activeSkillPacks String[]           @default([])
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
@@ -316,6 +316,7 @@ model Conversation {
   application     Application?
   turnTraces      TurnTrace[]
   score           ConversationScore?
+  simulationConversation SimulationConversation?
 }
 
 model Message {
@@ -770,4 +771,49 @@ model ABTestVariant {
   createdAt      DateTime  @default(now())
 
   @@index([isActive])
+}
+
+// ==========================================
+// DOMAIN: CUSTOMER SIMULATION
+// ==========================================
+
+model SimulationRun {
+  id             String    @id @default(cuid())
+  status         String    @default("RUNNING")
+  trigger        String
+  config         Json
+  totalScenarios Int
+  completedCount Int       @default(0)
+  failedCount    Int       @default(0)
+  avgScore       Float?
+  errors         Json      @default("[]")
+  startedAt      DateTime  @default(now())
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+
+  conversations SimulationConversation[]
+
+  @@index([status])
+  @@index([startedAt])
+}
+
+model SimulationConversation {
+  id             String   @id @default(cuid())
+  runId          String
+  conversationId String   @unique
+  personaSlug    String
+  scenarioType   String
+  scenarioSlug   String?
+  status         String   @default("RUNNING")
+  turnCount      Int      @default(0)
+  error          String?  @db.Text
+  score          Float?
+  durationMs     Int?
+  createdAt      DateTime @default(now())
+
+  run          SimulationRun @relation(fields: [runId], references: [id])
+  conversation Conversation  @relation(fields: [conversationId], references: [id])
+
+  @@index([runId])
+  @@index([personaSlug])
 }
