@@ -46,7 +46,7 @@ export default function SimulationTranscriptViewer({ conversationId }: { convers
               {msg.role === 'user' ? 'Customer' : msg.role === 'assistant' ? 'Zeno' : 'System'}
             </span>
             {msg.content}
-            {msg.toolCalls && <div className="mt-1 text-xs text-muted">Tools: {JSON.stringify(msg.toolCalls)}</div>}
+            {msg.toolCalls ? <div className="mt-1 text-xs text-muted">Tools: {String(JSON.stringify(msg.toolCalls))}</div> : null}
           </div>
         ))}
       </div>

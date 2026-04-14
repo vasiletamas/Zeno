@@ -73,7 +73,7 @@ export async function runSimulation(config: SimulationConfig): Promise<RunResult
     data: {
       trigger: config.trigger,
       status: 'RUNNING',
-      config: config as Record<string, unknown>,
+      config: JSON.parse(JSON.stringify(config)),
       totalScenarios: 0,
       completedCount: 0,
       failedCount: 0,
@@ -85,7 +85,7 @@ export async function runSimulation(config: SimulationConfig): Promise<RunResult
   const conversations: ConversationResult[] = []
 
   try {
-    logInfo('simulation.runner', `Starting simulation run ${runId}`, { config })
+    logInfo({ layer: 'simulation', category: 'runner', message: `Starting simulation run ${runId}`, context: { trigger: config.trigger } })
 
     // -----------------------------------------------
     // SCRIPTED scenarios — run sequentially
@@ -101,9 +101,7 @@ export async function runSimulation(config: SimulationConfig): Promise<RunResult
           answersMap: DEFAULT_ANSWERS,
         })
         conversations.push(result)
-        logInfo('simulation.runner', `Scripted scenario done: ${scenario.slug}`, {
-          status: result.status,
-        })
+        logInfo({ layer: 'simulation', category: 'runner', message: `Scripted scenario done: ${scenario.slug} (${result.status})` })
       }
     }
 
@@ -135,10 +133,7 @@ export async function runSimulation(config: SimulationConfig): Promise<RunResult
       const freeformResults = await runWithConcurrency(tasks, config.concurrency)
       for (const result of freeformResults) {
         conversations.push(result)
-        logInfo('simulation.runner', `Freeform conversation done`, {
-          personaSlug: result.personaSlug,
-          status: result.status,
-        })
+        logInfo({ layer: 'simulation', category: 'runner', message: `Freeform conversation done: ${result.personaSlug} (${result.status})` })
       }
     }
 
@@ -172,22 +167,17 @@ export async function runSimulation(config: SimulationConfig): Promise<RunResult
       },
     })
 
-    logInfo('simulation.runner', `Run ${runId} finished`, {
-      status: overallStatus,
-      totalScenarios,
-      completedCount,
-      failedCount,
-    })
+    logInfo({ layer: 'simulation', category: 'runner', message: `Run ${runId} finished: ${overallStatus} — ${completedCount}/${totalScenarios} ok, ${failedCount} failed` })
 
     // -----------------------------------------------
     // Optional: trigger self-improvement batch
     // -----------------------------------------------
     if (config.runBatchAfter) {
       try {
-        logInfo('simulation.runner', 'Triggering self-improvement batch after simulation')
+        logInfo({ layer: 'simulation', category: 'runner', message: 'Triggering self-improvement batch after simulation' })
         await runDailyBatch()
       } catch (batchErr) {
-        logError('simulation.runner', 'Self-improvement batch failed (non-fatal)', batchErr)
+        logError({ layer: 'simulation', category: 'runner', message: 'Self-improvement batch failed (non-fatal)', error: batchErr })
       }
     }
 
