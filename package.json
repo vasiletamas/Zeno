@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts"
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "simulate": "npx tsx scripts/simulate.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
