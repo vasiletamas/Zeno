@@ -1,36 +1,89 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Zeno — V2 AI Sales Agent
 
-## Getting Started
+Next.js 16 + Prisma 7 + Postgres 16. AI sales agent for Allianz-Tiriac Protect (Romanian life insurance).
 
-First, run the development server:
+## Prerequisites
+
+- **Node.js 22+** (developed on v22.14.0)
+- **npm 10+**
+- **Docker Desktop** (for local Postgres)
+- **git**
+
+## First-time setup on a new machine
 
 ```bash
+# 1. Clone
+git clone <this-repo-url> v2_ai_sales_agent
+cd v2_ai_sales_agent
+
+# 2. Install dependencies
+npm install
+
+# 3. Create your local .env
+cp .env.example .env
+# Then edit .env and fill in real values (see "Required env vars" below).
+# IMPORTANT: .env is gitignored — secrets are NOT in this repo.
+# Bring the .env from your other machine (USB / 1Password / etc.).
+
+# 4. Start Postgres (port 5435 — 5434 is reserved on Vasi's main machine)
+docker compose up -d
+
+# 5. Run database migrations
+npx prisma migrate deploy
+
+# 6. Generate the Prisma client
+npx prisma generate
+
+# 7. Seed baseline data (users, products, questions, agents, skill-packs, simulator persona)
+npx prisma db seed
+
+# 8. Start the dev server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# → http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Required env vars
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+See `.env.example` for the full list. Minimum to run dev locally:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Var | Purpose |
+|---|---|
+| `DATABASE_URL` | Postgres connection (default points at the Docker container on `localhost:5435`) |
+| `OPENAI_API_KEY` | LLM calls (required) |
+| `ANTHROPIC_API_KEY` | LLM calls (required) |
+| `JWT_SECRET` | Session signing — any 64-char hex |
+| `ENCRYPTION_KEY` | PII encryption — 64-char hex (32 bytes) |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Admin login |
+| `APP_URL` | `http://localhost:3000` for dev |
+| `PAYMENT_PROVIDER` | `mock` for dev |
+| `EMAIL_PROVIDER` | `mock` for dev |
 
-## Learn More
+## Common scripts
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run dev         # Next.js dev server
+npm run build       # Production build
+npm test            # Vitest unit tests
+npm run test:e2e    # Vitest e2e tests
+npm run simulate    # Run customer simulation against the running app
+npx prisma studio   # DB browser at localhost:5555
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Customer simulation
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The simulation harness drives synthetic customers through the chat. It expects the app to be running (`npm run dev`).
 
-## Deploy on Vercel
+```bash
+npm run dev          # terminal 1
+npm run simulate     # terminal 2
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Admin dashboard: http://localhost:3000/admin/simulation
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Project layout
+
+- `app/` — Next.js App Router (chat, admin, API routes)
+- `lib/agents/` — agent definitions and the agent runtime
+- `lib/simulation/` — customer simulation runner, personas, scenarios
+- `prisma/` — schema, migrations, seeds
+- `docs/` — design specs and the master transformation plan
