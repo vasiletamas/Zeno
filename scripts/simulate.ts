@@ -4,6 +4,7 @@
  * Runs the customer simulation against the local (or configured) app.
  */
 
+import 'dotenv/config'
 import { runSimulation } from '../lib/simulation/runner'
 import type { SimulationConfig } from '../lib/simulation/types'
 import { DEFAULT_CONFIG } from '../lib/simulation/types'

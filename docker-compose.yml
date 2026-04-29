@@ -2,7 +2,7 @@ services:
   db:
     image: postgres:16-alpine
     ports:
-      - "5434:5432"
+      - "5435:5432"
     environment:
       POSTGRES_USER: zeno
       POSTGRES_PASSWORD: zeno_dev
