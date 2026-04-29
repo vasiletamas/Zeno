@@ -46,3 +46,9 @@ next-env.d.ts
 
 /lib/generated/prisma
 .superpowers/
+
+# playwright artifacts
+.playwright-cli/
+test-results/
+turn*.yml
+
