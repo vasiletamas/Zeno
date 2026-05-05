@@ -56,7 +56,7 @@
 - [ ] **Step 1: Install LLM SDKs**
 
 ```bash
-cd C:/GitHub/v2_ai_sales_agent
+cd C:/GitHub/Zeno
 npm install openai @anthropic-ai/sdk
 ```
 
@@ -520,7 +520,7 @@ export function getAllToolNames(): string[]
 
 Define all 23 tool definitions from the spec's classification table (Section 7.2). For handlers, only `list_products` and `get_product_info` are implemented in A2 — all others get a stub handler that returns `{ success: false, error: 'Not implemented yet' }`.
 
-Read `C:/GitHub/v2_ai_sales_agent/zeno-brand-book.md` starting at line 762 for the complete status message pools.
+Read `C:/GitHub/Zeno/zeno-brand-book.md` starting at line 762 for the complete status message pools.
 
 **Always-allowed tools** (bypass workflow gate):
 ```typescript
@@ -1071,7 +1071,7 @@ git commit -m "feat(a2): complete Slice A2 — LLM gateway, tool pipeline, chat 
    - `C:/GitHub/ai_sales_agent_crm/ai-sales-agent-crm/lib/tools/executor.ts` — tool executor
    - `C:/GitHub/ai_sales_agent_crm/ai-sales-agent-crm/lib/workflows/gate.ts` — workflow gate
 
-4. **Brand book S16:** Read `C:/GitHub/v2_ai_sales_agent/zeno-brand-book.md` starting at line 762 for complete status message pools per tool.
+4. **Brand book S16:** Read `C:/GitHub/Zeno/zeno-brand-book.md` starting at line 762 for complete status message pools per tool.
 
 5. **Streaming pattern:** Use Web Streams API (`ReadableStream`) for SSE. Next.js App Router supports returning `ReadableStream` from route handlers.
 

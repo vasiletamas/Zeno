@@ -13,8 +13,8 @@ Next.js 16 + Prisma 7 + Postgres 16. AI sales agent for Allianz-Tiriac Protect (
 
 ```bash
 # 1. Clone
-git clone <this-repo-url> v2_ai_sales_agent
-cd v2_ai_sales_agent
+git clone <this-repo-url> Zeno
+cd Zeno
 
 # 2. Install dependencies
 npm install

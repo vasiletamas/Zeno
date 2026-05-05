@@ -52,7 +52,7 @@
 
 Run:
 ```bash
-cd C:/GitHub/v2_ai_sales_agent
+cd C:/GitHub/Zeno
 npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir=false --import-alias="@/*" --turbopack --yes
 ```
 
