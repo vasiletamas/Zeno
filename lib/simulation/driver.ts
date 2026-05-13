@@ -234,6 +234,10 @@ export async function driveConversation(options: DriverOptions): Promise<Convers
         where: { conversationId },
         data: { status: 'COMPLETED', turnCount, durationMs: Date.now() - startTime },
       })
+      await prisma.conversation.update({
+        where: { id: conversationId },
+        data: { status: 'COMPLETED', completedAt: new Date() },
+      })
       return {
         conversationId,
         personaSlug: persona.slug,
@@ -265,6 +269,10 @@ export async function driveConversation(options: DriverOptions): Promise<Convers
             await prisma.simulationConversation.update({
               where: { conversationId },
               data: { status: 'ABANDONED', turnCount, durationMs: Date.now() - startTime },
+            })
+            await prisma.conversation.update({
+              where: { id: conversationId },
+              data: { status: 'ABANDONED' },
             })
             return {
               conversationId,
@@ -351,6 +359,18 @@ export async function driveConversation(options: DriverOptions): Promise<Convers
       durationMs,
     },
   })
+
+  // Bridge terminal customer outcomes (not system errors) into the Conversation table
+  // so the self-improvement scorer picks them up.
+  if (finalStatus === 'COMPLETED' || finalStatus === 'ABANDONED') {
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        status: finalStatus,
+        ...(finalStatus === 'COMPLETED' ? { completedAt: new Date() } : {}),
+      },
+    })
+  }
 
   // Step 8: Return result
   return {

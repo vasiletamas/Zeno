@@ -14,6 +14,9 @@ vi.mock('@/lib/db', () => ({
       create: vi.fn().mockResolvedValue({ id: 'sc-1' }),
       update: vi.fn().mockResolvedValue({}),
     },
+    conversation: {
+      update: vi.fn().mockResolvedValue({}),
+    },
   },
 }))
 
@@ -30,8 +33,10 @@ vi.mock('openai', () => ({
 }))
 
 import { sendSimulationMessage } from '@/lib/simulation/sse-client'
+import { prisma } from '@/lib/db'
 
 const mockSend = vi.mocked(sendSimulationMessage)
+const mockConversationUpdate = vi.mocked(prisma.conversation.update)
 
 const testPersona: Persona = {
   slug: 'test-persona',
@@ -133,6 +138,83 @@ describe('driveConversation', () => {
 
     expect(result.status).toBe('FAILED')
     expect(result.error).toContain('Service unavailable')
+  })
+
+  it('bridges COMPLETED status into Conversation table when reaching terminal UI action', async () => {
+    // Turn 0 (opening) — agent immediately emits a terminal UI action
+    mockSend.mockResolvedValueOnce({
+      content: 'Polita emisa!',
+      toolsCalled: [],
+      uiActions: [{ type: 'show_policy_issued', payload: {} }],
+      errors: [], done: { messageId: 'm1' }, rawEvents: [],
+    })
+
+    await driveConversation({
+      persona: testPersona,
+      scenario: null,
+      runId: 'run-1',
+      baseUrl: 'http://localhost:3000',
+      answersMap: {},
+    })
+
+    expect(mockConversationUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'conv-1' },
+        data: expect.objectContaining({ status: 'COMPLETED' }),
+      }),
+    )
+  })
+
+  it('bridges ABANDONED status into Conversation table on scripted abandon', async () => {
+    const scenario: ScriptedScenario = {
+      slug: 'abandon-test',
+      name: 'Abandon Test',
+      personaSlug: 'test-persona',
+      steps: [
+        { trigger: { type: 'turn', number: 1 }, response: { type: 'abandon' } },
+      ],
+    }
+
+    mockSend.mockResolvedValueOnce({
+      content: 'Buna!', toolsCalled: [], uiActions: [],
+      errors: [], done: { messageId: 'm1' }, rawEvents: [],
+    })
+
+    await driveConversation({
+      persona: testPersona,
+      scenario,
+      runId: 'run-1',
+      baseUrl: 'http://localhost:3000',
+      answersMap: {},
+    })
+
+    expect(mockConversationUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'conv-1' },
+        data: expect.objectContaining({ status: 'ABANDONED' }),
+      }),
+    )
+  })
+
+  it('does NOT touch Conversation.status on FAILED (system error, not customer outcome)', async () => {
+    mockSend.mockResolvedValueOnce({
+      content: '', toolsCalled: [], uiActions: [],
+      errors: ['Service unavailable'], done: null, rawEvents: [],
+    })
+
+    await driveConversation({
+      persona: testPersona,
+      scenario: null,
+      runId: 'run-1',
+      baseUrl: 'http://localhost:3000',
+      answersMap: {},
+    })
+
+    // No call to conversation.update with status — system errors shouldn't pollute scoring
+    const statusCalls = mockConversationUpdate.mock.calls.filter(
+      ([arg]) => (arg as { data?: { status?: unknown } } | undefined)?.data?.status !== undefined,
+    )
+    expect(statusCalls).toHaveLength(0)
   })
 
   it('respects maxTurns limit', async () => {
