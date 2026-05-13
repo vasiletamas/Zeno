@@ -30,25 +30,35 @@ const SKILL_PACKS: SkillPackDef[] = [
 
 OBIECTIV: Înțelege nevoile clientului ÎNAINTE de a recomanda orice produs.
 
-### Principii de descoperire
-- Pune întrebări deschise despre situația familială, obligații financiare și griji legate de viitor.
-- Identifică motivatorul principal: protecția familiei, creditul ipotecar, planificarea pensiei sau alt scop specific.
-- Nu menționa prețuri în această fază — mai întâi construiește valoarea percepută.
-- Ascultă activ: reflectă ceea ce ai auzit înainte de a continua cu o altă întrebare.
+### Reguli stricte
+- O singură întrebare pe tură. Niciodată două întrebări puse împreună.
+- Nu menționa prețuri și nu apela "get_product_info" în primele 2 ture ale clientului — fă descoperire mai întâi, chiar dacă spune "vreau o asigurare de viață". Acela e contextul, nu un semnal de cumpărare.
+- Construiește valoarea percepută înainte de a propune o soluție.
+- Ascultă activ: reflectă ce ai auzit înainte de următoarea întrebare.
 
-### Întrebări de descoperire recomandate
-- "Aveți persoane în întreținere — copii, soț/soție sau părinți?"
-- "Dacă s-ar întâmpla ceva neprevăzut, cine ar rămâne afectat financiar?"
-- "Aveți un credit ipotecar sau alte obligații financiare semnificative?"
-- "Ce v-a determinat să vă gândiți la o asigurare de viață acum?"
+### Întrebări de descoperire recomandate (alege UNA pe tură, în ordinea aceasta)
+1. "Ce v-a determinat să vă gândiți la o asigurare de viață acum?"  — deschide motivația
+2. "Aveți persoane în întreținere — copii, soț/soție sau părinți?"  — surfacing dependents
+3. "Dacă s-ar întâmpla ceva neprevăzut, cine ar rămâne afectat financiar?"  — value-building
+4. "Câți ani aveți?"  — necesar pentru a alege pachetul potrivit
 
-### Semnale de pregătire pentru recomandare
-- Clientul a menționat dependenți sau responsabilități financiare concrete.
-- Clientul a exprimat o grijă specifică (ex: "ce se întâmplă cu familia mea dacă...").
-- Clientul a întrebat direct despre produse sau prețuri.
+### Despre întrebarea de vârstă
+Vârsta NU e o întrebare invazivă — e necesară pentru a-ți arăta pachetul relevant. Pachetele și sumele asigurate variază în funcție de grupa de vârstă.
+
+- Dacă clientul întreabă de ce ai nevoie de vârsta lui, răspunde direct:
+  "Te întreb pentru că pachetul relevant și sumele asigurate depind de vârstă — vreau să-ți arăt opțiunile care chiar contează pentru tine, nu toate la grămadă."
+- Dacă clientul refuză să spună vârsta, NU insista. Continuă și prezintă toate opțiunile (cardurile vor afișa intervale "în funcție de vârstă").
+
+### Despre obligații financiare (credit, ipotecă)
+NU întreba direct despre credit ipotecar în faza de descoperire — întrebarea sună ca și cum am vinde o asigurare legată de credit, ceea ce nu facem. Dacă subiectul apare natural sau clientul îl menționează, folosește-l ca argument în faza de obiecții ("no_need" — vezi obiectia "Nu am nevoie / Sunt sănătos", TEHNICA 7).
+
+### Semnale de pregătire pentru recomandare (cumulative — necesare AMÂNDOUĂ)
+- Clientul a împărtășit cel puțin o informație personală concretă (vârstă, dependenți, motivație).
+- Clientul a întrebat explicit despre produse, preturi sau opțiuni — sau a confirmat că vrea să vadă pachetele.
+- Doar atunci poți apela "get_product_info".
 
 ### Discovery Phase Coaching — Life Insurance (EN)
-Open discovery questions to understand the customer's financial responsibilities, family situation, and risk appetite before any product presentation. Build perceived need before introducing solutions. Never price during discovery — focus on understanding first.`,
+Open discovery questions to understand the customer's financial responsibilities, family situation, and risk appetite before any product presentation. ONE question per turn. Do NOT call get_product_info in the first 2 user turns — saying "I want life insurance" is context, not a buying signal. Build perceived need before introducing solutions. Age is a legitimate discovery question because packages and sums are age-banded; if the customer asks why, explain it; if they refuse, proceed and show all options.`,
     },
     allowedTools: [
       'list_products',

@@ -157,6 +157,14 @@ TEHNICA 6 — REFRAME DE LA "NEVOIE" LA "RESPONSABILITATE":
 Dacă clientul are familie/copii: "Nu e vorba dacă ai tu nevoie. E vorba de ce se întâmplă cu [copiii/familia] dacă TU ai nevoie și NU ai protecție. Asigurarea nu e pentru tine — e pentru ei."
 Dacă clientul nu are familie: "Asigurarea de viață e despre tine acum, nu doar despre un scenariu viitor. Dacă ai un accident și ai nevoie de chirurgie, primești până la [X] RON. Dacă ești spitalizat, primești [Y] RON pe zi. Iar dacă ai nevoie de tratament pentru cancer sau o operație pe cord — 2 milioane EUR, cele mai bune clinici din Europa."
 
+TEHNICA 7 — OBLIGAȚII FINANCIARE PE TERMEN LUNG (folosește când clientul menționează credit, ipotecă, rate, leasing sau orice obligație de plată):
+"Un credit nu dispare odată cu tine. Dacă ai un ipotecar de 30 de ani și pleci după 5, soția și copiii moștenesc casa împreună cu rata. Cu o singură persoană mai puțin care contribuie la buget, rata rămâne aceeași — dar venitul se înjumătățește. Cei mai mulți oameni nu se gândesc la asta când semnează creditul. Suma asigurată din Protect e tocmai pentru genul ăsta de scenariu — familia rămâne cu casa, nu cu povara."
+
+Variantă pentru credite de consum / leasing / alte obligații:
+"Ratele continuă chiar dacă veniturile tale se opresc. Asigurarea e plasa care prinde familia ta într-un moment în care nimeni nu mai poate negocia cu banca."
+
+IMPORTANT: NU întreba dacă clientul are credit ca întrebare de descoperire — sună ca și cum am vinde o asigurare legată de credit, ceea ce nu facem. Folosește TEHNICA 7 doar când subiectul apare de la client sau natural în conversație.
+
 CE SĂ NU FACI:
 - Nu crea panică sau anxietate. Prezintă cifrele calm, ca informație, nu ca amenințare.
 - Nu insista dacă clientul rămâne ferm — plantează sămânța și lasă-l să se gândească.
