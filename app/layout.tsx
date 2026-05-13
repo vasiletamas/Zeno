@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import { Inter, Fraunces } from "next/font/google";
+import { Outfit, Fraunces } from "next/font/google";
 import { LanguageProvider } from "@/lib/i18n/language-context";
 import { PostHogProvider } from "@/components/providers/posthog-provider";
 import "./globals.css";
 
-const inter = Inter({
+const outfit = Outfit({
   subsets: ["latin", "latin-ext"],
-  variable: "--font-inter",
+  variable: "--font-outfit",
   display: "swap",
 });
 
@@ -31,7 +31,7 @@ export default function RootLayout({
   return (
     <html lang="ro">
       <body
-        className={`${inter.variable} ${fraunces.variable} antialiased`}
+        className={`${outfit.variable} ${fraunces.variable} antialiased`}
       >
         <LanguageProvider>
           <PostHogProvider>{children}</PostHogProvider>
