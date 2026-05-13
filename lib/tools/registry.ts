@@ -11,6 +11,7 @@ import type { LLMToolDefinition } from '@/lib/llm/providers/types'
 import type { ToolDefinition, ToolHandler, ToolContext, ToolResult } from './types'
 import { prisma } from '@/lib/db'
 import { LRUCache } from '@/lib/cache/lru-cache'
+import { collapseCoveragesForDisplay } from '@/lib/products/coverage-display'
 
 // --- Handler imports ---
 import { checkDntStatus, startDntQuestionnaire, saveDntAnswer, signDnt } from './handlers/dnt-handlers'
@@ -253,7 +254,7 @@ const listProductsHandler: ToolHandler = async (
  */
 const getProductInfoHandler: ToolHandler = async (
   args: Record<string, unknown>,
-  _context: ToolContext,
+  context: ToolContext,
 ): Promise<ToolResult> => {
   try {
     const productCode = args.productCode as string | undefined
@@ -293,6 +294,21 @@ const getProductInfoHandler: ToolHandler = async (
       return { success: false, error: `Product not found: ${productCode || productId}` }
     }
 
+    // Look up customer age (if known) so age-banded coverages can be filtered
+    // down to the matching band. Falls back to undefined → ranges in UI.
+    let customerAge: number | undefined
+    const customer = await prisma.customer.findUnique({ where: { id: context.customerId } })
+    if (customer?.dateOfBirth) {
+      const today = new Date()
+      const dob = customer.dateOfBirth
+      let age = today.getFullYear() - dob.getFullYear()
+      const monthDiff = today.getMonth() - dob.getMonth()
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+        age--
+      }
+      customerAge = age
+    }
+
     // Build uiAction with show_product_cards when product has pricing tiers
     let uiAction: { type: string; payload: Record<string, unknown> } | undefined
     if (product.pricingTiers.length > 0) {
@@ -304,11 +320,20 @@ const getProductInfoHandler: ToolHandler = async (
           levelName: level.name as { en: string; ro: string },
           premiumAnnual: level.premiumAnnual,
           premiumMonthly: Math.round((level.premiumAnnual / 12) * 100) / 100,
-          coverages: level.coverageAmounts.map((ca) => ({
-            name: ca.coverageType.name as { en: string; ro: string },
-            amount: ca.amount,
-            currency: ca.currency,
-          })),
+          coverages: collapseCoveragesForDisplay(
+            level.coverageAmounts.map((ca) => ({
+              amount: ca.amount,
+              currency: ca.currency,
+              isAgeBased: ca.isAgeBased,
+              minAge: ca.minAge,
+              maxAge: ca.maxAge,
+              coverageType: {
+                code: ca.coverageType.code,
+                name: ca.coverageType.name as { en: string; ro: string },
+              },
+            })),
+            customerAge,
+          ),
         })),
         isRecommended: tier.orderIndex === 0, // First tier recommended by default
       }))

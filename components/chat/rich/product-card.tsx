@@ -10,7 +10,12 @@ interface ProductCardProps {
   levelCode: string
   premiumMonthly: number
   premiumAnnual: number
-  coverages: { name: { en: string; ro: string }; amount: number; currency: string }[]
+  coverages: {
+    name: { en: string; ro: string }
+    amount: number
+    currency: string
+    amountRange?: { min: number; max: number }
+  }[]
   isRecommended: boolean
   onSelect: () => void
   language: Language
@@ -84,11 +89,14 @@ export function ProductCard({
       <ul className="mt-4 space-y-2">
         {coverages.map((cov, idx) => {
           const covName = language === 'ro' ? cov.name.ro : cov.name.en
+          const amountText = cov.amountRange
+            ? `${formatAmount(cov.amountRange.min, cov.currency)} – ${formatAmount(cov.amountRange.max, cov.currency)} ${language === 'ro' ? '(în funcție de vârstă)' : '(depending on age)'}`
+            : formatAmount(cov.amount, cov.currency)
           return (
             <li key={idx} className="flex items-start gap-2 text-[13px] text-night">
               <Check className="w-4 h-4 text-sage flex-shrink-0 mt-0.5" />
               <span>
-                {covName}: {formatAmount(cov.amount, cov.currency)}
+                {covName}: {amountText}
               </span>
             </li>
           )

@@ -35,6 +35,7 @@ interface CoveragePayload {
   name: LocalizedString
   amount: number
   currency: string
+  amountRange?: { min: number; max: number }
 }
 
 interface TierLevel {
