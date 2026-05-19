@@ -5,7 +5,7 @@
 // ==============================================
 
 export type ErrorSeverity = 'info' | 'warn' | 'error' | 'fatal'
-export type ErrorLayer = 'provider' | 'gateway' | 'orchestrator' | 'tool' | 'api' | 'self-improvement' | 'simulation'
+export type ErrorLayer = 'provider' | 'gateway' | 'orchestrator' | 'tool' | 'api' | 'self-improvement' | 'simulation' | 'questionnaire' | 'compliance'
 
 // ==============================================
 // CUSTOM ERROR CLASSES

@@ -47,7 +47,7 @@ export async function findContextHit(
     const optionValues = (question.options as Array<{ value: string }>).map(o => o.value)
     if (!optionValues.includes(insight.value)) {
       logWarn({
-        layer: 'orchestrator',
+        layer: 'questionnaire',
         category: 'extractor_value_mismatch',
         message: 'Insight value does not match question options',
         context: {
