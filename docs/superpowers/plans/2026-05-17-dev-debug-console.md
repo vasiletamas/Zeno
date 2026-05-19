@@ -549,7 +549,7 @@ Find the line `const [gateResult, contextResult] = await Promise.all([gatePromis
 ```ts
 yield* debugYield(isDev(), debugEnabled, {
   event: 'debug:gate',
-  data: { traceId: state.traceId, ...gateResult.gateDebug },
+  data: { ...gateResult.gateDebug, traceId: state.traceId },
 })
 ```
 

@@ -537,7 +537,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
   yield* debugYield(isDev(), debugEnabled, {
     event: 'debug:gate',
-    data: { traceId: state.traceId, ...gateResult.gateDebug },
+    data: { ...gateResult.gateDebug, traceId: state.traceId },
   })
 
   // Patch situationalBriefing from gate output
