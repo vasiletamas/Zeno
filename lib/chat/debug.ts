@@ -112,5 +112,13 @@ export function* debugYield(
 // MODULE-LEVEL DEV FLAG
 // ==============================================
 
-/** True iff the server is running with NODE_ENV === 'development'. */
-export const IS_DEV = process.env.NODE_ENV === 'development'
+/**
+ * True iff the server is running with NODE_ENV === 'development'.
+ *
+ * Evaluated lazily so vi.stubEnv() works after this module has been
+ * imported — otherwise tests that flip NODE_ENV at runtime would be
+ * silently ignored.
+ */
+export function isDev(): boolean {
+  return process.env.NODE_ENV === 'development'
+}
