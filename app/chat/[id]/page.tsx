@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/db'
 import { cookies } from 'next/headers'
 import ChatPage from '@/components/chat/chat-page'
+import { DebugProvider } from '@/components/debug/debug-provider'
 
 /**
  * /chat/[id] — Conversation UI page.
@@ -40,7 +41,8 @@ export default async function ConversationPage({
     createdAt: m.createdAt,
   }))
 
-  return (
+  const isDev = process.env.NODE_ENV === 'development'
+  const content = (
     <ChatPage
       conversationId={conversation.id}
       customerId={customerId ?? conversation.customerId}
@@ -48,4 +50,6 @@ export default async function ConversationPage({
       language={(conversation.language as 'ro' | 'en') ?? 'ro'}
     />
   )
+
+  return isDev ? <DebugProvider>{content}</DebugProvider> : content
 }
