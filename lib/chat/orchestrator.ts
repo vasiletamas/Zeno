@@ -650,6 +650,21 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const buildResult = buildPrompt(mergedSections, gateSelection)
   const { prompt: systemPrompt } = buildResult
 
+  yield* debugYield(isDev(), debugEnabled, {
+    event: 'debug:prompt',
+    data: {
+      sections: mergedSections,
+      sectionSizes: buildResult.sectionSizes,
+      includedSections: buildResult.includedSections,
+      excludedSections: buildResult.excludedSections,
+      gateActive: buildResult.gateActive,
+      stablePrefix: buildResult.stablePrefix ?? null,
+      dynamicSuffix: buildResult.dynamicSuffix ?? null,
+      totalChars: (buildResult.stablePrefix?.length ?? 0) + (buildResult.dynamicSuffix?.length ?? 0),
+      traceId: state.traceId,
+    },
+  })
+
   // =============================================
   // STEP 4b — Calculate token budget
   // =============================================
