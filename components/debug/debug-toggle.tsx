@@ -2,21 +2,21 @@
 
 import { useDebug } from './debug-provider'
 
+const IS_DEV = process.env.NODE_ENV === 'development'
+
 interface DebugToggleProps {
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
-export function DebugToggle({ open, onOpenChange }: DebugToggleProps) {
-  // Build-time dead-code elimination guard. Next.js inlines this constant.
-  if (process.env.NODE_ENV !== 'development') return null
-
+function DebugToggleInner({ open, onOpenChange }: DebugToggleProps) {
   const { enabled, turns } = useDebug()
 
   return (
     <button
       type="button"
       data-testid="debug-toggle"
+      aria-pressed={open}
       onClick={() => onOpenChange(!open)}
       title={enabled ? 'Debug console (on)' : 'Debug console (off)'}
       className="fixed bottom-4 right-4 z-50 flex h-10 items-center gap-2 rounded-full border border-black/10 bg-white px-3 text-xs font-mono shadow-md hover:shadow-lg transition-shadow"
@@ -30,4 +30,14 @@ export function DebugToggle({ open, onOpenChange }: DebugToggleProps) {
       )}
     </button>
   )
+}
+
+/**
+ * Floating debug toggle. Returns null in production builds — the inner
+ * component (and its useDebug() call) is never reached, so Next.js
+ * dead-code-eliminates it from the prod client bundle.
+ */
+export function DebugToggle(props: DebugToggleProps) {
+  if (!IS_DEV) return null
+  return <DebugToggleInner {...props} />
 }
