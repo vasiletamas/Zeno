@@ -37,6 +37,7 @@ import { estimateTokens, calculateMessageBudget } from '@/lib/chat/token-budget'
 import { compactMessages } from '@/lib/chat/compaction'
 import { isContextLengthError, parseTokenDeficit } from '@/lib/llm/errors'
 import { logError, logWarn, logFatal } from '@/lib/errors/logger'
+import { extractAndPersistInsights } from '@/lib/insights/extractor'
 import { CircuitOpenError, TimeoutError } from '@/lib/errors/types'
 import { eventBus, initObservability, getTurnCost, getTurnAnomalies } from '@/lib/events'
 import { applyABTestVariant } from '@/lib/self-improvement/ab-test-assigner'
@@ -1323,65 +1324,23 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'background', timestamp: Date.now() })
   const step9Start = Date.now()
 
-  // Profile extractor: detect potential personal info (Romanian and English patterns)
-  const hasPersonalInfo = /\b(ani|varsta|vârstă|copil|copii|soț|soție|sot|sotie|lucrez|căsătorit|casatorit|familie|venit|salariu|\d{13})\b/i.test(input.message)
-  if (hasPersonalInfo) {
-    void (async () => {
-      try {
-        const response = await gateway.call('profile-extractor', {
-          messages: [{ role: 'user' as const, content: input.message }],
-          traceId: state.traceId,
-        })
-        if (response.content) {
-          const extracted = JSON.parse(response.content) as Record<string, unknown>
-          const current = await prisma.customer.findUnique({
-            where: { id: state.customerId },
-            select: { extractedProfile: true },
-          })
-          const currentProfile = (current?.extractedProfile as Record<string, unknown>) ?? {}
-          const merged = { ...currentProfile, ...extracted }
-          await prisma.customer.update({
-            where: { id: state.customerId },
-            data: { extractedProfile: merged as unknown as Record<string, string | number | boolean | null> },
-          })
-
-          // Write insights to CustomerInsight table
-          for (const [key, value] of Object.entries(extracted)) {
-            if (value == null) continue
-            const category = categorizeInsight(key)
-            await prisma.customerInsight.upsert({
-              where: {
-                customerId_key: {
-                  customerId: state.customerId,
-                  key,
-                },
-              },
-              update: {
-                value: String(value),
-                lastConfirmedAt: new Date(),
-              },
-              create: {
-                customerId: state.customerId,
-                category,
-                key,
-                value: String(value),
-                confidence: 0.6,
-                source: state.conversationId,
-              },
-            })
-          }
-        }
-      } catch (e) {
-        logError({
-          layer: 'orchestrator',
-          category: 'profile_extractor',
-          message: 'Profile extractor failed',
-          context: { customerId: state.customerId, conversationId: state.conversationId },
-          error: e,
-        })
-      }
-    })()
-  }
+  // Profile extractor: closed-vocabulary insight extraction (fire-and-forget)
+  void extractAndPersistInsights({
+    message: input.message,
+    customerId: state.customerId,
+    conversationId: state.conversationId,
+    productId: state.productId,
+    mode: state.conversationMode,
+    traceId: state.traceId,
+  }).catch((err: unknown) =>
+    logError({
+      layer: 'orchestrator',
+      category: 'extract_insights',
+      message: 'extractAndPersistInsights threw',
+      context: { customerId: state.customerId, conversationId: state.conversationId },
+      error: err,
+    }),
+  )
 
   // Proactive summary refresh: keep summary warm for next turn
   void updateSummaryIfStale(state.conversationId, state.messageCount).catch((err: unknown) =>
@@ -1494,13 +1453,3 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 // HELPERS
 // ==============================================
 
-function categorizeInsight(key: string): 'DEMOGRAPHIC' | 'PREFERENCE' | 'OBJECTION_PATTERN' | 'BUYING_SIGNAL' | 'RISK_FACTOR' {
-  const demographics = ['age', 'occupation', 'income', 'education', 'familySize', 'hasSpouse', 'hasChildren', 'minorChildren']
-  const buyingSignals = ['urgency', 'motivation', 'readiness', 'interests']
-  const riskFactors = ['health', 'smoking', 'hazardous']
-
-  if (demographics.includes(key)) return 'DEMOGRAPHIC'
-  if (buyingSignals.includes(key)) return 'BUYING_SIGNAL'
-  if (riskFactors.includes(key)) return 'RISK_FACTOR'
-  return 'PREFERENCE'
-}
