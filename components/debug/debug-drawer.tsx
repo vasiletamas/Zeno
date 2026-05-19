@@ -23,8 +23,6 @@ function DebugDrawerInner({ open, onOpenChange }: DebugDrawerProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onOpenChange])
 
-  if (!open) return null
-
   return (
     <aside
       data-testid="debug-drawer"
@@ -81,6 +79,6 @@ function DebugDrawerInner({ open, onOpenChange }: DebugDrawerProps) {
  * Next.js dead-code-eliminates it from the prod client bundle.
  */
 export function DebugDrawer(props: DebugDrawerProps) {
-  if (!IS_DEV) return null
+  if (!IS_DEV || !props.open) return null
   return <DebugDrawerInner {...props} />
 }

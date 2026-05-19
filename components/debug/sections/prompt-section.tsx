@@ -43,7 +43,9 @@ export function PromptSection({ prompt }: { prompt: DebugTurn['prompt'] }) {
       {prompt.stablePrefix && (
         <button
           type="button"
-          onClick={() => navigator.clipboard.writeText(prompt.stablePrefix ?? '')}
+          onClick={() => {
+            navigator.clipboard.writeText(prompt.stablePrefix ?? '').catch(() => undefined)
+          }}
           className="text-[10px] underline"
         >
           Copy stablePrefix

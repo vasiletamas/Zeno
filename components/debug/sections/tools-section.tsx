@@ -50,7 +50,7 @@ export function ToolsSection({
               <div className="px-2 py-1 space-y-2 bg-gray-50">
                 <div>
                   <p className="font-mono text-[10px] text-gray-500">args</p>
-                  <pre className="text-[11px] whitespace-pre-wrap">
+                  <pre className="text-[11px] whitespace-pre-wrap max-h-64 overflow-auto">
                     {JSON.stringify(tc.args, null, 2)}
                   </pre>
                 </div>
@@ -59,7 +59,7 @@ export function ToolsSection({
                     <p className="font-mono text-[10px] text-gray-500">
                       result ({tc.result.durationMs}ms)
                     </p>
-                    <pre className="text-[11px] whitespace-pre-wrap">
+                    <pre className="text-[11px] whitespace-pre-wrap max-h-64 overflow-auto">
                       {JSON.stringify(
                         tc.result.data ?? tc.result.error,
                         null,
