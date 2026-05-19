@@ -152,7 +152,7 @@ export function useChat(
       try {
         const response = await fetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(extraHeaders ?? {}) },
+          headers: { ...(extraHeaders ?? {}), 'Content-Type': 'application/json' },
           body: JSON.stringify({ conversationId, customerId, message: text }),
           signal: abortController.signal,
         })
@@ -354,7 +354,7 @@ export function useChat(
       try {
         const response = await fetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(extraHeaders ?? {}) },
+          headers: { ...(extraHeaders ?? {}), 'Content-Type': 'application/json' },
           body: JSON.stringify({ conversationId, customerId, action }),
           signal: abortController.signal,
         })
