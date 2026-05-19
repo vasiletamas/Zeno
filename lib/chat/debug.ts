@@ -10,6 +10,7 @@
 import type { SSEEvent } from './stream-handler'
 import type { ReasoningGateInput, ReasoningGateOutput } from './reasoning-gate'
 import type { PromptSections } from './prompt-builder'
+import { writeDebugEvent } from './debug-persistence'
 
 // ==============================================
 // DEBUG EVENT PAYLOADS
@@ -105,7 +106,10 @@ export function* debugYield(
   // Typed DebugEvent payloads are structurally compatible with SSEEvent's
   // generic Record<string, unknown> data field, but TS can't widen typed
   // interfaces to an index signature automatically — hence the cast.
-  if (isDev && enabled) yield event as unknown as SSEEvent
+  if (isDev && enabled) {
+    void writeDebugEvent(event)
+    yield event as unknown as SSEEvent
+  }
 }
 
 // ==============================================

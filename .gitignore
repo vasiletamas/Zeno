@@ -52,3 +52,6 @@ next-env.d.ts
 test-results/
 turn*.yml
 
+# dev-mode debug console traces
+.debug-traces/
+
