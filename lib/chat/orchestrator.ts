@@ -40,6 +40,7 @@ import { logError, logWarn, logFatal } from '@/lib/errors/logger'
 import { CircuitOpenError, TimeoutError } from '@/lib/errors/types'
 import { eventBus, initObservability, getTurnCost, getTurnAnomalies } from '@/lib/events'
 import { applyABTestVariant } from '@/lib/self-improvement/ab-test-assigner'
+import { debugYield, isDev } from './debug'
 
 // ==============================================
 // CONSTANTS
@@ -181,6 +182,17 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     conversationId: state.conversationId,
     messageIndex: state.messageCount,
     timestamp: state.startMs,
+  })
+
+  yield* debugYield(isDev(), debugEnabled, {
+    event: 'debug:turn_start',
+    data: {
+      traceId: state.traceId,
+      conversationId: state.conversationId,
+      messageIndex: state.messageCount,
+      userMessage: input.message,
+      language: state.language,
+    },
   })
 
   // =============================================
@@ -1278,6 +1290,19 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     cost: getTurnCost(state.traceId),
     latencyMs,
     anomalies: getTurnAnomalies(state.traceId),
+  })
+
+  yield* debugYield(isDev(), debugEnabled, {
+    event: 'debug:turn_end',
+    data: {
+      traceId: state.traceId,
+      phases: state.phases,
+      totalInputTokens: state.totalInputTokens,
+      totalOutputTokens: state.totalOutputTokens,
+      cost: getTurnCost(state.traceId),
+      latencyMs,
+      anomalies: getTurnAnomalies(state.traceId),
+    },
   })
 
   // =============================================
