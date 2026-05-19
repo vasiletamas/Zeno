@@ -1,13 +1,13 @@
 import { prisma } from '@/lib/db'
 import { gateway } from '@/lib/llm/gateway'
 import { logError, logWarn } from '@/lib/errors/logger'
-import { getActiveInsightKeys, findKeySpec, type InsightKeySpec } from '@/lib/insights/keys'
+import { getActiveInsightKeys, findKeySpec, GLOBAL_INSIGHT_KEYS, type InsightKeySpec } from '@/lib/insights/keys'
 
 const DEFAULT_CONFIDENCE = 0.7
 const PERSONAL_INFO_REGEX =
   /\b(ani|varsta|vârstă|copil|copii|soț|soție|sot|sotie|lucrez|căsătorit|casatorit|familie|venit|salariu|\d{13})\b/i
 
-const PER_PRODUCT_CATEGORIES = new Set(['PREFERENCE'])
+const GLOBAL_KEY_NAMES = new Set(GLOBAL_INSIGHT_KEYS.map(k => k.key))
 
 export interface ExtractorInput {
   message: string
@@ -100,7 +100,7 @@ export async function extractAndPersistInsights(input: ExtractorInput): Promise<
       typeof item.confidence === 'number' && item.confidence >= 0 && item.confidence <= 1
         ? item.confidence
         : DEFAULT_CONFIDENCE
-    const stampProductId = PER_PRODUCT_CATEGORIES.has(spec.category) ? productId : null
+    const stampProductId = GLOBAL_KEY_NAMES.has(spec.key) ? null : productId
 
     try {
       await prisma.customerInsight.upsert({

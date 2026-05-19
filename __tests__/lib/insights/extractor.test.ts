@@ -15,6 +15,10 @@ vi.mock('@/lib/errors/logger', () => ({
 vi.mock('@/lib/insights/keys', () => ({
   getActiveInsightKeys: vi.fn(),
   findKeySpec: (active: Array<{key: string}>, key: string) => active.find(s => s.key === key),
+  GLOBAL_INSIGHT_KEYS: [
+    { key: 'age', category: 'DEMOGRAPHIC', type: 'number' },
+    { key: 'urgency', category: 'BUYING_SIGNAL', type: 'enum', options: ['immediate', 'weeks', 'exploring'] },
+  ],
 }))
 
 const { prisma } = await import('@/lib/db')
@@ -84,6 +88,53 @@ describe('extractAndPersistInsights', () => {
     const args = vi.mocked(prisma.customerInsight.upsert).mock.calls[0][0]
     expect(args.create.productId).toBe('prod-1')
     expect(args.create.category).toBe('PREFERENCE')
+  })
+
+  it('stamps productId on per-product BUYING_SIGNAL keys (by origin, not category)', async () => {
+    vi.mocked(getActiveInsightKeys).mockResolvedValue([
+      { key: 'budgetPreference', category: 'BUYING_SIGNAL', type: 'enum', options: ['lowest', 'balanced', 'best_coverage'] },
+    ] as never)
+    vi.mocked(gateway.call).mockResolvedValue({
+      content: JSON.stringify({
+        insights: [{ key: 'budgetPreference', value: 'balanced', confidence: 0.9 }],
+      }),
+    } as never)
+
+    await extractAndPersistInsights({
+      message: 'caut ceva echilibrat',
+      customerId: 'cust-1',
+      conversationId: 'conv-1',
+      productId: 'prod-1',
+      mode: 'SALES',
+      traceId: 't-1',
+    })
+
+    const args = vi.mocked(prisma.customerInsight.upsert).mock.calls[0][0]
+    expect(args.create.productId).toBe('prod-1')
+    expect(args.create.category).toBe('BUYING_SIGNAL')
+  })
+
+  it('does NOT stamp productId on global BUYING_SIGNAL keys', async () => {
+    vi.mocked(getActiveInsightKeys).mockResolvedValue([
+      { key: 'urgency', category: 'BUYING_SIGNAL', type: 'enum', options: ['immediate', 'weeks', 'exploring'] },
+    ] as never)
+    vi.mocked(gateway.call).mockResolvedValue({
+      content: JSON.stringify({
+        insights: [{ key: 'urgency', value: 'immediate', confidence: 0.9 }],
+      }),
+    } as never)
+
+    await extractAndPersistInsights({
+      message: 'urgent',
+      customerId: 'cust-1',
+      conversationId: 'conv-1',
+      productId: 'prod-1',
+      mode: 'SALES',
+      traceId: 't-1',
+    })
+
+    const args = vi.mocked(prisma.customerInsight.upsert).mock.calls[0][0]
+    expect(args.create.productId).toBeNull()
   })
 
   it('defaults confidence to 0.7 when extractor omits it', async () => {
