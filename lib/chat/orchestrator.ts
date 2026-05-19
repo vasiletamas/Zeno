@@ -784,7 +784,11 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         toolCallId: tc.id,
         name: tc.name,
         args: tc.arguments,
-        partition: (def?.sideEffects === false ? 'readOnly' : 'writing'),
+        partition: def?.executionMode === 'background'
+          ? 'background'
+          : def?.sideEffects === false
+            ? 'readOnly'
+            : 'writing',
         traceId: state.traceId,
       },
     })
