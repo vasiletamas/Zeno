@@ -29,6 +29,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       type: string
       options?: unknown | null
       validationRules?: unknown | null
+      insightKey?: string | null
       orderIndex: number
       isRequired?: boolean
       parentQuestionCode?: string | null
@@ -75,6 +76,7 @@ export async function seedQuestions(prisma: PrismaClient) {
             type: q.type,
             options: jsonOrDbNull(q.options),
             validationRules: jsonOrDbNull(q.validationRules),
+            insightKey: q.insightKey ?? null,
             orderIndex: q.orderIndex,
             isRequired: q.isRequired ?? true,
             parentQuestionId,
@@ -92,6 +94,7 @@ export async function seedQuestions(prisma: PrismaClient) {
             type: q.type,
             options: jsonOrDbNull(q.options),
             validationRules: jsonOrDbNull(q.validationRules),
+            insightKey: q.insightKey ?? null,
             orderIndex: q.orderIndex,
             isRequired: q.isRequired ?? true,
             parentQuestionId,
@@ -592,6 +595,7 @@ export async function seedQuestions(prisma: PrismaClient) {
           ro: 'Ce pachet de asigurare doriți?',
         },
         type: 'DROPDOWN',
+        insightKey: 'selectedTier',
         orderIndex: 2,
         options: [
           { value: 'standard', label: { en: 'Standard', ro: 'Standard' } },
@@ -605,6 +609,7 @@ export async function seedQuestions(prisma: PrismaClient) {
           ro: 'Ce nivel de primă preferați?',
         },
         type: 'DROPDOWN',
+        insightKey: 'selectedLevel',
         orderIndex: 3,
         options: [
           { value: 'level_1', label: { en: 'Level I (lowest premium)', ro: 'Nivelul I (primă minimă)' } },
@@ -619,6 +624,7 @@ export async function seedQuestions(prisma: PrismaClient) {
           ro: 'Doriți să adăugați acoperirea Tratament Medical în Străinătate (până la 2.000.000 EUR)?',
         },
         type: 'BOOLEAN',
+        insightKey: 'selectedAddon_externalTreatment',
         orderIndex: 4,
       },
       {

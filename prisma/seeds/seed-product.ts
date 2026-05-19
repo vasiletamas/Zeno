@@ -137,6 +137,12 @@ export async function seedProduct(prisma: PrismaClient) {
       },
       insuranceType: 'LIFE',
       subType: 'term_life',
+      insightKeys: [
+        { key: 'selectedTier', category: 'PREFERENCE', type: 'enum', options: ['standard', 'optim'] },
+        { key: 'selectedLevel', category: 'PREFERENCE', type: 'enum', options: ['level_1', 'level_2', 'level_3'] },
+        { key: 'selectedAddon_externalTreatment', category: 'PREFERENCE', type: 'boolean' },
+        { key: 'budgetPreference', category: 'BUYING_SIGNAL', type: 'enum', options: ['lowest', 'balanced', 'best_coverage'] },
+      ],
       eligibility: {
         minAge: 18,
         maxAge: 64,
@@ -463,6 +469,12 @@ PRIORITATE LA CONTRADICȚII
       },
       insuranceType: 'LIFE',
       subType: 'term_life',
+      insightKeys: [
+        { key: 'selectedTier', category: 'PREFERENCE', type: 'enum', options: ['standard', 'optim'] },
+        { key: 'selectedLevel', category: 'PREFERENCE', type: 'enum', options: ['level_1', 'level_2', 'level_3'] },
+        { key: 'selectedAddon_externalTreatment', category: 'PREFERENCE', type: 'boolean' },
+        { key: 'budgetPreference', category: 'BUYING_SIGNAL', type: 'enum', options: ['lowest', 'balanced', 'best_coverage'] },
+      ],
       eligibility: {
         minAge: 18,
         maxAge: 64,
