@@ -16,6 +16,8 @@ import { prisma } from '@/lib/db'
 import { getToolDefinition } from '@/lib/tools/registry'
 import { estimateTokens } from '@/lib/chat/token-budget'
 import { LRUCache } from '@/lib/cache/lru-cache'
+import { findContextHit, type ContextHit } from '@/lib/insights/context-hits'
+import { logInfo } from '@/lib/errors/logger'
 import type { PromptSections } from './prompt-builder'
 
 // ==============================================
@@ -270,28 +272,20 @@ export function loadWorkflowInstructions(
  */
 export async function loadQuestionnaireContext(
   conversationId: string,
+  customerId: string,
   workflowStepCode: string | null,
   language: 'en' | 'ro',
 ): Promise<string | null> {
   if (!workflowStepCode) return null
 
-  // Determine which question group codes are active based on workflow step
   const groupCodes = resolveQuestionGroupCodes(workflowStepCode)
   if (groupCodes.length === 0) return null
 
-  // Determine questionnaire type label
   const questionnaireType = resolveQuestionnaireType(workflowStepCode)
 
-  // Load all questions in the active groups
   const questions = await prisma.question.findMany({
-    where: {
-      group: {
-        code: { in: groupCodes },
-      },
-    },
-    include: {
-      group: true,
-    },
+    where: { group: { code: { in: groupCodes } } },
+    include: { group: true },
     orderBy: [
       { group: { orderIndex: 'asc' } },
       { orderIndex: 'asc' },
@@ -300,18 +294,12 @@ export async function loadQuestionnaireContext(
 
   if (questions.length === 0) return null
 
-  // Load answers for this conversation
   const questionIds = questions.map((q) => q.id)
   const answers = await prisma.answer.findMany({
-    where: {
-      conversationId,
-      questionId: { in: questionIds },
-    },
+    where: { conversationId, questionId: { in: questionIds } },
   })
 
   const answeredIds = new Set(answers.map((a) => a.questionId))
-
-  // Find first unanswered question
   const currentQuestion = questions.find((q) => !answeredIds.has(q.id))
   const answeredCount = answeredIds.size
   const totalCount = questions.length
@@ -320,35 +308,92 @@ export async function loadQuestionnaireContext(
   parts.push(`[ACTIVE QUESTIONNAIRE - ${questionnaireType}]`)
   parts.push(`Progress: ${answeredCount}/${totalCount}`)
 
-  if (currentQuestion) {
-    const questionText = (currentQuestion.text as unknown as LocalizedText)[
-      language
-    ]
-    parts.push('')
-    parts.push(`Current question (${currentQuestion.group.code}):`)
-    parts.push(questionText)
-    parts.push(`Type: ${currentQuestion.type}`)
-
-    // Format options if present
-    if (currentQuestion.options) {
-      const options = currentQuestion.options as unknown as Array<{
-        value: string
-        label: LocalizedText
-      }>
-      if (Array.isArray(options) && options.length > 0) {
-        parts.push('Options:')
-        for (const opt of options) {
-          const label = opt.label[language]
-          parts.push(`  - value: "${opt.value}" -> label: "${label}"`)
-        }
-      }
-    }
-  } else {
+  if (!currentQuestion) {
     parts.push('')
     parts.push('All questions answered. Questionnaire complete.')
+    return parts.join('\n')
+  }
+
+  const questionText = (currentQuestion.text as unknown as LocalizedText)[language]
+  parts.push('')
+  parts.push(`Current question (${currentQuestion.group.code}):`)
+  parts.push(questionText)
+  parts.push(`Type: ${currentQuestion.type}`)
+
+  if (currentQuestion.options) {
+    const options = currentQuestion.options as unknown as Array<{
+      value: string
+      label: LocalizedText
+    }>
+    if (Array.isArray(options) && options.length > 0) {
+      parts.push('Options:')
+      for (const opt of options) {
+        parts.push(`  - value: "${opt.value}" -> label: "${opt.label[language]}"`)
+      }
+    }
+  }
+
+  // Context hit lookup
+  const hit = await findContextHit(
+    customerId,
+    {
+      id: currentQuestion.id,
+      insightKey: currentQuestion.insightKey,
+      options: currentQuestion.options,
+      group: { code: currentQuestion.group.code },
+    },
+    conversationId,
+  )
+
+  if (hit) {
+    parts.push('')
+    parts.push(renderContextHitBlock(hit, currentQuestion.group.code))
+
+    if (currentQuestion.group.code === 'bd_medical' && hit.category === 'RISK_FACTOR') {
+      logInfo({
+        layer: 'compliance',
+        category: 'context_hit_medical',
+        message: 'Medical CONTEXT HIT presented for explicit affirmation',
+        context: {
+          customerId,
+          conversationId,
+          questionCode: currentQuestion.code,
+          insightKey: hit.key,
+          value: hit.value,
+          confidence: hit.confidence,
+        },
+      })
+    }
   }
 
   return parts.join('\n')
+}
+
+function renderContextHitBlock(hit: ContextHit, groupCode: string): string {
+  const lines: string[] = []
+  lines.push('[CONTEXT HIT for current question]')
+  lines.push('We already extracted this from the conversation:')
+  lines.push(`  field: ${hit.key}`)
+  lines.push(`  value: "${hit.value}"`)
+  lines.push(`  confidence: ${hit.confidence.toFixed(2)}`)
+  lines.push(`  extracted from conversation: ${hit.source}`)
+  lines.push('')
+  lines.push('INSTRUCTIONS — DO NOT RE-ASK:')
+  lines.push('  Instead of asking the original question, confirm the value with the user.')
+  lines.push(`  Example phrasing: "Înțeleg că vrei ${hit.value} — confirmi?"`)
+  lines.push(`  If user says yes/confirms → call the answer-saving tool with answer="${hit.value}".`)
+  lines.push('  If user says no/wants something different → ask the original question normally.')
+
+  if (groupCode === 'bd_medical' && hit.category === 'RISK_FACTOR') {
+    lines.push('')
+    lines.push('For this medical/risk declaration:')
+    lines.push('  Use explicit phrasing — the customer must consciously affirm.')
+    lines.push(`  Required pattern: "Pentru declarația medicală oficială: confirmi că ${hit.value}?`)
+    lines.push('                     Te rog răspunde cu DA sau NU."')
+    lines.push('  Never accept implicit confirmation (e.g. "ok"). Only explicit yes/da.')
+  }
+
+  return lines.join('\n')
 }
 
 /**
@@ -698,7 +743,7 @@ export async function loadAllSections(params: {
   ] = await Promise.all([
     productId ? loadProductContext(productId, language) : null,
     productId ? loadCoachingBriefing(productId) : null,
-    loadQuestionnaireContext(conversationId, workflowStepCode, language),
+    loadQuestionnaireContext(conversationId, customerId, workflowStepCode, language),
     prefetchedCustomer
       ? Promise.resolve(loadCustomerContextFromData(prefetchedCustomer))
       : loadCustomerContext(customerId),
