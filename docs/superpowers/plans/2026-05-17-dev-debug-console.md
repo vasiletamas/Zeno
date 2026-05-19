@@ -230,8 +230,16 @@ export function* debugYield(
 // MODULE-LEVEL DEV FLAG
 // ==============================================
 
-/** True iff the server is running with NODE_ENV === 'development'. */
-export const IS_DEV = process.env.NODE_ENV === 'development'
+/**
+ * True iff the server is running with NODE_ENV === 'development'.
+ *
+ * Evaluated lazily so vi.stubEnv() works after this module has been
+ * imported — otherwise tests that flip NODE_ENV at runtime would be
+ * silently ignored.
+ */
+export function isDev(): boolean {
+  return process.env.NODE_ENV === 'development'
+}
 ```
 
 - [ ] **Step 5: Run the test — it should pass**
@@ -380,12 +388,12 @@ These are the bookends. Adding them first lets us verify the full pipeline (serv
 **Files:**
 - Modify: `lib/chat/orchestrator.ts` — insert two `yield* debugYield(...)` calls
 
-- [ ] **Step 1: Import `debugYield` and `IS_DEV` in the orchestrator**
+- [ ] **Step 1: Import `debugYield` and `isDev` in the orchestrator**
 
 At the top of `lib/chat/orchestrator.ts`, add to the existing imports:
 
 ```ts
-import { debugYield, IS_DEV } from './debug'
+import { debugYield, isDev } from './debug'
 ```
 
 - [ ] **Step 2: Emit `debug:turn_start` near the start of `chatTurnGenerator`**
@@ -393,7 +401,7 @@ import { debugYield, IS_DEV } from './debug'
 Find the existing `eventBus.emit({ type: 'turn:start', ... })` call (around line 175). Immediately after it, add:
 
 ```ts
-yield* debugYield(IS_DEV, debugEnabled, {
+yield* debugYield(isDev(), debugEnabled, {
   event: 'debug:turn_start',
   data: {
     traceId: state.traceId,
@@ -410,7 +418,7 @@ yield* debugYield(IS_DEV, debugEnabled, {
 Find the final `yield { event: 'done', ... }` (around line 1283). Immediately before it, add:
 
 ```ts
-yield* debugYield(IS_DEV, debugEnabled, {
+yield* debugYield(isDev(), debugEnabled, {
   event: 'debug:turn_end',
   data: {
     traceId: state.traceId,
@@ -539,7 +547,7 @@ Be sure to declare `gateInput` outside the inner `try` block so it remains in sc
 Find the line `const [gateResult, contextResult] = await Promise.all([gatePromise, contextPromise])` (around line 486). Immediately after destructuring `gateResult`, add:
 
 ```ts
-yield* debugYield(IS_DEV, debugEnabled, {
+yield* debugYield(isDev(), debugEnabled, {
   event: 'debug:gate',
   data: { traceId: state.traceId, ...gateResult.gateDebug },
 })
@@ -597,7 +605,7 @@ Surfaces the actual system prompt the LLM saw, broken out by section.
 Find the line `const buildResult = buildPrompt(mergedSections, gateSelection)` (around line 598). Immediately after it (before the existing comment about `STEP 4b`), add:
 
 ```ts
-yield* debugYield(IS_DEV, debugEnabled, {
+yield* debugYield(isDev(), debugEnabled, {
   event: 'debug:prompt',
   data: {
     traceId: state.traceId,
@@ -653,7 +661,7 @@ The orchestrator calls `executeToolWithPipeline` from four places: synthetic, re
 Before the existing `const pipelineResult = await executeToolWithPipeline(...)` for synthetic, add:
 
 ```ts
-yield* debugYield(IS_DEV, debugEnabled, {
+yield* debugYield(isDev(), debugEnabled, {
   event: 'debug:tool_call',
   data: {
     traceId: state.traceId,
@@ -671,7 +679,7 @@ const synthStart = Date.now()
 After the `pipelineResult` is assigned, add:
 
 ```ts
-yield* debugYield(IS_DEV, debugEnabled, {
+yield* debugYield(isDev(), debugEnabled, {
   event: 'debug:tool_result',
   data: {
     traceId: state.traceId,
@@ -692,7 +700,7 @@ yield* debugYield(IS_DEV, debugEnabled, {
 The background loop is `void executeToolWithPipeline(...)` (fire-and-forget). Add a `debug:tool_call` before the void call and a synthetic `debug:tool_result` immediately after — matching what the LLM sees:
 
 ```ts
-yield* debugYield(IS_DEV, debugEnabled, {
+yield* debugYield(isDev(), debugEnabled, {
   event: 'debug:tool_call',
   data: {
     traceId: state.traceId,
@@ -706,7 +714,7 @@ yield* debugYield(IS_DEV, debugEnabled, {
 
 void executeToolWithPipeline(/* existing args */).catch(/* existing handler */)
 
-yield* debugYield(IS_DEV, debugEnabled, {
+yield* debugYield(isDev(), debugEnabled, {
   event: 'debug:tool_result',
   data: {
     traceId: state.traceId,
@@ -725,7 +733,7 @@ Inside the existing `if (readOnly.length > 0)` block, before the existing `for (
 
 ```ts
 for (const tc of readOnly) {
-  yield* debugYield(IS_DEV, debugEnabled, {
+  yield* debugYield(isDev(), debugEnabled, {
     event: 'debug:tool_call',
     data: {
       traceId: state.traceId,
@@ -742,7 +750,7 @@ for (const tc of readOnly) {
 Then in the `for (let i = 0; i < readOnly.length; i++)` loop where results are processed (around line 979), after `resultMap.set(tc.id, { pipelineResult, def })`, add:
 
 ```ts
-yield* debugYield(IS_DEV, debugEnabled, {
+yield* debugYield(isDev(), debugEnabled, {
   event: 'debug:tool_result',
   data: {
     traceId: state.traceId,
@@ -763,7 +771,7 @@ yield* debugYield(IS_DEV, debugEnabled, {
 Before the existing `let pipelineResult: PipelineResult` line, add:
 
 ```ts
-yield* debugYield(IS_DEV, debugEnabled, {
+yield* debugYield(isDev(), debugEnabled, {
   event: 'debug:tool_call',
   data: {
     traceId: state.traceId,
@@ -781,7 +789,7 @@ const writeStart = Date.now()
 After `resultMap.set(tc.id, { pipelineResult, def })` (around line 1031), add:
 
 ```ts
-yield* debugYield(IS_DEV, debugEnabled, {
+yield* debugYield(isDev(), debugEnabled, {
   event: 'debug:tool_result',
   data: {
     traceId: state.traceId,
