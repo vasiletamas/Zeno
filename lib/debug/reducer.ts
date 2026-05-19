@@ -22,7 +22,7 @@ export interface DebugTurnToolCall {
   name: string
   args: Record<string, unknown>
   partition: 'readOnly' | 'writing' | 'background'
-  result?: DebugToolResultPayload
+  result?: Omit<DebugToolResultPayload, 'traceId' | 'toolCallId'>
 }
 
 export interface DebugTurn {
@@ -93,11 +93,11 @@ export function reduceDebugEvent(state: DebugState, event: DebugEvent): DebugSta
     }
 
     case 'debug:tool_result': {
-      const { traceId } = event.data
+      const { traceId, toolCallId, ...rest } = event.data
       return updateTurn(state, traceId, (t) => ({
         ...t,
         toolCalls: t.toolCalls.map((tc) =>
-          tc.toolCallId === event.data.toolCallId ? { ...tc, result: event.data } : tc,
+          tc.toolCallId === toolCallId ? { ...tc, result: rest } : tc,
         ),
       }))
     }
