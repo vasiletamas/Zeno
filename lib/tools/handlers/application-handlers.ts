@@ -14,6 +14,7 @@ import {
 } from '@/lib/engines/questionnaire-engine'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackProductSelected } from '@/lib/analytics/events'
+import { bumpInsightOnAnswer } from './insight-bump'
 
 const APPLICATION_GROUP_CODES = ['application']
 
@@ -161,6 +162,21 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
 
     const currentQuestion = currentResult.question
 
+    // Refetch question with group + insightKey (needed for insight bump)
+    const questionMeta = await prisma.question.findUnique({
+      where: { id: currentQuestion.id },
+      include: { group: true },
+    })
+
+    // Capture pre-existing insight (if any) to detect confirmed/denied for bd_medical
+    const priorInsight = questionMeta?.insightKey
+      ? await prisma.customerInsight.findUnique({
+          where: {
+            customerId_key: { customerId: context.customerId, key: questionMeta.insightKey },
+          },
+        })
+      : null
+
     // Validate
     const validation = validateAnswer(
       { type: currentQuestion.type, options: currentQuestion.options, validationRules: currentQuestion.validationRules },
@@ -294,6 +310,23 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
       where: { id: application.id },
       data: updateData,
     })
+
+    // Bump insight + write compliance resolution log for bd_medical CONTEXT HITs
+    if (questionMeta?.insightKey) {
+      await bumpInsightOnAnswer({
+        customerId: context.customerId,
+        conversationId: context.conversationId,
+        question: {
+          id: questionMeta.id,
+          code: questionMeta.code,
+          insightKey: questionMeta.insightKey,
+          group: { code: questionMeta.group.code },
+        },
+        answerValue: validation.normalizedValue,
+        previousInsightValue: priorInsight?.value,
+        previousInsightCategory: priorInsight?.category,
+      })
+    }
 
     // Get next question
     const nextResult = await getNextQuestion(activeGroupCodes, context.conversationId)

@@ -12,6 +12,7 @@ import {
 } from '@/lib/engines/questionnaire-engine'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackDntCompleted } from '@/lib/analytics/events'
+import { bumpInsightOnAnswer } from './insight-bump'
 
 // All DNT group codes in order
 const DNT_GROUP_CODES = [
@@ -167,6 +168,21 @@ export const saveDntAnswer: ToolHandler = async (args, context) => {
       return { success: false, error: validation.error ?? 'Invalid answer.' }
     }
 
+    // Refetch question with group + insightKey (needed for insight bump)
+    const questionWithGroup = await prisma.question.findUnique({
+      where: { id: questionId! },
+      include: { group: true },
+    })
+
+    // Capture pre-existing insight (if any)
+    const priorInsight = questionWithGroup?.insightKey
+      ? await prisma.customerInsight.findUnique({
+          where: {
+            customerId_key: { customerId: context.customerId, key: questionWithGroup.insightKey },
+          },
+        })
+      : null
+
     // Upsert answer
     await prisma.answer.upsert({
       where: {
@@ -185,6 +201,23 @@ export const saveDntAnswer: ToolHandler = async (args, context) => {
         answeredAt: new Date(),
       },
     })
+
+    // Bump insight + write compliance log (DNT v1 has no insightKeys, so this no-ops)
+    if (questionWithGroup?.insightKey) {
+      await bumpInsightOnAnswer({
+        customerId: context.customerId,
+        conversationId: context.conversationId,
+        question: {
+          id: questionWithGroup.id,
+          code: questionWithGroup.code,
+          insightKey: questionWithGroup.insightKey,
+          group: { code: questionWithGroup.group.code },
+        },
+        answerValue: validation.normalizedValue,
+        previousInsightValue: priorInsight?.value,
+        previousInsightCategory: priorInsight?.category,
+      })
+    }
 
     // Get next question
     const nextResult = await getNextQuestion(DNT_GROUP_CODES, context.conversationId)
