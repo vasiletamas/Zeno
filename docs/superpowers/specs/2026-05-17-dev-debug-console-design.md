@@ -44,7 +44,9 @@ function* debugYield(
 
 ### Layer 2 — Client guard
 
-The toggle button and `DebugDrawer` component are wrapped in `process.env.NODE_ENV === 'development'`. Next.js inlines this at build time, so the entire panel implementation is dead-code-eliminated from the production client bundle. The strings "DebugDrawer", "debug:gate", etc. are not present in the prod source maps.
+The toggle button and `DebugDrawer` component are wrapped in `process.env.NODE_ENV === 'development'` early returns inside split-component wrappers (`DebugToggleInner` / `DebugDrawerInner` own the hooks; the exported wrappers do the early return without hooks to satisfy `react-hooks/rules-of-hooks`). In production the wrappers always return `null`, so neither the toggle nor the drawer is ever rendered — the floating button is not in the DOM, the drawer JSX never instantiates, and no `x-zeno-debug` header is ever sent by `useChat`.
+
+**Known trade-off**: Because `components/chat/chat-page.tsx` statically imports `useDebug`, `DebugToggle`, and `DebugDrawer`, the underlying modules (`debug-provider.tsx`, `debug-drawer.tsx`, `debug-toggle.tsx`, `turn-card.tsx`, `lib/debug/reducer.ts`, parts of `lib/chat/debug.ts`) remain in the prod client bundle as inert code. A future audit will find string literals such as `"debug:turn_start"`, `"x-zeno-debug"`, and `"zeno_debug"` in `.next/static/chunks/*.js`. These literals correspond to dead-code paths: the reducer's `switch` cases never fire (no provider is mounted), `useDebug()` returns its no-op fallback, and the toggle/drawer wrappers short-circuit before reaching the inner components. Estimated weight: ~3-5KB minified. A future improvement using `next/dynamic` with build-time-gated imports could eliminate this; for v1 the visible-UI guarantee was deemed sufficient.
 
 ### Layer 3 — User toggle (dev only)
 
@@ -184,6 +186,7 @@ TDD per the universal rules — failing test first, then implementation.
 | `process.env.NODE_ENV` check gets bypassed by an `if/else` someone "simplifies" | The `debugYield` helper is the single chokepoint. Lint rule could enforce this later if it becomes a recurring problem. |
 | Tool payloads grow large enough to dominate the SSE stream | The client opt-out header means `enabled === false` produces zero extra bytes. When on, the panel discards old turns past the cap of 50. |
 | PII visible during screen-share | Documented in the toggle tooltip; the developer is responsible for turning it off before sharing. |
+| Prod bundle contains inert debug strings (~3-5KB) | Accepted for v1: UI is invisible in prod and no debug header is sent. A `next/dynamic` refactor is the documented future improvement if this matters. |
 
 ## Rollout
 
