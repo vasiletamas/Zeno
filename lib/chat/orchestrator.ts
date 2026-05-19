@@ -777,6 +777,20 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       }
     }
 
+    yield* debugYield(isDev(), debugEnabled, {
+      event: 'debug:tool_call',
+      data: {
+        round: 0,
+        toolCallId: tc.id,
+        name: tc.name,
+        args: tc.arguments,
+        partition: (def?.sideEffects === false ? 'readOnly' : 'writing'),
+        traceId: state.traceId,
+      },
+    })
+
+    const synthStart = Date.now()
+
     const pipelineResult = await executeToolWithPipeline(
       tc.name,
       tc.arguments,
@@ -790,6 +804,21 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         : null,
       state.traceId,
     )
+
+    yield* debugYield(isDev(), debugEnabled, {
+      event: 'debug:tool_result',
+      data: {
+        toolCallId: tc.id,
+        success: pipelineResult.toolResult.success,
+        durationMs: Date.now() - synthStart,
+        cached: false,
+        data: pipelineResult.toolResult.data,
+        error: pipelineResult.toolResult.error,
+        uiAction: pipelineResult.toolResult.uiAction as unknown as Record<string, unknown> | undefined,
+        transition: pipelineResult.transition as unknown as Record<string, unknown> | undefined,
+        traceId: state.traceId,
+      },
+    })
 
     if (isBlocking) {
       yield {
@@ -981,6 +1010,18 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
       // --- Phase 0: Fire-and-forget background tools ---
       for (const tc of background) {
+        yield* debugYield(isDev(), debugEnabled, {
+          event: 'debug:tool_call',
+          data: {
+            round,
+            toolCallId: tc.id,
+            name: tc.name,
+            args: tc.arguments,
+            partition: 'background',
+            traceId: state.traceId,
+          },
+        })
+
         void executeToolWithPipeline(
           tc.name,
           tc.arguments,
@@ -1001,6 +1042,18 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           error: err,
         }))
 
+        yield* debugYield(isDev(), debugEnabled, {
+          event: 'debug:tool_result',
+          data: {
+            toolCallId: tc.id,
+            success: true,
+            durationMs: 0,
+            cached: false,
+            data: { backgroundFireAndForget: true },
+            traceId: state.traceId,
+          },
+        })
+
         resultMap.set(tc.id, {
           pipelineResult: { toolResult: { success: true, message: 'Processing in background.' } },
           def: getToolDefinition(tc.name),
@@ -1009,6 +1062,20 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
       // --- Phase 1: Execute read-only tools in parallel ---
       if (readOnly.length > 0) {
+        for (const tc of readOnly) {
+          yield* debugYield(isDev(), debugEnabled, {
+            event: 'debug:tool_call',
+            data: {
+              round,
+              toolCallId: tc.id,
+              name: tc.name,
+              args: tc.arguments,
+              partition: 'readOnly',
+              traceId: state.traceId,
+            },
+          })
+        }
+
         for (const tc of readOnly) {
           const def = getToolDefinition(tc.name)
           if (def?.executionMode === 'blocking' && def?.statusMessage) {
@@ -1049,6 +1116,21 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           const def = getToolDefinition(tc.name)
           resultMap.set(tc.id, { pipelineResult, def })
 
+          yield* debugYield(isDev(), debugEnabled, {
+            event: 'debug:tool_result',
+            data: {
+              toolCallId: tc.id,
+              success: pipelineResult.toolResult.success,
+              durationMs: 0,
+              cached: false,
+              data: pipelineResult.toolResult.data,
+              error: pipelineResult.toolResult.error,
+              uiAction: pipelineResult.toolResult.uiAction as unknown as Record<string, unknown> | undefined,
+              transition: pipelineResult.transition as unknown as Record<string, unknown> | undefined,
+              traceId: state.traceId,
+            },
+          })
+
           if (def?.executionMode === 'blocking') {
             yield {
               event: 'tool_complete',
@@ -1073,6 +1155,20 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           }
         }
 
+        yield* debugYield(isDev(), debugEnabled, {
+          event: 'debug:tool_call',
+          data: {
+            round,
+            toolCallId: tc.id,
+            name: tc.name,
+            args: tc.arguments,
+            partition: 'writing',
+            traceId: state.traceId,
+          },
+        })
+
+        const writeStart = Date.now()
+
         let pipelineResult: PipelineResult
         try {
           pipelineResult = await executeToolWithPipeline(
@@ -1096,6 +1192,21 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         }
 
         resultMap.set(tc.id, { pipelineResult, def })
+
+        yield* debugYield(isDev(), debugEnabled, {
+          event: 'debug:tool_result',
+          data: {
+            toolCallId: tc.id,
+            success: pipelineResult.toolResult.success,
+            durationMs: Date.now() - writeStart,
+            cached: false,
+            data: pipelineResult.toolResult.data,
+            error: pipelineResult.toolResult.error,
+            uiAction: pipelineResult.toolResult.uiAction as unknown as Record<string, unknown> | undefined,
+            transition: pipelineResult.transition as unknown as Record<string, unknown> | undefined,
+            traceId: state.traceId,
+          },
+        })
 
         if (isBlocking) {
           yield {
