@@ -317,24 +317,49 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const gatePromise = (async (): Promise<{
     gateOutput: ReasoningGateOutput | null
     gateSelection: GateSelection
+    gateDebug: {
+      skipped: boolean
+      reason?: 'fast_path' | 'synthetic'
+      input?: ReasoningGateInput
+      output?: ReasoningGateOutput
+      durationMs: number
+    }
   }> => {
     eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'reasoning_gate', timestamp: Date.now() })
     const gatePhaseStart = Date.now()
 
     let gateOutput: ReasoningGateOutput | null = null
     let gateSelection: GateSelection
+    let gateDebug: {
+      skipped: boolean
+      reason?: 'fast_path' | 'synthetic'
+      input?: ReasoningGateInput
+      output?: ReasoningGateOutput
+      durationMs: number
+    }
 
     if (detectFastPath(input.message, hasActiveQuestionnaire) && !input.syntheticToolCall) {
       // Fast path: skip reasoning gate
       gateSelection = FAST_PATH_GATE
       state.phases['reasoningGate'] = { skipped: true, fastPath: true, durationMs: 0 }
+      gateDebug = {
+        skipped: true,
+        reason: 'fast_path',
+        durationMs: 0,
+      }
     } else if (input.syntheticToolCall) {
       // Synthetic tool call: skip gate
       gateSelection = { requiredSections: [], excludedSections: [], confidence: 0 }
       state.phases['reasoningGate'] = { skipped: true, syntheticAction: true, durationMs: 0 }
+      gateDebug = {
+        skipped: true,
+        reason: 'synthetic',
+        durationMs: 0,
+      }
     } else {
       // Full reasoning gate — read from turnCtx instead of querying DB
       const gateStart = Date.now()
+      let gateInput: ReasoningGateInput | undefined
 
       try {
         // Recent messages from turnCtx (already chronological)
@@ -363,7 +388,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         const currentQuestionText: string | null = null
         // We'll leave this null since loading questionnaire context is handled in context assembly
 
-        const gateInput: ReasoningGateInput = {
+        gateInput = {
           lastUserMessage: input.message,
           last3Messages,
           hasActiveQuestionnaire,
@@ -425,12 +450,19 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           error: true,
         }
       }
+
+      gateDebug = {
+        skipped: false,
+        input: gateInput,
+        output: gateOutput ?? undefined,
+        durationMs: Date.now() - gateStart,
+      }
     }
 
     state.phases['step3_reasoning_gate'] = Date.now() - gatePhaseStart
     eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'reasoning_gate', durationMs: Date.now() - gatePhaseStart })
 
-    return { gateOutput, gateSelection }
+    return { gateOutput, gateSelection, gateDebug }
   })()
 
   // --- contextPromise: Step 4 — Context assembly (without situationalBriefing, patched after gate) ---
@@ -502,6 +534,11 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
   const { gateOutput, gateSelection } = gateResult
   const { agentSlug, agentConfig, sections } = contextResult
+
+  yield* debugYield(isDev(), debugEnabled, {
+    event: 'debug:gate',
+    data: { traceId: state.traceId, ...gateResult.gateDebug },
+  })
 
   // Patch situationalBriefing from gate output
   const situationalBriefing = gateOutput ? formatGateBriefing(gateOutput) : null
