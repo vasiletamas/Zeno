@@ -10,7 +10,15 @@
 // ==============================================
 
 export interface SSEEvent {
-  event: 'content' | 'tool_start' | 'tool_complete' | 'ui_action' | 'error' | 'done' | 'status'
+  event:
+    | 'content'
+    | 'tool_start'
+    | 'tool_complete'
+    | 'ui_action'
+    | 'error'
+    | 'done'
+    | 'status'
+    | `debug:${string}`
   data: Record<string, unknown>
 }
 
