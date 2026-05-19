@@ -121,6 +121,7 @@ model Product {
   territoryCoverage       String
   premiumRange            Json?
   paymentFrequencyOptions Json?
+  insightKeys             Json?
   quoteValidityDays       Int      @default(30)
   isActive                Boolean  @default(true)
   createdAt               DateTime @default(now())
@@ -135,6 +136,7 @@ model Product {
   quotes              Quote[]
   policies            Policy[]
   agentKnowledge      AgentKnowledge[]
+  insights            CustomerInsight[]
 }
 
 model PricingTier {
@@ -438,6 +440,7 @@ model Question {
   type             String
   options          Json?
   validationRules  Json?
+  insightKey       String?
   parentQuestionId String?
   showWhenValue    String?
   orderIndex       Int
@@ -680,6 +683,7 @@ model User {
 model CustomerInsight {
   id              String          @id @default(cuid())
   customerId      String
+  productId       String?
   category        InsightCategory
   key             String
   value           String          @db.Text
@@ -690,6 +694,7 @@ model CustomerInsight {
   updatedAt       DateTime        @updatedAt
 
   customer Customer @relation(fields: [customerId], references: [id])
+  product  Product? @relation(fields: [productId], references: [id])
 
   @@unique([customerId, key])
   @@index([customerId, category])
