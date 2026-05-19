@@ -1,10 +1,45 @@
 'use client'
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState } from 'react'
+import { createContext, useCallback, useContext, useMemo, useReducer, useSyncExternalStore } from 'react'
 import type { DebugEvent } from '@/lib/chat/debug'
 import { EMPTY_STATE, reduceDebugEvent, type DebugState, type DebugTurn } from '@/lib/debug/reducer'
 
 const STORAGE_KEY = 'zeno_debug'
+
+const TOGGLE_EVENT = 'zeno-debug-toggle'
+
+function readEnabled(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.localStorage.getItem(STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeEnabled(b: boolean): void {
+  try {
+    if (b) window.localStorage.setItem(STORAGE_KEY, '1')
+    else window.localStorage.removeItem(STORAGE_KEY)
+  } catch {
+    // ignore quota / private-mode errors
+  }
+  window.dispatchEvent(new Event(TOGGLE_EVENT))
+}
+
+function subscribeEnabled(callback: () => void): () => void {
+  if (typeof window === 'undefined') return () => undefined
+  window.addEventListener('storage', callback) // cross-tab changes
+  window.addEventListener(TOGGLE_EVENT, callback) // same-tab setEnabled calls
+  return () => {
+    window.removeEventListener('storage', callback)
+    window.removeEventListener(TOGGLE_EVENT, callback)
+  }
+}
+
+function serverSnapshot(): boolean {
+  return false
+}
 
 interface DebugContextValue {
   enabled: boolean
@@ -18,26 +53,8 @@ interface DebugContextValue {
 const DebugContext = createContext<DebugContextValue | null>(null)
 
 export function DebugProvider({ children }: { children: React.ReactNode }) {
-  const [enabled, setEnabledState] = useState<boolean>(false)
-
-  // Hydrate enabled from localStorage (client-only)
-  useEffect(() => {
-    try {
-      setEnabledState(window.localStorage.getItem(STORAGE_KEY) === '1')
-    } catch {
-      // ignore
-    }
-  }, [])
-
-  const setEnabled = useCallback((b: boolean) => {
-    setEnabledState(b)
-    try {
-      if (b) window.localStorage.setItem(STORAGE_KEY, '1')
-      else window.localStorage.removeItem(STORAGE_KEY)
-    } catch {
-      // ignore
-    }
-  }, [])
+  const enabled = useSyncExternalStore(subscribeEnabled, readEnabled, serverSnapshot)
+  const setEnabled = useCallback((b: boolean) => writeEnabled(b), [])
 
   const [state, dispatch] = useReducer(
     (s: DebugState, e: DebugEvent | { type: 'CLEAR' }) =>
