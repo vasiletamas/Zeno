@@ -105,6 +105,7 @@ export interface ChatTurnInput {
   message: string
   language?: 'en' | 'ro'
   syntheticToolCall?: ToolCall
+  debugEnabled?: boolean
 }
 
 // ==============================================
@@ -150,6 +151,8 @@ export function handleChatTurn(input: ChatTurnInput): ReadableStream<Uint8Array>
 
 async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent> {
   initObservability()
+
+  const debugEnabled = input.debugEnabled === true
 
   const state: TurnState = {
     conversationId: input.conversationId ?? '',

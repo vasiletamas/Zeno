@@ -74,6 +74,8 @@ export async function POST(request: NextRequest) {
       message = message || `[Action: ${parsed.action.type}]`
     }
 
+    const debugEnabled = request.headers.get('x-zeno-debug') === '1'
+
     let stream: ReadableStream<Uint8Array>
     try {
       stream = handleChatTurn({
@@ -82,6 +84,7 @@ export async function POST(request: NextRequest) {
         message,
         language: parsed.language,
         syntheticToolCall,
+        debugEnabled,
       })
     } catch (err) {
       const errorId = logFatal({
