@@ -77,11 +77,18 @@ function parseSSEEvents(text: string): ParsedSSEEvent[] {
 // HOOK
 // ==============================================
 
+export interface UseChatOptions {
+  initialMessages?: ChatMessage[]
+  onDebugEvent?: (event: { event: string; data: Record<string, unknown> }) => void
+  extraHeaders?: Record<string, string>
+}
+
 export function useChat(
   conversationId: string,
   customerId: string,
-  initialMessages?: ChatMessage[]
+  options: UseChatOptions = {},
 ): UseChatReturn {
+  const { initialMessages, onDebugEvent, extraHeaders } = options
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages ?? [])
   const [isStreaming, setIsStreaming] = useState(false)
   const [toolStatus, setToolStatus] = useState<{ tool: string; message: string } | null>(null)
@@ -145,7 +152,7 @@ export function useChat(
       try {
         const response = await fetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(extraHeaders ?? {}) },
           body: JSON.stringify({ conversationId, customerId, message: text }),
           signal: abortController.signal,
         })
@@ -257,6 +264,13 @@ export function useChat(
                 streamingMessageIdRef.current = null
                 break
               }
+
+              default: {
+                if (sseEvent.event.startsWith('debug:') && onDebugEvent) {
+                  onDebugEvent({ event: sseEvent.event, data })
+                }
+                break
+              }
             }
           }
         }
@@ -308,7 +322,7 @@ export function useChat(
         streamingMessageIdRef.current = null
       }
     },
-    [isStreaming, conversationId, customerId]
+    [isStreaming, conversationId, customerId, onDebugEvent, extraHeaders]
   )
 
   const sendAction = useCallback(
@@ -340,7 +354,7 @@ export function useChat(
       try {
         const response = await fetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(extraHeaders ?? {}) },
           body: JSON.stringify({ conversationId, customerId, action }),
           signal: abortController.signal,
         })
@@ -439,6 +453,12 @@ export function useChat(
                 streamingMessageIdRef.current = null
                 break
               }
+              default: {
+                if (sseEvent.event.startsWith('debug:') && onDebugEvent) {
+                  onDebugEvent({ event: sseEvent.event, data })
+                }
+                break
+              }
             }
           }
         }
@@ -468,7 +488,7 @@ export function useChat(
         streamingMessageIdRef.current = null
       }
     },
-    [isStreaming, conversationId, customerId]
+    [isStreaming, conversationId, customerId, onDebugEvent, extraHeaders]
   )
 
   return {

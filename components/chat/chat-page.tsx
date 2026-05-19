@@ -32,7 +32,7 @@ export default function ChatPage({
     uiActions,
     answeredMessageIds,
     markAnswered,
-  } = useChat(conversationId, customerId, initialMessages)
+  } = useChat(conversationId, customerId, { initialMessages })
 
   const handleSuggestionSelect = (text: string) => {
     sendMessage(text)
