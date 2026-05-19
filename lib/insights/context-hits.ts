@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db'
 import { logWarn } from '@/lib/errors/logger'
+import type { InsightCategory } from '@/lib/generated/prisma/client'
 
 const DEFAULT_THRESHOLD = 0.8
 
@@ -16,7 +17,7 @@ export interface ContextHit {
   confidence: number
   source: string
   lastConfirmedAt: Date
-  category: string
+  category: InsightCategory
 }
 
 export async function findContextHit(
