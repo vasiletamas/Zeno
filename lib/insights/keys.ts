@@ -1,15 +1,9 @@
 import { prisma } from '@/lib/db'
-
-export type InsightCategoryName =
-  | 'DEMOGRAPHIC'
-  | 'PREFERENCE'
-  | 'OBJECTION_PATTERN'
-  | 'BUYING_SIGNAL'
-  | 'RISK_FACTOR'
+import type { InsightCategory } from '@/lib/generated/prisma/client'
 
 export interface InsightKeySpec {
   key: string
-  category: InsightCategoryName
+  category: InsightCategory
   type: 'string' | 'number' | 'boolean' | 'enum'
   options?: string[]
 }
