@@ -498,6 +498,7 @@ registerTool('set_conversation_product', {
   statusMessage: STATUS_SET_CONVERSATION_PRODUCT,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
 }, setConversationProduct)
 
 registerTool('get_objection_strategy', {
@@ -602,6 +603,7 @@ registerTool('start_dnt_questionnaire', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
 }, startDntQuestionnaire)
 
 registerTool('save_dnt_answer', {
@@ -620,6 +622,7 @@ registerTool('save_dnt_answer', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
+  sideEffect: 'save',
 }, saveDntAnswer)
 
 registerTool('sign_dnt', {
@@ -638,6 +641,7 @@ registerTool('sign_dnt', {
   statusMessage: STATUS_SIGN_DNT,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
 }, signDnt)
 
 // --- Application ---
@@ -656,6 +660,7 @@ registerTool('start_application', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
 }, startApplication)
 
 registerTool('save_application_answer', {
@@ -674,6 +679,7 @@ registerTool('save_application_answer', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
+  sideEffect: 'save',
 }, saveApplicationAnswer)
 
 registerTool('resume_application', {
@@ -738,6 +744,7 @@ registerTool('generate_quote', {
   statusMessage: STATUS_GENERATE_QUOTE,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
+  sideEffect: 'quote',
 }, generateQuote)
 
 registerTool('accept_quote', {
@@ -756,6 +763,7 @@ registerTool('accept_quote', {
   statusMessage: STATUS_ACCEPT_QUOTE,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
 }, acceptQuote)
 
 registerTool('get_quote_details', {

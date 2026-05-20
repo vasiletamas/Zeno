@@ -126,6 +126,12 @@ export const setConversationProduct: ToolHandler = async (args, context) => {
         insuranceType: product.insuranceType,
       },
       message: `Product set to ${name[lang]}.`,
+      confirmation: {
+        category: 'lifecycle',
+        label: lang === 'en' ? 'Selected product' : 'Produs selectat',
+        value: `${product.code} — ${name[lang]}`,
+        timestamp: new Date().toISOString(),
+      },
     }
   } catch (error) {
     return { success: false, error: String(error) }
