@@ -32,6 +32,7 @@ export interface PromptSections {
   agentKnowledge: string | null
   customerContext: string | null
   coachingBriefing: string | null
+  domainGuidance: string | null
   workflowInstructions: string | null
   questionnaireContext: string | null
   productContext: string | null
@@ -73,6 +74,7 @@ const SECTION_REGISTRY: SectionConfig[] = [
   { key: 'capabilityManifest',  priority: 3,    layer: 'constitution', alwaysInclude: false, prefix: 'WHAT I CAN DO:' },
   { key: 'productContext',      priority: 4,  layer: 'stable',      alwaysInclude: false, prefix: '=== PRODUCT CONTEXT ===' },
   { key: 'coachingBriefing',    priority: 5,  layer: 'stable',      alwaysInclude: false, prefix: '=== PRODUCT SALES PLAYBOOK ===' },
+  { key: 'domainGuidance',      priority: 6,  layer: 'stable',      alwaysInclude: false, prefix: '=== DOMAIN GUIDANCE ===' },
 
   // DYNAMIC SUFFIX — changes every turn
   { key: 'complianceGuidance',  priority: 9,  layer: 'dynamic',     alwaysInclude: false, prefix: '=== COMPLIANCE GUIDANCE ===' },

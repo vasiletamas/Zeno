@@ -894,6 +894,7 @@ export async function loadAllSections(params: {
     agentKnowledge,
     customerContext,
     coachingBriefing,
+    domainGuidance: null, // populated by mergeSkillPackSections from active packs
     workflowInstructions,
     questionnaireContext,
     productContext,

@@ -585,6 +585,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         agentKnowledge: null,
         customerContext: null,
         coachingBriefing: null,
+        domainGuidance: null,
         workflowInstructions: null,
         questionnaireContext: null,
         productContext: null,

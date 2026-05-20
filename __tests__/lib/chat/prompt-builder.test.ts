@@ -25,6 +25,7 @@ function makeSections(
     agentKnowledge: null,
     customerContext: 'Ion, age 35, married.',
     coachingBriefing: 'Focus on value, not price.',
+    domainGuidance: null,
     workflowInstructions: 'Ask the next DNT question.',
     questionnaireContext: 'Q5: What is your annual income?',
     productContext: 'Protect Standard I: 190 RON/year.',
@@ -295,6 +296,28 @@ describe('FAST_PATH_GATE', () => {
     expect(result.prompt).toContain('Never give medical advice')
     expect(result.prompt).toContain('Ask the next DNT question')
     expect(result.prompt).toContain('Q5: What is your annual income?')
+  })
+})
+
+describe('domainGuidance section (subsystem B)', () => {
+  it('renders the section when populated', () => {
+    const sections = makeSections({
+      domainGuidance: 'Prefer warmth in life-insurance conversations.',
+    })
+    const result = buildPrompt(sections, NO_GATE)
+
+    expect(result.prompt).toContain('=== DOMAIN GUIDANCE ===')
+    expect(result.prompt).toContain('Prefer warmth in life-insurance conversations.')
+  })
+
+  it('appears after coachingBriefing in the stable layer', () => {
+    const sections = makeSections({
+      coachingBriefing: 'COACH BLOCK',
+      domainGuidance: 'DOMAIN BLOCK',
+    })
+    const result = buildPrompt(sections, NO_GATE)
+
+    expect(result.prompt.indexOf('COACH BLOCK')).toBeLessThan(result.prompt.indexOf('DOMAIN BLOCK'))
   })
 })
 
