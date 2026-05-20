@@ -195,6 +195,32 @@ const STATUS_PRODUCT_LOOKUP = {
   ],
 }
 
+const STATUS_GET_PRODUCT_INFO = {
+  ro: [
+    'Verific detaliile produsului... un moment',
+    'Caut datele exacte ale produsului',
+    'Citesc fi\u0219a produsului pentru tine',
+  ],
+  en: [
+    'Looking up product details... one moment',
+    'Reading the product datasheet',
+    'Pulling the exact product info',
+  ],
+}
+
+const STATUS_SET_CONVERSATION_PRODUCT = {
+  ro: [
+    'Confirm produsul selectat',
+    'Salvez alegerea ta',
+    '\u00cenregistrez produsul ales',
+  ],
+  en: [
+    'Confirming the selected product',
+    'Saving your choice',
+    'Recording the selected product',
+  ],
+}
+
 // ==============================================
 // STUB HANDLER (for background-only tools)
 // ==============================================
@@ -424,7 +450,7 @@ registerTool('get_product_info', {
   },
   executionMode: 'blocking',
   customerVisible: false,
-  statusMessage: STATUS_PRODUCT_LOOKUP,
+  statusMessage: STATUS_GET_PRODUCT_INFO,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffects: false,
@@ -469,7 +495,7 @@ registerTool('set_conversation_product', {
   },
   executionMode: 'blocking',
   customerVisible: false,
-  statusMessage: null,
+  statusMessage: STATUS_SET_CONVERSATION_PRODUCT,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
 }, setConversationProduct)
