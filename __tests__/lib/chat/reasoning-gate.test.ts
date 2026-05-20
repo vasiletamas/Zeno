@@ -402,4 +402,17 @@ describe('buildGateContextMessage', () => {
 
     expect(message).toContain('Quote: 290 RON')
   })
+
+  it('subsystem B — does NOT include the [Active Skill Packs] line in gate input', () => {
+    const input = makeInput({
+      currentMode: 'SALES',
+      availableSkillPacks: [{ slug: 'life-insurance-discovery', description: 'Life insurance' }],
+      activeSkillPacks: ['life-insurance-discovery'],
+    })
+
+    const message = buildGateContextMessage(input)
+
+    expect(message).not.toContain('[Active Skill Packs]')
+    expect(message).toContain('[Available Skill Packs]')
+  })
 })

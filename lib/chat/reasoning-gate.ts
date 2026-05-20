@@ -157,9 +157,11 @@ export function buildGateContextMessage(input: ReasoningGateInput): string {
     parts.push(`\n[Conversation Mode] ${input.currentMode}`)
   }
 
-  if (input.activeSkillPacks && input.activeSkillPacks.length > 0) {
-    parts.push(`[Active Skill Packs] ${input.activeSkillPacks.join(', ')}`)
-  }
+  // Active skill packs are intentionally NOT included in gate input — feeding
+  // the gate its own previous recommendations creates a self-reinforcement
+  // loop that keeps the same pack active across explicit product-category
+  // pivots. The gate still sees [Available Skill Packs] below.
+  // See subsystem B / docs/superpowers/specs/2026-05-20-zeno-skill-pack-contract-design.md.
 
   if (input.availableSkillPacks && input.availableSkillPacks.length > 0) {
     parts.push(
