@@ -23,7 +23,7 @@ const baseConversation = {
   mode: 'SALES',
   activeSkillPacks: ['pack-a'],
   productId: 'prod-1',
-  product: { id: 'prod-1' },
+  product: { id: 'prod-1', code: 'PROD-1', name: { ro: 'Produs 1', en: 'Product 1' } },
   workflowSession: {
     id: 'ws-1',
     workflowId: 'wf-1',
@@ -56,6 +56,9 @@ const baseCustomer = {
   extractedProfile: { smoker: false },
   language: 'ro',
   isAnonymous: false,
+  gdprConsentAt: null,
+  gdprConsentScope: null,
+  aiDisclosureAcknowledgedAt: null,
 }
 
 const rawMessages = [
@@ -166,7 +169,7 @@ describe('loadTurnContext', () => {
       expect(ctx.conversation.mode).toBe('SALES')
       expect(ctx.conversation.activeSkillPacks).toEqual(['pack-a'])
       expect(ctx.conversation.productId).toBe('prod-1')
-      expect(ctx.conversation.product).toEqual({ id: 'prod-1' })
+      expect(ctx.conversation.product).toEqual({ id: 'prod-1', code: 'PROD-1', name: { ro: 'Produs 1', en: 'Product 1' } })
     })
 
     it('returns workflowSession with currentStep', async () => {
@@ -295,6 +298,40 @@ describe('loadTurnContext', () => {
       expect(ctx.customer.extractedProfile).toEqual({})
       expect(ctx.customer.language).toBe('ro')
       expect(ctx.customer.isAnonymous).toBe(true)
+      expect(ctx.customer.gdprConsentAt).toBeNull()
+      expect(ctx.customer.gdprConsentScope).toBeNull()
+      expect(ctx.customer.aiDisclosureAcknowledgedAt).toBeNull()
+    })
+
+    it('threads customer consent fields through when populated', async () => {
+      const customerWithConsent = {
+        ...baseCustomer,
+        gdprConsentAt: new Date('2026-05-20T12:48:00Z'),
+        gdprConsentScope: 'data_processing_for_quote',
+        aiDisclosureAcknowledgedAt: new Date('2026-05-20T12:45:00Z'),
+      }
+      vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
+      vi.mocked(prisma.customer.findUnique).mockResolvedValue(customerWithConsent as never)
+      vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
+      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
+
+      const ctx = await loadTurnContext('conv-1', 'cust-1')
+
+      expect(ctx.customer.gdprConsentAt).toEqual(new Date('2026-05-20T12:48:00Z'))
+      expect(ctx.customer.gdprConsentScope).toBe('data_processing_for_quote')
+      expect(ctx.customer.aiDisclosureAcknowledgedAt).toEqual(new Date('2026-05-20T12:45:00Z'))
+    })
+
+    it('threads product code and name through', async () => {
+      vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
+      vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
+      vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
+      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
+
+      const ctx = await loadTurnContext('conv-1', 'cust-1')
+
+      expect(ctx.conversation.product?.code).toBe('PROD-1')
+      expect(ctx.conversation.product?.name).toEqual({ ro: 'Produs 1', en: 'Product 1' })
     })
 
     it('defaults mode to SALES when null', async () => {

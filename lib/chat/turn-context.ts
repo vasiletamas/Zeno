@@ -18,7 +18,7 @@ export interface TurnContextConversation {
   mode: string
   activeSkillPacks: string[]
   productId: string | null
-  product: { id: string } | null
+  product: { id: string; code: string; name: unknown } | null
   workflowSession: {
     id: string
     workflowId: string
@@ -51,6 +51,9 @@ export interface TurnContextCustomer {
   extractedProfile: Record<string, unknown>
   language: string
   isAnonymous: boolean
+  gdprConsentAt: Date | null
+  gdprConsentScope: string | null
+  aiDisclosureAcknowledgedAt: Date | null
 }
 
 export interface TurnContextMessage {
@@ -85,7 +88,7 @@ export async function loadTurnContext(
     prisma.conversation.findUniqueOrThrow({
       where: { id: conversationId },
       include: {
-        product: { select: { id: true } },
+        product: { select: { id: true, code: true, name: true } },
         workflowSession: {
           include: {
             currentStep: {
@@ -126,6 +129,9 @@ export async function loadTurnContext(
         extractedProfile: true,
         language: true,
         isAnonymous: true,
+        gdprConsentAt: true,
+        gdprConsentScope: true,
+        aiDisclosureAcknowledgedAt: true,
       },
     }),
 
@@ -176,6 +182,9 @@ export async function loadTurnContext(
         extractedProfile: (rawCustomer.extractedProfile as Record<string, unknown>) ?? {},
         language: rawCustomer.language,
         isAnonymous: rawCustomer.isAnonymous,
+        gdprConsentAt: rawCustomer.gdprConsentAt ?? null,
+        gdprConsentScope: rawCustomer.gdprConsentScope ?? null,
+        aiDisclosureAcknowledgedAt: rawCustomer.aiDisclosureAcknowledgedAt ?? null,
       }
     : {
         name: null,
@@ -183,6 +192,9 @@ export async function loadTurnContext(
         extractedProfile: {},
         language: 'ro',
         isAnonymous: true,
+        gdprConsentAt: null,
+        gdprConsentScope: null,
+        aiDisclosureAcknowledgedAt: null,
       }
 
   // -------------------------------------------------------------------------
