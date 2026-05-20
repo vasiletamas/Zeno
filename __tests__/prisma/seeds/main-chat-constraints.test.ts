@@ -43,4 +43,14 @@ describe('main-chat agent constraints', () => {
     expect(gate).toBeDefined()
     expect(gate?.systemPrompt).toMatch(/current message overrides the stored interests/i)
   })
+
+  it('includes the forbidden-phrase rule (subsystem C)', () => {
+    const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
+    const parsed = JSON.parse(mainChat!.constraints as string)
+    expect(parsed).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Forbidden examples'),
+      ]),
+    )
+  })
 })
