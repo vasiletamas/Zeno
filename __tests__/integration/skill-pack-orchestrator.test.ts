@@ -120,14 +120,13 @@ describe('mergeSkillPackSections — constitution keys are never overridden', ()
 })
 
 // ============================================================
-// 3. Tool scoping — union-then-intersection
+// 3. Tool scoping — union of workflow tools and pack tools
 // ============================================================
 
-describe('computeAllowedTools — workflow tools intersected with union of pack tools', () => {
-  it('union of two packs then intersected with workflow tools', () => {
+describe('computeAllowedTools — workflow tools unioned with pack tools', () => {
+  it('union of workflow tools and tools from multiple packs', () => {
     const workflowTools = ['search_products', 'calculate_premium', 'get_quote', 'send_email']
 
-    // Pack A covers first two tools, Pack B covers last two
     const packA = makeSkillPack({
       slug: 'pack-a',
       allowedTools: ['search_products', 'calculate_premium'],
@@ -137,7 +136,6 @@ describe('computeAllowedTools — workflow tools intersected with union of pack 
       allowedTools: ['get_quote', 'send_email'],
     })
 
-    // Both packs together cover all 4 workflow tools, so all 4 should pass through
     const result = computeAllowedTools(workflowTools, [packA, packB] as never)
 
     expect(result).toHaveLength(4)
@@ -146,7 +144,7 @@ describe('computeAllowedTools — workflow tools intersected with union of pack 
     )
   })
 
-  it('tool not in any pack is excluded even if in workflow', () => {
+  it('workflow-only tool stays in result alongside pack-restricted tools', () => {
     const workflowTools = ['search_products', 'calculate_premium', 'admin_action']
 
     const packA = makeSkillPack({
@@ -160,14 +158,13 @@ describe('computeAllowedTools — workflow tools intersected with union of pack 
 
     const result = computeAllowedTools(workflowTools, [packA, packB] as never)
 
-    expect(result).toHaveLength(2)
+    expect(result).toHaveLength(3)
     expect(result).toEqual(
-      expect.arrayContaining(['search_products', 'calculate_premium']),
+      expect.arrayContaining(['search_products', 'calculate_premium', 'admin_action']),
     )
-    expect(result).not.toContain('admin_action')
   })
 
-  it('tool in pack but not in workflow is excluded', () => {
+  it('pack-only tool stays in result alongside workflow tools', () => {
     const workflowTools = ['search_products']
 
     const pack = makeSkillPack({
@@ -177,8 +174,10 @@ describe('computeAllowedTools — workflow tools intersected with union of pack 
 
     const result = computeAllowedTools(workflowTools, [pack] as never)
 
-    expect(result).toEqual(['search_products'])
-    expect(result).not.toContain('super_admin_tool')
+    expect(result).toEqual(
+      expect.arrayContaining(['search_products', 'super_admin_tool']),
+    )
+    expect(result).toHaveLength(2)
   })
 })
 
