@@ -380,6 +380,7 @@ model WorkflowStep {
   autoTool          String?
   allowedTools      String[]
   agentInstructions String?  @db.Text
+  salesPlaybook     String?  @db.Text
   uiAction          String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
