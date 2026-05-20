@@ -281,6 +281,10 @@ model Customer {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
+  gdprConsentAt              DateTime?
+  gdprConsentScope           String?
+  aiDisclosureAcknowledgedAt DateTime?
+
   conversations     Conversation[]
   applications      Application[]
   quotes            Quote[]
