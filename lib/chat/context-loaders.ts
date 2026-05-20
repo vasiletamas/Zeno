@@ -297,22 +297,56 @@ export async function loadProductContext(
 
 /**
  * Load coaching briefing section.
- * Returns the product's default sales playbook.
+ *
+ * Prefers WorkflowStep.salesPlaybook when a workflow step is active
+ * (subsystem B). Falls back to Product.defaultPlaybook when no workflow
+ * is active OR when the active step has no playbook. Returns null when
+ * neither source provides content — including the case where productId
+ * is null and workflowStepCode is null.
+ *
+ * Cache key includes both inputs because the same product can be hit
+ * with different workflow steps in the same conversation.
  */
 export async function loadCoachingBriefing(
-  productId: string,
+  productId: string | null,
+  workflowStepCode: string | null,
 ): Promise<string | null> {
-  const cached = coachingBriefingCache.get(productId)
+  const cacheKey = `${productId ?? 'null'}:${workflowStepCode ?? 'null'}`
+  const cached = coachingBriefingCache.get(cacheKey)
   if (cached !== undefined) return cached
 
-  const product = await prisma.product.findUnique({
-    where: { id: productId },
-    select: { defaultPlaybook: true },
-  })
+  // Prefer WorkflowStep.salesPlaybook
+  if (workflowStepCode) {
+    const step = await prisma.workflowStep.findFirst({
+      where: { code: workflowStepCode },
+      select: { salesPlaybook: true },
+    })
+    if (step?.salesPlaybook) {
+      coachingBriefingCache.set(cacheKey, step.salesPlaybook)
+      return step.salesPlaybook
+    }
+  }
 
-  const result = product?.defaultPlaybook ?? null
-  coachingBriefingCache.set(productId, result)
-  return result
+  // Fallback: Product.defaultPlaybook
+  if (productId) {
+    const product = await prisma.product.findUnique({
+      where: { id: productId },
+      select: { defaultPlaybook: true },
+    })
+    const result = product?.defaultPlaybook ?? null
+    coachingBriefingCache.set(cacheKey, result)
+    return result
+  }
+
+  coachingBriefingCache.set(cacheKey, null)
+  return null
+}
+
+/**
+ * Test-only: flush the cache so unit tests don't bleed between specs.
+ */
+export function flushCoachingBriefingCache(): void {
+  coachingBriefingCache.clear()
 }
 
 /**
@@ -840,7 +874,7 @@ export async function loadAllSections(params: {
     agentKnowledge,
   ] = await Promise.all([
     productId ? loadProductContext(productId, language) : null,
-    productId ? loadCoachingBriefing(productId) : null,
+    (productId || workflowStepCode) ? loadCoachingBriefing(productId, workflowStepCode) : null,
     loadQuestionnaireContext(conversationId, customerId, workflowStepCode, language),
     prefetchedCustomer
       ? Promise.resolve(loadCustomerContextFromData(prefetchedCustomer))
