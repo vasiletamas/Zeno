@@ -38,6 +38,7 @@ const turnAnomalies = new Map<string, Anomaly[]>()
 const turnToolFailures = new Map<string, number>()
 const turnToolCalls = new Map<string, number>()
 const turnLlmStarts = new Map<string, Map<string, number>>()
+const turnToolHistory = new Map<string, Array<{ name: string; success: boolean }>>()
 const _rollingLatency = new Map<string, RollingStats>()
 
 function addAnomaly(traceId: string, anomaly: Anomaly): void {
@@ -51,6 +52,12 @@ export function getTurnAnomalies(traceId: string): Anomaly[] {
   return turnAnomalies.get(traceId) ?? []
 }
 
+export function getTurnToolHistory(
+  traceId: string,
+): Array<{ name: string; success: boolean }> {
+  return turnToolHistory.get(traceId) ?? []
+}
+
 // ==============================================
 // SUBSCRIBER
 // ==============================================
@@ -62,6 +69,7 @@ export function registerAnomalySubscriber(bus: EventBus): void {
     turnToolFailures.set(event.traceId, 0)
     turnToolCalls.set(event.traceId, 0)
     turnLlmStarts.set(event.traceId, new Map())
+    turnToolHistory.set(event.traceId, [])
   })
 
   bus.on('phase:end', (event) => {
@@ -116,6 +124,11 @@ export function registerAnomalySubscriber(bus: EventBus): void {
     if (event.type !== 'tool:end') return
     const calls = (turnToolCalls.get(event.traceId) ?? 0) + 1
     turnToolCalls.set(event.traceId, calls)
+    // Accumulate tool history for side-effect validation (subsystem C).
+    const history = turnToolHistory.get(event.traceId)
+    if (history) {
+      history.push({ name: event.toolName, success: event.success })
+    }
     if (!event.success) {
       const failures = (turnToolFailures.get(event.traceId) ?? 0) + 1
       turnToolFailures.set(event.traceId, failures)
@@ -148,6 +161,17 @@ export function registerAnomalySubscriber(bus: EventBus): void {
         metadata: { gaps: event.gaps },
       })
     }
+  })
+
+  bus.on('side_effect:invalid', (event) => {
+    if (event.type !== 'side_effect:invalid') return
+    const phrases = event.violations.map((v) => `"${v.matchedPhrase}" (${v.category})`).join(', ')
+    addAnomaly(event.traceId, {
+      type: 'behavioral',
+      severity: 'warning',
+      message: `Side-effect claim not backed by tool call: ${phrases}`,
+      metadata: { violations: event.violations },
+    })
   })
 
   bus.on('turn:end', (event) => {
@@ -189,6 +213,7 @@ export function registerAnomalySubscriber(bus: EventBus): void {
       turnToolFailures.delete(event.traceId)
       turnToolCalls.delete(event.traceId)
       turnLlmStarts.delete(event.traceId)
+      turnToolHistory.delete(event.traceId)
     }, 1000)
   })
 }

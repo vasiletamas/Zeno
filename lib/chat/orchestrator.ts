@@ -23,7 +23,7 @@ import { getToolDefinition, getToolsForLLM } from '@/lib/tools/registry'
 import { executeToolWithPipeline } from '@/lib/tools/pipeline'
 import { buildToolContext } from './context-builder'
 import { createSSEStream, pickStatusMessage, type SSEEvent } from './stream-handler'
-import type { ToolContext, PipelineResult } from '@/lib/tools/types'
+import type { ToolContext, PipelineResult, ToolResult } from '@/lib/tools/types'
 import { buildPrompt, detectFastPath, FAST_PATH_GATE, type GateSelection, type PromptSections } from './prompt-builder'
 import { executeReasoningGate, formatGateBriefing, type ReasoningGateInput, type ReasoningGateOutput } from './reasoning-gate'
 import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
@@ -40,7 +40,8 @@ import { isContextLengthError, parseTokenDeficit } from '@/lib/llm/errors'
 import { logError, logWarn, logFatal } from '@/lib/errors/logger'
 import { extractAndPersistInsights } from '@/lib/insights/extractor'
 import { CircuitOpenError, TimeoutError } from '@/lib/errors/types'
-import { eventBus, initObservability, getTurnCost, getTurnAnomalies } from '@/lib/events'
+import { eventBus, initObservability, getTurnCost, getTurnAnomalies, getTurnToolHistory } from '@/lib/events'
+import { validateSideEffectClaims } from './side-effect-validator'
 import { applyABTestVariant } from '@/lib/self-improvement/ab-test-assigner'
 import { debugYield, isDev } from './debug'
 
@@ -1347,6 +1348,45 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
   state.phases['step7_llm_tools'] = Date.now() - step7Start
   eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'llm_tools', durationMs: Date.now() - step7Start })
+
+  // =============================================
+  // STEP 7b — Side-effect claim validation (subsystem C)
+  // =============================================
+  // Make sure the assistant's prose doesn't claim side effects it didn't
+  // actually perform via tools. Validator uses the tool history accumulated
+  // by the anomaly subscriber to know which side-effect categories succeeded.
+  try {
+    const history = getTurnToolHistory(state.traceId)
+    const toolCallsThisTurn = history.map((h, i) => ({
+      id: `t${i}`,
+      name: h.name,
+      arguments: {} as Record<string, unknown>,
+    })) as unknown as import('@/lib/llm/providers/types').ToolCall[]
+    const toolResultsThisTurn = history.map((h) => ({ success: h.success })) as ToolResult[]
+    const validation = validateSideEffectClaims(
+      finalContent,
+      toolCallsThisTurn,
+      toolResultsThisTurn,
+      state.language,
+    )
+    if (!validation.valid) {
+      eventBus.emit({
+        type: 'side_effect:invalid',
+        traceId: state.traceId,
+        conversationId: state.conversationId,
+        violations: validation.violations,
+      })
+    }
+  } catch (err) {
+    // Validator failures are never fatal — log and continue.
+    logWarn({
+      layer: 'orchestrator',
+      category: 'side_effect_validator',
+      message: 'Side-effect validator threw',
+      context: { conversationId: state.conversationId },
+      error: err,
+    })
+  }
 
   // =============================================
   // STEP 8 — Save assistant message

@@ -1,7 +1,7 @@
 export { eventBus, EventBus } from './event-bus'
 export type { ZenoEvent, ZenoEventType, EventHandler, Anomaly } from './types'
 export { getTurnCost } from './cost-subscriber'
-export { getTurnAnomalies, RollingStats } from './anomaly-subscriber'
+export { getTurnAnomalies, getTurnToolHistory, RollingStats } from './anomaly-subscriber'
 export { initOtel } from './otel-setup'
 
 import { eventBus } from './event-bus'

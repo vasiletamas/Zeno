@@ -28,6 +28,7 @@ export type ZenoEvent =
   | { type: 'skillpack:activated'; traceId: string; slugs: string[]; conversationId: string }
   | { type: 'skillpack:deactivated'; traceId: string; slugs: string[]; conversationId: string }
   | { type: 'compliance:result'; traceId: string; passed: boolean; gaps: string[]; conversationId: string }
+  | { type: 'side_effect:invalid'; traceId: string; conversationId: string; violations: Array<{ category: string; matchedPhrase: string }> }
   // Infrastructure events
   | { type: 'cache:status'; traceId: string; provider: string; cacheRead: number; cacheWrite: number; cacheHit: boolean }
 
