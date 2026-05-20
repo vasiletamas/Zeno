@@ -1,6 +1,13 @@
 # Zeno debug notes — 2026-05-20
 
-Issues surfaced by walking a real conversation end-to-end. Each entry is a problem to fix later, not a fix itself.
+Issues surfaced by walking a real conversation end-to-end. Both filed issues are addressed by the four-subsystem reliability redesign — see plans:
+
+- `docs/superpowers/plans/2026-05-20-zeno-discovery-toolset.md` (subsystem D)
+- `docs/superpowers/plans/2026-05-20-zeno-state-grounding.md` (subsystem A)
+- `docs/superpowers/plans/2026-05-20-zeno-skill-pack-contract.md` (subsystem B)
+- `docs/superpowers/plans/2026-05-20-zeno-tool-mediated-effects.md` (subsystem C)
+
+**Resolution status:** Both issues below are addressed. Issue 1 by subsystem D (catalogue tools always available); Issue 2 by subsystem B (pack contract locks state-bearing sections, gate self-feedback removed, current-message priority rule). The deeper hallucination root cause (agent prose claiming side effects without backing tool calls) is addressed by subsystem C (forbidden-phrase validator + side_effect:invalid anomaly).
 
 ---
 
