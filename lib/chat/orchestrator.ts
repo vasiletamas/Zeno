@@ -28,6 +28,7 @@ import { buildPrompt, detectFastPath, FAST_PATH_GATE, type GateSelection, type P
 import { executeReasoningGate, formatGateBriefing, type ReasoningGateInput, type ReasoningGateOutput } from './reasoning-gate'
 import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
 import { loadAllSections, type WorkflowSessionData } from './context-loaders'
+import { withDefaultDiscoveryTools } from './default-tools'
 import { loadTurnContext, type TurnContext } from './turn-context'
 import { resolveAgent } from './agent-resolver'
 import { getActiveSkillPacks, mergeSkillPackSections, computeAllowedTools } from '@/lib/skills/skill-pack-loader'
@@ -311,8 +312,13 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     (['dnt_questionnaire', 'application_fill'].includes(state.workflowStepCode) ||
       state.workflowStepCode.includes('bd')))
 
-  // Determine allowed tools for this step (hoisted for use in gate + skill pack scoping)
-  const stepAllowedTools = turnCtx.conversation.workflowSession?.currentStep.allowedTools ?? []
+  // Determine allowed tools for this step (hoisted for use in gate + skill pack scoping).
+  // DEFAULT_DISCOVERY_TOOLS are merged in as a baseline so the agent always has
+  // catalog tools during the pre-workflow discovery phase. See
+  // docs/superpowers/specs/2026-05-20-zeno-discovery-toolset-design.md.
+  const stepAllowedTools = withDefaultDiscoveryTools(
+    turnCtx.conversation.workflowSession?.currentStep.allowedTools ?? [],
+  )
 
   // --- gatePromise: Step 3 — Reasoning gate ---
   const gatePromise = (async (): Promise<{
