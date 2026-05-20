@@ -18,6 +18,7 @@ function makeSections(
     agentIdentity: 'You are Zeno, an AI insurance agent.',
     capabilityManifest: 'I can help you find the right policy.',
     constraints: 'Never give medical advice.',
+    stateGrounding: null,
     complianceGuidance: null,
     situationalBriefing: 'Customer is asking about pricing.',
     customerMemory: null,
@@ -294,5 +295,37 @@ describe('FAST_PATH_GATE', () => {
     expect(result.prompt).toContain('Never give medical advice')
     expect(result.prompt).toContain('Ask the next DNT question')
     expect(result.prompt).toContain('Q5: What is your annual income?')
+  })
+})
+
+describe('stateGrounding section (subsystem A)', () => {
+  it('appears after constraints and before capabilityManifest when populated', () => {
+    const sections = makeSections({
+      stateGrounding: '=== CURRENT SYSTEM STATE ===\n✗ No workflow is active',
+    })
+    const result = buildPrompt(sections, NO_GATE)
+
+    const ai = result.prompt.indexOf('You are Zeno')
+    const constraints = result.prompt.indexOf('Never give medical advice')
+    const stateGrounding = result.prompt.indexOf('=== CURRENT SYSTEM STATE ===')
+    const manifest = result.prompt.indexOf('I can help you find the right policy')
+
+    expect(ai).toBeGreaterThanOrEqual(0)
+    expect(constraints).toBeGreaterThan(ai)
+    expect(stateGrounding).toBeGreaterThan(constraints)
+    expect(manifest).toBeGreaterThan(stateGrounding)
+  })
+
+  it('is always included even when gate excludes it', () => {
+    const sections = makeSections({
+      stateGrounding: '=== CURRENT SYSTEM STATE ===\n✗ No workflow is active',
+    })
+    const result = buildPrompt(sections, {
+      requiredSections: [],
+      excludedSections: ['stateGrounding'],
+      confidence: 1.0,
+    })
+
+    expect(result.prompt).toContain('=== CURRENT SYSTEM STATE ===')
   })
 })

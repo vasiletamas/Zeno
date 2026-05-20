@@ -25,6 +25,7 @@ export interface PromptSections {
   agentIdentity: string | null
   capabilityManifest: string | null
   constraints: string | null
+  stateGrounding: string | null
   complianceGuidance: string | null
   situationalBriefing: string | null
   customerMemory: string | null
@@ -66,9 +67,10 @@ interface SectionConfig {
 
 const SECTION_REGISTRY: SectionConfig[] = [
   // STABLE PREFIX — rarely changes within a conversation
-  { key: 'agentIdentity',       priority: 1,  layer: 'constitution', alwaysInclude: true,  prefix: '' },
-  { key: 'constraints',         priority: 2,  layer: 'constitution', alwaysInclude: true,  prefix: 'CRITICAL CONSTRAINTS:' },
-  { key: 'capabilityManifest',  priority: 3,  layer: 'constitution', alwaysInclude: false, prefix: 'WHAT I CAN DO:' },
+  { key: 'agentIdentity',       priority: 1,    layer: 'constitution', alwaysInclude: true,  prefix: '' },
+  { key: 'constraints',         priority: 2,    layer: 'constitution', alwaysInclude: true,  prefix: 'CRITICAL CONSTRAINTS:' },
+  { key: 'stateGrounding',      priority: 2.5,  layer: 'constitution', alwaysInclude: true,  prefix: '' },
+  { key: 'capabilityManifest',  priority: 3,    layer: 'constitution', alwaysInclude: false, prefix: 'WHAT I CAN DO:' },
   { key: 'productContext',      priority: 4,  layer: 'stable',      alwaysInclude: false, prefix: '=== PRODUCT CONTEXT ===' },
   { key: 'coachingBriefing',    priority: 5,  layer: 'stable',      alwaysInclude: false, prefix: '=== PRODUCT SALES PLAYBOOK ===' },
 
