@@ -123,22 +123,39 @@ export function mergeSkillPackSections(
 // computeAllowedTools
 // ============================================================
 
+/**
+ * Compute the set of tools available to the LLM for this turn.
+ *
+ * Returns the UNION of workflow-step tools and all tools allowed by active
+ * skill packs. Duplicates are removed. Workflow tools come first, then pack
+ * tools in pack order.
+ *
+ * Previous behaviour was intersection, which zeroed out pack tools whenever
+ * workflow tools were empty (pre-workflow conversations). The union semantics
+ * align with subsystem D: default discovery tools are baseline, workflow and
+ * packs add to that.
+ */
 export function computeAllowedTools(
   workflowStepTools: string[],
   packs: SkillPack[],
 ): string[] {
-  if (packs.length === 0) return workflowStepTools
-
-  // Union all pack allowedTools
-  const packToolsUnion = new Set<string>()
-  for (const pack of packs) {
-    for (const tool of pack.allowedTools) {
-      packToolsUnion.add(tool)
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const t of workflowStepTools) {
+    if (!seen.has(t)) {
+      seen.add(t)
+      result.push(t)
     }
   }
-
-  // Intersect with workflow step tools
-  return workflowStepTools.filter((tool) => packToolsUnion.has(tool))
+  for (const pack of packs) {
+    for (const t of pack.allowedTools) {
+      if (!seen.has(t)) {
+        seen.add(t)
+        result.push(t)
+      }
+    }
+  }
+  return result
 }
 
 // ============================================================

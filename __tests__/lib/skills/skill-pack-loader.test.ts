@@ -233,7 +233,7 @@ describe('mergeSkillPackSections', () => {
 // ============================================================
 
 describe('computeAllowedTools', () => {
-  it('returns intersection of workflow tools and pack tools', () => {
+  it('returns the union of workflow tools and pack tools', () => {
     const workflowTools = ['search_products', 'calculate_premium', 'send_email']
     const packs = [
       makeSkillPack({ allowedTools: ['search_products', 'calculate_premium', 'admin_tool'] }),
@@ -241,9 +241,13 @@ describe('computeAllowedTools', () => {
 
     const result = computeAllowedTools(workflowTools, packs as any)
 
-    expect(result).toEqual(expect.arrayContaining(['search_products', 'calculate_premium']))
-    expect(result).not.toContain('send_email')
-    expect(result).not.toContain('admin_tool')
+    expect(result).toEqual(expect.arrayContaining([
+      'search_products',
+      'calculate_premium',
+      'send_email',
+      'admin_tool',
+    ]))
+    expect(result).toHaveLength(4)
   })
 
   it('returns workflow tools when no packs active', () => {
@@ -254,27 +258,44 @@ describe('computeAllowedTools', () => {
     expect(result).toEqual(['search_products', 'calculate_premium'])
   })
 
-  it('unions tools from multiple packs before intersecting', () => {
-    const workflowTools = ['search_products', 'calculate_premium', 'send_email', 'get_quote']
+  it('unions tools from multiple packs with workflow tools', () => {
+    const workflowTools = ['search_products', 'calculate_premium']
     const packs = [
-      makeSkillPack({ slug: 'pack-a', allowedTools: ['search_products', 'calculate_premium'] }),
-      makeSkillPack({ slug: 'pack-b', allowedTools: ['send_email', 'get_quote'] }),
+      makeSkillPack({ slug: 'pack-a', allowedTools: ['send_email'] }),
+      makeSkillPack({ slug: 'pack-b', allowedTools: ['get_quote'] }),
     ]
 
     const result = computeAllowedTools(workflowTools, packs as any)
 
-    expect(result).toEqual(expect.arrayContaining(['search_products', 'calculate_premium', 'send_email', 'get_quote']))
+    expect(result).toEqual(expect.arrayContaining([
+      'search_products', 'calculate_premium', 'send_email', 'get_quote',
+    ]))
     expect(result).toHaveLength(4)
   })
 
-  it('returns empty array when no overlap', () => {
-    const workflowTools = ['admin_tool', 'restricted_action']
+  it('returns pack tools when workflow tools are empty', () => {
+    const workflowTools: string[] = []
     const packs = [
-      makeSkillPack({ allowedTools: ['search_products', 'calculate_premium'] }),
+      makeSkillPack({ allowedTools: ['list_products', 'get_product_info'] }),
     ]
 
     const result = computeAllowedTools(workflowTools, packs as any)
 
-    expect(result).toEqual([])
+    expect(result).toEqual(expect.arrayContaining(['list_products', 'get_product_info']))
+    expect(result).toHaveLength(2)
+  })
+
+  it('deduplicates when workflow and packs share a tool', () => {
+    const workflowTools = ['search_products', 'calculate_premium']
+    const packs = [
+      makeSkillPack({ allowedTools: ['search_products', 'send_email'] }),
+    ]
+
+    const result = computeAllowedTools(workflowTools, packs as any)
+
+    expect(result).toEqual(expect.arrayContaining([
+      'search_products', 'calculate_premium', 'send_email',
+    ]))
+    expect(result).toHaveLength(3)
   })
 })
