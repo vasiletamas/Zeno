@@ -28,6 +28,13 @@ export interface ToolDefinition {
   sideEffects?: boolean     // default true — tools with no side effects can run in parallel
   cacheable?: boolean       // default false — opt-in to result caching
   cacheTtlMs?: number       // default 300_000 (5 minutes) — TTL for cached results
+  /**
+   * Category of side effect for system-rendered confirmation lines.
+   * If set, the tool's handler is expected to populate `ToolResult.confirmation`
+   * on success. Read-only tools omit this field.
+   * See docs/superpowers/specs/2026-05-20-zeno-tool-mediated-effects-design.md.
+   */
+  sideEffect?: 'save' | 'lifecycle' | 'consent' | 'quote'
 }
 
 // ==============================================
@@ -45,6 +52,19 @@ export interface ToolResult {
   error?: string
   message?: string
   uiAction?: { type: string; payload: Record<string, unknown> }
+  /**
+   * Structured confirmation rendered by the system as a customer-facing
+   * '✓ Label: Value' line. Only populated on success for side-effecting tools
+   * (those with sideEffect: 'save' | 'lifecycle' | 'consent' | 'quote').
+   * See docs/superpowers/specs/2026-05-20-zeno-tool-mediated-effects-design.md.
+   */
+  confirmation?: {
+    category: 'save' | 'lifecycle' | 'consent' | 'quote'
+    label: string
+    value: string
+    provenance?: string
+    timestamp: string
+  }
 }
 
 export interface ToolContext {
