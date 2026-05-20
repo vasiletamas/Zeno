@@ -25,6 +25,13 @@ const { loadAllSections, loadCustomerContextFromData } = await import(
   '@/lib/chat/context-loaders'
 )
 
+const emptyStateGroundingInput = {
+  workflowSession: null,
+  application: null,
+  product: null,
+  customer: { gdprConsentAt: null, gdprConsentScope: null, aiDisclosureAcknowledgedAt: null },
+} as const
+
 describe('loadAllSections with prefetchedCustomer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -61,6 +68,7 @@ describe('loadAllSections with prefetchedCustomer', () => {
       situationalBriefing: null,
       language: 'ro',
       prefetchedCustomer,
+      stateGroundingInput: emptyStateGroundingInput,
     })
 
     // prisma.customer.findUnique must NOT have been called
@@ -99,11 +107,31 @@ describe('loadAllSections with prefetchedCustomer', () => {
       workflowStepCode: null,
       situationalBriefing: null,
       language: 'ro',
+      stateGroundingInput: emptyStateGroundingInput,
     })
 
     expect(prisma.customer.findUnique).toHaveBeenCalledWith({
       where: { id: 'cust-1' },
     })
+  })
+
+  it('returns a stateGrounding section even when state is fully empty', async () => {
+    const result = await loadAllSections({
+      agentConfig: { systemPrompt: 'You are Zeno.', constraints: null },
+      allowedTools: [],
+      productId: null,
+      conversationId: 'conv-1',
+      customerId: 'cust-1',
+      workflowSession: null,
+      workflowStepCode: null,
+      situationalBriefing: null,
+      language: 'ro',
+      stateGroundingInput: emptyStateGroundingInput,
+    })
+
+    expect(result.stateGrounding).toContain('=== CURRENT SYSTEM STATE')
+    expect(result.stateGrounding).toContain('✗ No workflow is active')
+    expect(result.stateGrounding).toContain('✗ No product is selected')
   })
 })
 

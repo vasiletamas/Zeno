@@ -27,7 +27,7 @@ import type { ToolContext, PipelineResult } from '@/lib/tools/types'
 import { buildPrompt, detectFastPath, FAST_PATH_GATE, type GateSelection, type PromptSections } from './prompt-builder'
 import { executeReasoningGate, formatGateBriefing, type ReasoningGateInput, type ReasoningGateOutput } from './reasoning-gate'
 import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
-import { loadAllSections, type WorkflowSessionData } from './context-loaders'
+import { loadAllSections, loadStateGrounding, type WorkflowSessionData, type StateGroundingInput } from './context-loaders'
 import { withDefaultDiscoveryTools } from './default-tools'
 import { loadTurnContext, type TurnContext } from './turn-context'
 import { resolveAgent } from './agent-resolver'
@@ -493,6 +493,37 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           }
         : null
 
+      // Build StateGroundingInput from turnCtx — feeds the "=== CURRENT SYSTEM STATE ==="
+      // section so the agent has explicit ✓/✗ facts about the current world.
+      // See docs/superpowers/specs/2026-05-20-zeno-state-grounding-design.md.
+      const stateGroundingInput: StateGroundingInput = {
+        workflowSession: turnCtx.conversation.workflowSession
+          ? {
+              currentStep: {
+                code: turnCtx.conversation.workflowSession.currentStep.code,
+                name: turnCtx.conversation.workflowSession.currentStep.name,
+              },
+              status: 'ACTIVE',
+            }
+          : null,
+        application: turnCtx.conversation.application
+          ? {
+              id: 'application',
+              status: turnCtx.conversation.application.status,
+              currentQuestionIndex: turnCtx.conversation.application.currentQuestionIndex,
+              totalQuestions: turnCtx.conversation.application.totalQuestions,
+            }
+          : null,
+        product: turnCtx.conversation.product
+          ? { code: turnCtx.conversation.product.code, name: turnCtx.conversation.product.name }
+          : null,
+        customer: {
+          gdprConsentAt: turnCtx.customer.gdprConsentAt,
+          gdprConsentScope: turnCtx.customer.gdprConsentScope,
+          aiDisclosureAcknowledgedAt: turnCtx.customer.aiDisclosureAcknowledgedAt,
+        },
+      }
+
       sections = await loadAllSections({
         agentConfig: { systemPrompt: agentConfig.systemPrompt, constraints: agentConfig.constraints },
         allowedTools: stepAllowedTools,
@@ -504,6 +535,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         situationalBriefing: null, // patched after gate completes
         language: state.language,
         prefetchedCustomer: turnCtx.customer,
+        stateGroundingInput,
       })
     } catch (err) {
       logWarn({
@@ -513,11 +545,40 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         context: { conversationId: state.conversationId },
         error: err,
       })
-      // Minimal fallback — identity and constraints only
+      // Minimal fallback — identity, constraints, and state grounding only
+      // (state grounding is alwaysInclude: true, so it must be present even on fallback)
+      const fallbackStateGroundingInput: StateGroundingInput = {
+        workflowSession: turnCtx.conversation.workflowSession
+          ? {
+              currentStep: {
+                code: turnCtx.conversation.workflowSession.currentStep.code,
+                name: turnCtx.conversation.workflowSession.currentStep.name,
+              },
+              status: 'ACTIVE',
+            }
+          : null,
+        application: turnCtx.conversation.application
+          ? {
+              id: 'application',
+              status: turnCtx.conversation.application.status,
+              currentQuestionIndex: turnCtx.conversation.application.currentQuestionIndex,
+              totalQuestions: turnCtx.conversation.application.totalQuestions,
+            }
+          : null,
+        product: turnCtx.conversation.product
+          ? { code: turnCtx.conversation.product.code, name: turnCtx.conversation.product.name }
+          : null,
+        customer: {
+          gdprConsentAt: turnCtx.customer.gdprConsentAt,
+          gdprConsentScope: turnCtx.customer.gdprConsentScope,
+          aiDisclosureAcknowledgedAt: turnCtx.customer.aiDisclosureAcknowledgedAt,
+        },
+      }
       sections = {
         agentIdentity: agentConfig.systemPrompt,
         capabilityManifest: null,
         constraints: agentConfig.constraints,
+        stateGrounding: loadStateGrounding(fallbackStateGroundingInput),
         complianceGuidance: null,
         situationalBriefing: null,
         customerMemory: null,

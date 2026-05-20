@@ -807,6 +807,7 @@ export async function loadAllSections(params: {
   situationalBriefing: string | null
   language: 'en' | 'ro'
   prefetchedCustomer?: PrefetchedCustomer
+  stateGroundingInput: StateGroundingInput
 }): Promise<PromptSections> {
   const {
     agentConfig,
@@ -819,6 +820,7 @@ export async function loadAllSections(params: {
     situationalBriefing,
     language,
     prefetchedCustomer,
+    stateGroundingInput,
   } = params
 
   // Synchronous loaders
@@ -826,6 +828,7 @@ export async function loadAllSections(params: {
   const capabilityManifest = loadCapabilityManifest(allowedTools)
   const constraints = loadConstraints(agentConfig.constraints)
   const workflowInstructions = loadWorkflowInstructions(workflowSession)
+  const stateGrounding = loadStateGrounding(stateGroundingInput)
 
   // Async loaders — run in parallel
   const [
@@ -850,6 +853,7 @@ export async function loadAllSections(params: {
     agentIdentity,
     capabilityManifest,
     constraints,
+    stateGrounding,
     complianceGuidance: null, // injected by orchestrator when compliance checker runs
     situationalBriefing,
     customerMemory,
