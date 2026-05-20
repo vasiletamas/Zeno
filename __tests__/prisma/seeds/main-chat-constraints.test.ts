@@ -27,4 +27,14 @@ describe('main-chat agent constraints', () => {
       ]),
     )
   })
+
+  it('includes the CURRENT SYSTEM STATE grounding rule', () => {
+    const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
+    const parsed = JSON.parse(mainChat!.constraints as string)
+    expect(parsed).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('CURRENT SYSTEM STATE'),
+      ]),
+    )
+  })
 })
