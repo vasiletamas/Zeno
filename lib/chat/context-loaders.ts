@@ -95,6 +95,101 @@ export function loadConstraints(
 }
 
 // ==============================================
+// STATE GROUNDING (constitution layer)
+// ==============================================
+
+/**
+ * Input shape for loadStateGrounding. Comes from already-loaded turn context.
+ */
+export interface StateGroundingInput {
+  workflowSession: {
+    currentStep: { code: string; name: string }
+    status: string
+  } | null
+  application: {
+    id: string
+    status: string
+    currentQuestionIndex: number | null
+    totalQuestions: number | null
+  } | null
+  product: { code: string; name: unknown } | null
+  customer: {
+    gdprConsentAt: Date | null
+    gdprConsentScope: string | null
+    aiDisclosureAcknowledgedAt: Date | null
+  }
+}
+
+function pickProductName(name: unknown): string {
+  if (typeof name === 'string') return name
+  if (name && typeof name === 'object') {
+    const obj = name as Record<string, unknown>
+    if (typeof obj.ro === 'string') return obj.ro
+    if (typeof obj.en === 'string') return obj.en
+  }
+  return 'product'
+}
+
+function formatStateDate(d: Date): string {
+  return d.toISOString().slice(0, 16).replace('T', ' ')
+}
+
+/**
+ * Build the '=== CURRENT SYSTEM STATE ===' section. Pure function: every
+ * fact is named explicitly with ✓ (present) or ✗ (absent) so the agent
+ * never has to infer reality from silence.
+ *
+ * See docs/superpowers/specs/2026-05-20-zeno-state-grounding-design.md.
+ */
+export function loadStateGrounding(input: StateGroundingInput): string {
+  const lines: string[] = []
+  lines.push('=== CURRENT SYSTEM STATE (ground truth — do not contradict) ===')
+
+  if (input.workflowSession) {
+    const s = input.workflowSession
+    lines.push(`✓ Active workflow: ${s.currentStep.code} (${s.currentStep.name})`)
+  } else {
+    lines.push('✗ No workflow is active')
+  }
+
+  if (input.application) {
+    const a = input.application
+    const progress = (a.currentQuestionIndex != null && a.totalQuestions != null)
+      ? ` (question ${a.currentQuestionIndex}/${a.totalQuestions})`
+      : ''
+    lines.push(`✓ Active application: ${a.id}${progress}`)
+  } else {
+    lines.push('✗ No application has been started')
+  }
+
+  if (input.product) {
+    lines.push(`✓ Selected product: ${input.product.code} — ${pickProductName(input.product.name)}`)
+  } else {
+    lines.push('✗ No product is selected')
+  }
+
+  if (input.customer.gdprConsentAt) {
+    const when = formatStateDate(input.customer.gdprConsentAt)
+    const scope = input.customer.gdprConsentScope ?? 'unspecified scope'
+    lines.push(`✓ GDPR consent: Granted at ${when} for ${scope}`)
+  } else {
+    lines.push('✗ GDPR consent has NOT been granted by this customer')
+  }
+
+  if (input.customer.aiDisclosureAcknowledgedAt) {
+    const when = formatStateDate(input.customer.aiDisclosureAcknowledgedAt)
+    lines.push(`✓ AI disclosure: Acknowledged at ${when}`)
+  } else {
+    lines.push('✗ AI disclosure has NOT been acknowledged by this customer')
+  }
+
+  lines.push('')
+  lines.push('You cannot claim to have completed any of these. To change state, call the matching tool and wait for its success.')
+
+  return lines.join('\n')
+}
+
+// ==============================================
 // DYNAMIC LAYER
 // ==============================================
 
