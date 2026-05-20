@@ -234,6 +234,9 @@ Available skill packs will be listed in the input under [Available Skill Packs].
 - Add WORKFLOW_PHASE packs when the conversation is in a specific phase (questionnaire, closing, etc.).
 - Add POST_SALE packs when the conversation mode is not SALES.
 
+IMPORTANT — current-message priority:
+When the customer's current message names a product category different from their stored extractedProfile.interests, the current message overrides the stored interests. Never recommend a skill pack for a product category the customer is not currently asking about. If the customer pivots from one product category to another mid-conversation, recommend packs based on the NEW direction, not the prior tag.
+
 ## Mode Detection
 
 If the customer's intent clearly belongs to a different conversation mode, set "modeTransition" to the target mode. Valid modes: SALES, ONBOARDING, SUPPORT, CLAIMS, RENEWAL.
