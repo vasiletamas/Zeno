@@ -45,10 +45,12 @@ describe('discovery flow (subsystem D regression)', () => {
         'list_products',
         'get_product_info',
         'set_conversation_product',
+        'record_gdpr_consent',
+        'acknowledge_ai_disclosure',
         'save_application_answer',
         'calculate_premium',
       ]),
     )
-    expect(effectiveTools).toHaveLength(5)
+    expect(effectiveTools).toHaveLength(7)
   })
 })

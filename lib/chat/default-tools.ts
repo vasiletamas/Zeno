@@ -10,6 +10,8 @@ export const DEFAULT_DISCOVERY_TOOLS = [
   'list_products',
   'get_product_info',
   'set_conversation_product',
+  'record_gdpr_consent',
+  'acknowledge_ai_disclosure',
 ] as const
 
 /**
