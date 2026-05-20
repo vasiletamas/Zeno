@@ -340,7 +340,7 @@ interface AgentDef {
   constraints: string | null
 }
 
-const AGENTS: AgentDef[] = [
+export const AGENTS: AgentDef[] = [
   {
     slug: 'main-chat',
     name: 'Main Chat Agent',
@@ -358,6 +358,7 @@ const AGENTS: AgentDef[] = [
       'No promises without tool actions',
       'Past tense for completed actions',
       'Insurance and financial services only',
+      'Before calling set_conversation_product, the customer must have explicitly confirmed the product choice in their most recent message. If unclear, ask "confirmi că alegi {productName}?" (RO) or "confirm you\'d like {productName}?" (EN) and wait for their response. Never call set_conversation_product based solely on the customer expressing interest in a category.',
     ]),
   },
   {
