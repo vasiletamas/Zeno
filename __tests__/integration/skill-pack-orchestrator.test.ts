@@ -72,28 +72,31 @@ describe('resolveAgent — all modes return main-chat', () => {
 // 2. Skill pack sections merge without overriding constitution
 // ============================================================
 
-describe('mergeSkillPackSections — constitution keys are never overridden', () => {
+describe('mergeSkillPackSections — only PACK_WRITABLE_KEYS allowed', () => {
   beforeEach(() => {
     flushSkillPackCache()
     vi.clearAllMocks()
   })
 
-  it('constitution keys unchanged, dynamic keys overridden by skill pack', async () => {
+  it('rejects every reserved key; only domainGuidance writes through', async () => {
     const baseSections = {
       agentIdentity: 'You are Zeno, the Allianz-Tiriac agent.',
       constraints: 'Never give medical advice.',
       capabilityManifest: 'I can help find life insurance policies.',
       productContext: 'Default product context.',
+      coachingBriefing: null as string | null,
+      domainGuidance: null as string | null,
     }
 
-    // Pack tries to override all four keys including the three constitution keys
     const packWithOverrides = makeSkillPack({
       slug: 'aggressive-pack',
       promptSections: {
         agentIdentity: 'HACKED IDENTITY',
         constraints: 'HACKED CONSTRAINTS VIA PROMPT_SECTIONS',
         capabilityManifest: 'HACKED MANIFEST',
-        productContext: 'Dynamic product context from pack.',
+        productContext: 'HACKED product context',
+        coachingBriefing: 'HACKED playbook',
+        domainGuidance: 'Legitimate domain guidance',
       },
       constraints: null,
       priority: 10,
@@ -104,18 +107,15 @@ describe('mergeSkillPackSections — constitution keys are never overridden', ()
     const activePacks = await getActiveSkillPacks(['aggressive-pack'])
     const result = mergeSkillPackSections(baseSections, activePacks)
 
-    // Constitution keys must remain unchanged
+    // Reserved keys must be untouched
     expect(result.agentIdentity).toBe('You are Zeno, the Allianz-Tiriac agent.')
     expect(result.capabilityManifest).toBe('I can help find life insurance policies.')
-
-    // constraints from promptSections is also a constitution key — must not override
-    // but the top-level constraints field on the pack is appended, not the promptSections one
-    // Since constraints is in CONSTITUTION_KEYS, it blocks the promptSections override.
-    // The base constraints value must still be present.
     expect(result.constraints).toContain('Never give medical advice.')
+    expect(result.productContext).toBe('Default product context.')
+    expect(result.coachingBriefing).toBeNull()
 
-    // Dynamic key should be overridden by the pack
-    expect(result.productContext).toBe('Dynamic product context from pack.')
+    // Only domainGuidance writes through
+    expect(result.domainGuidance).toBe('Legitimate domain guidance')
   })
 })
 
@@ -427,15 +427,14 @@ describe('pipeline integration — skill packs flow through merge and tool compu
       agentIdentity: 'You are Zeno.',
       constraints: 'Base constraint.',
       capabilityManifest: 'Base manifest.',
-      productContext: null as string | null,
-      coachingBriefing: null as string | null,
+      domainGuidance: null as string | null,
     }
 
     const workflowTools = ['search_products', 'calculate_premium', 'send_proposal', 'get_quote']
 
     const pack1 = makeSkillPack({
       slug: 'discovery-pack',
-      promptSections: { productContext: 'Life insurance product details.' },
+      promptSections: { domainGuidance: 'Discovery domain notes.' },
       allowedTools: ['search_products', 'calculate_premium'],
       constraints: 'Always identify customer needs first.',
       priority: 20,
@@ -444,7 +443,7 @@ describe('pipeline integration — skill packs flow through merge and tool compu
 
     const pack2 = makeSkillPack({
       slug: 'closing-pack',
-      promptSections: { coachingBriefing: 'Focus on closing value.' },
+      promptSections: {},
       allowedTools: ['send_proposal', 'get_quote'],
       constraints: null,
       priority: 10,
@@ -453,26 +452,20 @@ describe('pipeline integration — skill packs flow through merge and tool compu
 
     vi.mocked(prisma.skillPack.findMany).mockResolvedValue([pack1, pack2] as never)
 
-    // Step 1: Fetch active packs (as orchestrator does)
     const activePacks = await getActiveSkillPacks(['discovery-pack', 'closing-pack'])
 
     expect(activePacks).toHaveLength(2)
-    // Higher priority first
     expect(activePacks[0].slug).toBe('discovery-pack')
 
-    // Step 2: Merge sections
     const mergedSections = mergeSkillPackSections(baseSections, activePacks)
 
     expect(mergedSections.agentIdentity).toBe('You are Zeno.')
-    expect(mergedSections.productContext).toBe('Life insurance product details.')
-    expect(mergedSections.coachingBriefing).toBe('Focus on closing value.')
+    expect(mergedSections.domainGuidance).toBe('Discovery domain notes.')
     expect(mergedSections.constraints).toContain('Base constraint.')
     expect(mergedSections.constraints).toContain('Always identify customer needs first.')
 
-    // Step 3: Compute allowed tools
     const allowedTools = computeAllowedTools(workflowTools, activePacks)
 
-    // Both packs together cover all 4 workflow tools
     expect(allowedTools).toHaveLength(4)
     expect(allowedTools).toEqual(
       expect.arrayContaining(['search_products', 'calculate_premium', 'send_proposal', 'get_quote']),
@@ -484,21 +477,21 @@ describe('pipeline integration — skill packs flow through merge and tool compu
       agentIdentity: 'You are Zeno.',
       constraints: 'Base only.',
       capabilityManifest: 'Base manifest.',
-      productContext: null as string | null,
+      domainGuidance: null as string | null,
     }
 
     const workflowTools = ['search_products', 'calculate_premium']
 
     const activePack = makeSkillPack({
       slug: 'active-pack',
-      promptSections: { productContext: 'Active pack content.' },
+      promptSections: { domainGuidance: 'Active pack guidance.' },
       allowedTools: ['search_products', 'calculate_premium'],
       isActive: true,
       priority: 10,
     })
     const inactivePack = makeSkillPack({
       slug: 'inactive-pack',
-      promptSections: { coachingBriefing: 'Should not appear.' },
+      promptSections: { domainGuidance: 'Should not appear.' },
       allowedTools: ['search_products'],
       isActive: false,
       priority: 20,
@@ -512,8 +505,6 @@ describe('pipeline integration — skill packs flow through merge and tool compu
     expect(activePacks[0].slug).toBe('active-pack')
 
     const mergedSections = mergeSkillPackSections(baseSections, activePacks)
-    expect(mergedSections.productContext).toBe('Active pack content.')
-    // coachingBriefing from inactive pack should not appear
-    expect((mergedSections as Record<string, string | null>).coachingBriefing).toBeUndefined()
+    expect(mergedSections.domainGuidance).toBe('Active pack guidance.')
   })
 })

@@ -148,13 +148,14 @@ describe('mergeSkillPackSections', () => {
     capabilityManifest: 'I can help find policies.',
     productContext: null as string | null,
     coachingBriefing: null as string | null,
+    domainGuidance: null as string | null,
     situationalBriefing: null as string | null,
   }
 
-  it('merges pack sections into base sections', () => {
+  it('merges domainGuidance from a pack into base sections', () => {
     const packs = [
       makeSkillPack({
-        promptSections: { productContext: 'Product details here' },
+        promptSections: { domainGuidance: 'Domain-specific tone notes' },
         constraints: null,
         priority: 10,
       }),
@@ -162,16 +163,18 @@ describe('mergeSkillPackSections', () => {
 
     const result = mergeSkillPackSections(baseSections, packs as any)
 
-    expect(result.productContext).toBe('Product details here')
+    expect(result.domainGuidance).toBe('Domain-specific tone notes')
   })
 
-  it('never overrides constitution layer (agentIdentity, constraints key from promptSections, capabilityManifest)', () => {
+  it('rejects all reserved keys (only domainGuidance is writable)', () => {
     const packs = [
       makeSkillPack({
         promptSections: {
           agentIdentity: 'Hacked identity',
           capabilityManifest: 'Hacked manifest',
-          productContext: 'Legitimate product context',
+          productContext: 'INJECTED product context',
+          coachingBriefing: 'INJECTED coaching',
+          domainGuidance: 'Legitimate domain guidance',
         },
         constraints: null,
         priority: 10,
@@ -182,19 +185,21 @@ describe('mergeSkillPackSections', () => {
 
     expect(result.agentIdentity).toBe('You are Zeno.')
     expect(result.capabilityManifest).toBe('I can help find policies.')
-    expect(result.productContext).toBe('Legitimate product context')
+    expect(result.productContext).toBeNull()
+    expect(result.coachingBriefing).toBeNull()
+    expect(result.domainGuidance).toBe('Legitimate domain guidance')
   })
 
-  it('higher priority pack wins on conflicts', () => {
+  it('higher priority pack wins on conflicts (domainGuidance)', () => {
     const lowPriorityPack = makeSkillPack({
       slug: 'low',
-      promptSections: { coachingBriefing: 'Low priority coaching' },
+      promptSections: { domainGuidance: 'Low priority guidance' },
       constraints: null,
       priority: 5,
     })
     const highPriorityPack = makeSkillPack({
       slug: 'high',
-      promptSections: { coachingBriefing: 'High priority coaching' },
+      promptSections: { domainGuidance: 'High priority guidance' },
       constraints: null,
       priority: 20,
     })
@@ -203,7 +208,7 @@ describe('mergeSkillPackSections', () => {
 
     const result = mergeSkillPackSections(baseSections, packs as any)
 
-    expect(result.coachingBriefing).toBe('High priority coaching')
+    expect(result.domainGuidance).toBe('High priority guidance')
   })
 
   it('appends pack constraints to base constraints (not replaces)', () => {

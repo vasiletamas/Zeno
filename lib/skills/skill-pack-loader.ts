@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db'
 import { LRUCache } from '@/lib/cache/lru-cache'
+import { logWarn } from '@/lib/errors/logger'
 
 // ============================================================
 // TYPES
@@ -22,10 +23,14 @@ export interface SkillPack {
 }
 
 // ============================================================
-// CONSTITUTION KEYS — never overridden by skill packs
+// PACK_WRITABLE_KEYS — packs may ONLY write keys in this set
 // ============================================================
+// Inverted from the old CONSTITUTION_KEYS approach: instead of listing
+// what packs cannot write, list what they CAN. Anything else is reserved
+// for system loaders backed by real DB state. See
+// docs/superpowers/specs/2026-05-20-zeno-skill-pack-contract-design.md.
 
-const CONSTITUTION_KEYS = new Set(['agentIdentity', 'constraints', 'capabilityManifest'])
+export const PACK_WRITABLE_KEYS = new Set(['domainGuidance'])
 
 // ============================================================
 // CACHE — 5-minute TTL, up to 100 entries
@@ -80,6 +85,17 @@ export async function getActiveSkillPacks(slugs: string[]): Promise<SkillPack[]>
 // mergeSkillPackSections
 // ============================================================
 
+/**
+ * Merge skill pack contributions into the base prompt sections.
+ *
+ * Packs can ONLY write keys listed in PACK_WRITABLE_KEYS. Any other key
+ * appearing in a pack's promptSections is logged as a warning and
+ * ignored (defense-in-depth: pack rows from before the contract change
+ * are stripped at load time instead of leaking into the prompt).
+ *
+ * Pack constraints are appended to the base constraints (preserved
+ * behavior). Higher-priority packs claim a writable key first.
+ */
 export function mergeSkillPackSections(
   baseSections: Record<string, string | null>,
   packs: SkillPack[],
@@ -87,36 +103,51 @@ export function mergeSkillPackSections(
   if (packs.length === 0) return baseSections
 
   const merged: Record<string, string | null> = { ...baseSections }
-
-  // Track which non-constitution keys have been claimed (first/highest-priority pack wins)
   const claimed = new Set<string>()
-
-  // Collect all pack constraints to append
   const packConstraints: string[] = []
 
   for (const pack of packs) {
-    // Merge promptSections — skip constitution keys, first pack wins on conflict
     for (const [key, value] of Object.entries(pack.promptSections ?? {})) {
-      if (CONSTITUTION_KEYS.has(key)) continue
+      if (!PACK_WRITABLE_KEYS.has(key)) {
+        logWarn({
+          layer: 'orchestrator',
+          category: 'skillpack_section_rejected',
+          message: `skill pack '${pack.slug}' attempted to write reserved key '${key}' — ignored`,
+          context: { packSlug: pack.slug, key },
+        })
+        continue
+      }
       if (claimed.has(key)) continue
       merged[key] = value
       claimed.add(key)
     }
 
-    // Collect constraints for appending
     if (pack.constraints) {
       packConstraints.push(pack.constraints)
     }
   }
 
-  // Append pack constraints to base constraints (never replace)
   if (packConstraints.length > 0) {
     const base = merged.constraints ?? ''
-    const parts = [base, ...packConstraints].filter(Boolean)
-    merged.constraints = parts.join('\n')
+    merged.constraints = [base, ...packConstraints].filter(Boolean).join('\n')
   }
 
   return merged
+}
+
+// ============================================================
+// validatePackPromptSections — for save-time validation
+// ============================================================
+
+/**
+ * Returns { valid, invalidKeys } for a candidate pack's promptSections.
+ * Used by the admin endpoint that creates/updates pack rows.
+ */
+export function validatePackPromptSections(
+  sections: Record<string, unknown>,
+): { valid: boolean; invalidKeys: string[] } {
+  const invalidKeys = Object.keys(sections).filter((k) => !PACK_WRITABLE_KEYS.has(k))
+  return { valid: invalidKeys.length === 0, invalidKeys }
 }
 
 // ============================================================
