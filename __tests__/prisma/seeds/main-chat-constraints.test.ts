@@ -53,4 +53,26 @@ describe('main-chat agent constraints', () => {
       ]),
     )
   })
+
+  it('main-chat system prompt has the CATALOG FIRST rule', () => {
+    const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
+    expect(mainChat?.systemPrompt).toMatch(/CATALOG FIRST/)
+    expect(mainChat?.systemPrompt).toMatch(/list_products.*matching category/i)
+  })
+
+  it('main-chat system prompt forbids naming unfetched products', () => {
+    const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
+    expect(mainChat?.systemPrompt).toMatch(/NEVER NAME OR QUOTE A PRODUCT YOU HAVEN'T FETCHED/)
+  })
+
+  it('main-chat system prompt grounds discovery questions in product dimensions', () => {
+    const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
+    expect(mainChat?.systemPrompt).toMatch(/DISCOVERY QUESTIONS MUST BE GROUNDED/)
+  })
+
+  it('main-chat system prompt distinguishes pricing ranges from specific quotes', () => {
+    const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
+    expect(mainChat?.systemPrompt).toMatch(/SPECIFIC PRICES ONLY VIA QUOTE/)
+    expect(mainChat?.systemPrompt).toMatch(/premiumRange/)
+  })
 })
