@@ -11,7 +11,6 @@ import type { LLMToolDefinition } from '@/lib/llm/providers/types'
 import type { ToolDefinition, ToolHandler, ToolContext, ToolResult } from './types'
 import { prisma } from '@/lib/db'
 import { LRUCache } from '@/lib/cache/lru-cache'
-import { collapseCoveragesForDisplay } from '@/lib/products/coverage-display'
 
 // --- Handler imports ---
 import { checkDntStatus, startDntQuestionnaire, saveDntAnswer, signDnt } from './handlers/dnt-handlers'
@@ -320,67 +319,19 @@ const getProductInfoHandler: ToolHandler = async (
       return { success: false, error: `Product not found: ${productCode || productId}` }
     }
 
-    // Look up customer age (if known) so age-banded coverages can be filtered
-    // down to the matching band. Falls back to undefined → ranges in UI.
-    let customerAge: number | undefined
-    const customer = await prisma.customer.findUnique({ where: { id: context.customerId } })
-    if (customer?.dateOfBirth) {
-      const today = new Date()
-      const dob = customer.dateOfBirth
-      let age = today.getFullYear() - dob.getFullYear()
-      const monthDiff = today.getMonth() - dob.getMonth()
-      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
-        age--
-      }
-      customerAge = age
-    }
-
-    // Build uiAction with show_product_cards when product has pricing tiers
-    let uiAction: { type: string; payload: Record<string, unknown> } | undefined
-    if (product.pricingTiers.length > 0) {
-      const tiers = product.pricingTiers.map((tier) => ({
-        tierCode: tier.code,
-        tierName: tier.name as { en: string; ro: string },
-        levels: tier.levels.map((level) => ({
-          levelCode: level.code,
-          levelName: level.name as { en: string; ro: string },
-          premiumAnnual: level.premiumAnnual,
-          premiumMonthly: Math.round((level.premiumAnnual / 12) * 100) / 100,
-          coverages: collapseCoveragesForDisplay(
-            level.coverageAmounts.map((ca) => ({
-              amount: ca.amount,
-              currency: ca.currency,
-              isAgeBased: ca.isAgeBased,
-              minAge: ca.minAge,
-              maxAge: ca.maxAge,
-              coverageType: {
-                code: ca.coverageType.code,
-                name: ca.coverageType.name as { en: string; ro: string },
-              },
-            })),
-            customerAge,
-          ),
-        })),
-        isRecommended: tier.orderIndex === 0, // First tier recommended by default
-      }))
-
-      const addon = product.addons.length > 0 ? product.addons[0] : null
-
-      uiAction = {
-        type: 'show_product_cards',
-        payload: {
-          tiers,
-          addonAvailable: !!addon,
-          addonName: addon ? (addon.name as { en: string; ro: string }) : null,
-        } as unknown as Record<string, unknown>,
-      }
-    }
+    // NOTE: this tool used to emit a `show_product_cards` uiAction that drove
+    // the chat UI to render <ProductCard> components. That coupling was
+    // removed (subsystem D follow-up) — get_product_info is now pure data
+    // retrieval. The agent describes the product in prose using `data`. How
+    // (and whether) product presentation gets visual treatment is a separate
+    // design decision; uiActions should be reserved for cases where the
+    // system needs a specific structured answer from the customer (yes/no,
+    // multiple choice), not for free-form data display.
 
     return {
       success: true,
       data: { product: product as unknown as Record<string, unknown> },
       message: `Product details for ${product.code}.`,
-      uiAction,
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
