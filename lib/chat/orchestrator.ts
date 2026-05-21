@@ -890,6 +890,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         error: pipelineResult.toolResult.error,
         uiAction: pipelineResult.toolResult.uiAction as unknown as Record<string, unknown> | undefined,
         transition: pipelineResult.transition as unknown as Record<string, unknown> | undefined,
+        confirmation: pipelineResult.toolResult.confirmation,
         traceId: state.traceId,
       },
     })
@@ -1201,6 +1202,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
               error: pipelineResult.toolResult.error,
               uiAction: pipelineResult.toolResult.uiAction as unknown as Record<string, unknown> | undefined,
               transition: pipelineResult.transition as unknown as Record<string, unknown> | undefined,
+              confirmation: pipelineResult.toolResult.confirmation,
               traceId: state.traceId,
             },
           })
@@ -1278,6 +1280,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
             error: pipelineResult.toolResult.error,
             uiAction: pipelineResult.toolResult.uiAction as unknown as Record<string, unknown> | undefined,
             transition: pipelineResult.transition as unknown as Record<string, unknown> | undefined,
+            confirmation: pipelineResult.toolResult.confirmation,
             traceId: state.traceId,
           },
         })

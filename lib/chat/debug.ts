@@ -64,6 +64,17 @@ export interface DebugToolResultPayload {
   error?: string
   uiAction?: Record<string, unknown>
   transition?: Record<string, unknown>
+  /**
+   * Structured confirmation payload (subsystem C). Populated when the tool's
+   * sideEffect category produced a customer-facing '✓ Label: Value' line.
+   */
+  confirmation?: {
+    category: 'save' | 'lifecycle' | 'consent' | 'quote'
+    label: string
+    value: string
+    provenance?: string
+    timestamp: string
+  }
 }
 
 export interface DebugTurnEndPayload {
