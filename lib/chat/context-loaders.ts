@@ -864,6 +864,7 @@ export async function loadAllSections(params: {
   language: 'en' | 'ro'
   prefetchedCustomer?: PrefetchedCustomer
   stateGroundingInput: StateGroundingInput
+  preloadedInsights?: RawCustomerInsight[]
 }): Promise<PromptSections> {
   const {
     agentConfig,
@@ -877,6 +878,7 @@ export async function loadAllSections(params: {
     language,
     prefetchedCustomer,
     stateGroundingInput,
+    preloadedInsights,
   } = params
 
   // Synchronous loaders
@@ -901,7 +903,7 @@ export async function loadAllSections(params: {
     prefetchedCustomer
       ? Promise.resolve(loadCustomerContextFromData(prefetchedCustomer))
       : loadCustomerContext(customerId),
-    loadCustomerMemory(customerId),
+    loadCustomerMemory(customerId, preloadedInsights),
     loadAgentKnowledge(productId, workflowStepCode),
   ])
 
