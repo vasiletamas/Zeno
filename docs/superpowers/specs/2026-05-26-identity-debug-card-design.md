@@ -147,13 +147,15 @@ Per the project's TDD rule, each runtime behaviour gets a failing test before im
 
 ## Files touched
 
-- `lib/chat/debug.ts` — add `emitIdentity` and the `DebugIdentityEvent` type to the discriminated union.
-- `lib/chat/orchestrator.ts` — one new `debugYield(emitIdentity(...))` call site after `loadTurnContext` / `loadCustomerMemory`.
-- `components/debug/debug-provider.tsx` — reducer case for `debug:identity`, attaches payload to the matching turn.
+- `lib/chat/debug.ts` — add `DebugIdentityPayload` interface and the `debug:identity` variant of the `DebugEvent` discriminated union; add a small `buildIdentityPayload()` pure helper for the orchestrator to use (and tests to call).
+- `lib/chat/context-loaders.ts` — `loadCustomerMemory(customerId, preloadedInsights?)` accepts optional pre-fetched insights; `loadAllSections` accepts an optional `preloadedInsights` config field and threads it through. New exported `loadCustomerInsights(customerId)` helper that does the raw `findMany`.
+- `lib/chat/orchestrator.ts` — in dev+debug mode, call `loadCustomerInsights` once after `loadTurnContext`, pass insights both into the identity event and into the `loadAllSections` call.
+- `lib/debug/reducer.ts` — reducer case for `debug:identity`, attaches payload to the matching turn under `turn.identity`.
 - `components/debug/turn-card.tsx` — render `<IdentitySection turn={turn} previous={previousTurn} />` above `<GateSection />`.
-- `components/debug/identity-section.tsx` — **new file**, the card itself + pure `diff` helper.
-- `__tests__/lib/chat/debug.identity.test.ts` — **new file**, unit tests for the emitter.
-- `__tests__/components/debug/identity-section.test.tsx` — **new file**, unit tests for the card.
+- `components/debug/sections/identity-section.tsx` — **new file**, the card itself.
+- `components/debug/sections/identity-diff.ts` — **new file**, the pure diff helper.
+- `__tests__/lib/chat/debug-identity.test.ts` — **new file**, unit tests for `buildIdentityPayload`.
+- `__tests__/components/debug/identity-diff.test.ts` — **new file**, unit tests for `diffIdentity`.
 
 ## Out-of-scope follow-ups (not part of this spec)
 
