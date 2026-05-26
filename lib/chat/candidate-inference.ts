@@ -67,3 +67,19 @@ export function inferCandidate(
 
   return { productId: matches[0].id, confidence: 70 }
 }
+
+/**
+ * Cheap pre-check: returns true if the message OR interests mention any
+ * known category keyword. Used by the orchestrator to short-circuit the
+ * catalog DB query when no keyword is present in the turn at all.
+ *
+ * Pure, in-memory regex check. Safe to call on every turn.
+ */
+export function hasAnyCategoryKeyword(
+  message: string,
+  interests: string[] | null,
+): boolean {
+  if (findInsuranceTypeInText(message) !== null) return true
+  if (interests && interests.length > 0 && findInsuranceTypeInInterests(interests) !== null) return true
+  return false
+}

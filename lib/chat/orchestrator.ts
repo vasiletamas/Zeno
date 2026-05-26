@@ -31,7 +31,7 @@ import { loadAllSections, loadStateGrounding, loadCustomerInsights, type Workflo
 import { withDefaultDiscoveryTools } from './default-tools'
 import { loadTurnContext, type TurnContext } from './turn-context'
 import { getConversationPhase } from './phase'
-import { inferCandidate } from './candidate-inference'
+import { inferCandidate, hasAnyCategoryKeyword } from './candidate-inference'
 import { resolveAgent } from './agent-resolver'
 import { getActiveSkillPacks, mergeSkillPackSections, computeAllowedTools } from '@/lib/skills/skill-pack-loader'
 import { executeComplianceCheck, type ComplianceCheckResult } from './compliance-checker'
@@ -247,26 +247,27 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     return
   }
 
-  // Auto-infer the candidate product on the FIRST turn of conversations
-  // that don't yet have one. Keyword-based, deterministic, ~5-10ms.
+  // Auto-infer the candidate product whenever the current message reveals
+  // a category that maps unambiguously to one catalog product, AND no
+  // candidate is set yet AND no product is committed. Runs every turn until
+  // a candidate exists — greeting-then-intent ("buna ziua" → "vreau viața")
+  // is a common pattern, so we cannot gate on first-turn only.
+  //
+  // Cost: a cheap regex pre-check runs every turn; the catalog DB query
+  // only runs on turns whose message contains a category keyword.
   // Best-effort: a failure here must not break the turn.
   // See docs/superpowers/specs/2026-05-26-zeno-phase-model-design.md.
-  //
-  // Use turnCtx.conversation.messageCount (the DB-loaded value as of this
-  // turn's resolve step) rather than state.messageCount; the user message
-  // has not yet been saved at this point, so the DB value is 0 on the
-  // very first turn and >0 on subsequent turns.
+  const interests = (turnCtx.customer.extractedProfile as { interests?: string[] } | null)?.interests ?? null
   if (
     turnCtx.conversation.candidateProductId === null &&
     turnCtx.conversation.productId === null &&
-    turnCtx.conversation.messageCount === 0
+    hasAnyCategoryKeyword(input.message, interests)
   ) {
     try {
       const catalog = await prisma.product.findMany({
         where: { isActive: true },
         select: { id: true, insuranceType: true },
       })
-      const interests = (turnCtx.customer.extractedProfile as { interests?: string[] } | null)?.interests ?? null
       const guess = inferCandidate(input.message, interests, catalog)
       if (guess) {
         await prisma.conversation.update({

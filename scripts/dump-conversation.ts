@@ -16,6 +16,7 @@ async function main() {
     where: { id },
     include: {
       product: { select: { code: true, name: true, insuranceType: true } },
+      candidateProduct: { select: { code: true, name: true, insuranceType: true } },
       customer: {
         select: {
           id: true,
@@ -46,12 +47,26 @@ async function main() {
     process.exit(1);
   }
 
+  const phase = convo.mode === 'POST_SALE'
+    ? 'post_sale'
+    : (convo.application && convo.application.status !== 'COMPLETED' && convo.application.status !== 'ABANDONED'
+        ? 'application'
+        : 'presentation')
+
   console.log("=== META ===");
   console.log(JSON.stringify({
     id: convo.id,
+    phase,
     productCode: convo.product?.code,
     productName: convo.product?.name,
     insuranceType: convo.product?.insuranceType,
+    candidate: convo.candidateProductId ? {
+      productId: convo.candidateProductId,
+      productCode: convo.candidateProduct?.code,
+      productName: convo.candidateProduct?.name,
+      confidence: convo.candidateConfidence,
+      setAt: convo.candidateSetAt,
+    } : null,
     status: convo.status,
     mode: convo.mode,
     activeSkillPacks: convo.activeSkillPacks,
