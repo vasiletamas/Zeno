@@ -5,13 +5,16 @@ import type { DebugTurn } from '@/lib/debug/reducer'
 import { GateSection } from './sections/gate-section'
 import { PromptSection } from './sections/prompt-section'
 import { ToolsSection } from './sections/tools-section'
+import { IdentitySection } from './sections/identity-section'
 
 interface TurnCardProps {
   turn: DebugTurn
+  previousTurn: DebugTurn | null
   defaultOpen: boolean
 }
 
-export function TurnCard({ turn, defaultOpen }: TurnCardProps) {
+export function TurnCard({ turn, previousTurn, defaultOpen }: TurnCardProps) {
+  const [openIdentity, setOpenIdentity] = useState(defaultOpen)
   const [openGate, setOpenGate] = useState(defaultOpen)
   const [openPrompt, setOpenPrompt] = useState(defaultOpen)
   const [openTools, setOpenTools] = useState(defaultOpen)
@@ -35,6 +38,16 @@ export function TurnCard({ turn, defaultOpen }: TurnCardProps) {
           </p>
         )}
       </div>
+      <Subsection
+        title="Identity & Stored Context"
+        open={openIdentity}
+        onToggle={() => setOpenIdentity(!openIdentity)}
+      >
+        <IdentitySection
+          identity={turn.identity}
+          previousIdentity={previousTurn?.identity ?? null}
+        />
+      </Subsection>
       <Subsection
         title="Gate"
         open={openGate}

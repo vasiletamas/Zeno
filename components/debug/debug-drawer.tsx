@@ -66,7 +66,12 @@ function DebugDrawerInner({ open, onOpenChange }: DebugDrawerProps) {
           <p className="text-xs text-gray-500 p-2">Waiting for a turn...</p>
         )}
         {turns.map((turn, i) => (
-          <TurnCard key={turn.traceId} turn={turn} defaultOpen={i === 0} />
+          <TurnCard
+            key={turn.traceId}
+            turn={turn}
+            previousTurn={turns[i + 1] ?? null}
+            defaultOpen={i === 0}
+          />
         ))}
       </div>
     </aside>
