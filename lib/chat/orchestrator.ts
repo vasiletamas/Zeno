@@ -247,22 +247,34 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
   // Pre-fetch raw insights when in dev+debug so we can both emit the
   // structured identity event AND pass them into loadAllSections without
-  // a second DB query.
+  // a second DB query. A failure in this debug-only side path must never
+  // break the user-facing turn — log and continue.
   let preloadedInsights: RawCustomerInsight[] | undefined
   if (isDev() && debugEnabled) {
-    preloadedInsights = await loadCustomerInsights(state.customerId!)
-    yield* debugYield(isDev(), debugEnabled, {
-      event: 'debug:identity',
-      data: buildIdentityPayload({
-        traceId: state.traceId,
-        conversationId: state.conversationId!,
-        messageIndex: state.messageCount,
-        customerId: state.customerId!,
-        customer: turnCtx.customer,
-        insights: preloadedInsights,
-        now: new Date(),
-      }),
-    })
+    try {
+      preloadedInsights = await loadCustomerInsights(state.customerId)
+      yield* debugYield(isDev(), debugEnabled, {
+        event: 'debug:identity',
+        data: buildIdentityPayload({
+          traceId: state.traceId,
+          conversationId: state.conversationId,
+          messageIndex: state.messageCount,
+          customerId: state.customerId,
+          customer: turnCtx.customer,
+          insights: preloadedInsights,
+          now: new Date(),
+        }),
+      })
+    } catch (err) {
+      logWarn({
+        layer: 'orchestrator',
+        category: 'debug',
+        message: 'Failed to emit debug:identity event',
+        context: { conversationId: state.conversationId, customerId: state.customerId },
+        error: err,
+      })
+      preloadedInsights = undefined
+    }
   }
 
   // Guard: conversation must be active
