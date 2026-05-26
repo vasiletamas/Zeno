@@ -131,7 +131,8 @@ model Product {
   addons              Addon[]
   questionGroups      QuestionGroup[]
   objectionStrategies ObjectionStrategy[]
-  conversations       Conversation[]
+  conversations          Conversation[] @relation("ConversationProduct")
+  candidateConversations Conversation[] @relation("ConversationCandidateProduct")
   applications        Application[]
   quotes              Quote[]
   policies            Policy[]
@@ -297,31 +298,35 @@ model Customer {
 }
 
 model Conversation {
-  id               String             @id @default(cuid())
-  customerId       String
-  productId        String?
-  status           ConversationStatus @default(ACTIVE)
-  channel          String             @default("web")
-  language         String             @default("ro")
-  messageCount     Int                @default(0)
-  startedAt        DateTime           @default(now())
-  completedAt      DateTime?
-  lastActivityAt   DateTime           @default(now())
-  metadata         Json?
-  mode             String             @default("SALES")
-  activeSkillPacks String[]           @default([])
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  id                  String             @id @default(cuid())
+  customerId          String
+  productId           String?
+  candidateProductId  String?
+  candidateConfidence Int?
+  candidateSetAt      DateTime?
+  status              ConversationStatus @default(ACTIVE)
+  channel             String             @default("web")
+  language            String             @default("ro")
+  messageCount        Int                @default(0)
+  startedAt           DateTime           @default(now())
+  completedAt         DateTime?
+  lastActivityAt      DateTime           @default(now())
+  metadata            Json?
+  mode                String             @default("SALES")
+  activeSkillPacks    String[]           @default([])
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
 
-  customer        Customer             @relation(fields: [customerId], references: [id])
-  product         Product?             @relation(fields: [productId], references: [id])
-  messages        Message[]
-  workflowSession WorkflowSession?
-  summary         ConversationSummary?
-  answers         Answer[]
-  application     Application?
-  turnTraces      TurnTrace[]
-  score           ConversationScore?
+  customer         Customer             @relation(fields: [customerId], references: [id])
+  product          Product?             @relation("ConversationProduct", fields: [productId], references: [id])
+  candidateProduct Product?             @relation("ConversationCandidateProduct", fields: [candidateProductId], references: [id])
+  messages         Message[]
+  workflowSession  WorkflowSession?
+  summary          ConversationSummary?
+  answers          Answer[]
+  application      Application?
+  turnTraces       TurnTrace[]
+  score            ConversationScore?
   simulationConversation SimulationConversation?
 }
 
