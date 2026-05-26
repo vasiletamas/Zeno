@@ -27,7 +27,7 @@ import type { ToolContext, PipelineResult, ToolResult } from '@/lib/tools/types'
 import { buildPrompt, detectFastPath, FAST_PATH_GATE, type GateSelection, type PromptSections } from './prompt-builder'
 import { executeReasoningGate, formatGateBriefing, type ReasoningGateInput, type ReasoningGateOutput } from './reasoning-gate'
 import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
-import { loadAllSections, loadStateGrounding, type WorkflowSessionData, type StateGroundingInput } from './context-loaders'
+import { loadAllSections, loadStateGrounding, loadCustomerInsights, type WorkflowSessionData, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
 import { withDefaultDiscoveryTools } from './default-tools'
 import { loadTurnContext, type TurnContext } from './turn-context'
 import { resolveAgent } from './agent-resolver'
@@ -43,7 +43,7 @@ import { CircuitOpenError, TimeoutError } from '@/lib/errors/types'
 import { eventBus, initObservability, getTurnCost, getTurnAnomalies, getTurnToolHistory } from '@/lib/events'
 import { validateSideEffectClaims } from './side-effect-validator'
 import { applyABTestVariant } from '@/lib/self-improvement/ab-test-assigner'
-import { debugYield, isDev } from './debug'
+import { debugYield, isDev, buildIdentityPayload } from './debug'
 
 // ==============================================
 // CONSTANTS
@@ -243,6 +243,26 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       data: { errorId, type: 'internal', message: 'Service temporarily unavailable', retryable: true },
     }
     return
+  }
+
+  // Pre-fetch raw insights when in dev+debug so we can both emit the
+  // structured identity event AND pass them into loadAllSections without
+  // a second DB query.
+  let preloadedInsights: RawCustomerInsight[] | undefined
+  if (isDev() && debugEnabled) {
+    preloadedInsights = await loadCustomerInsights(state.customerId!)
+    yield* debugYield(isDev(), debugEnabled, {
+      event: 'debug:identity',
+      data: buildIdentityPayload({
+        traceId: state.traceId,
+        conversationId: state.conversationId!,
+        messageIndex: state.messageCount,
+        customerId: state.customerId!,
+        customer: turnCtx.customer,
+        insights: preloadedInsights,
+        now: new Date(),
+      }),
+    })
   }
 
   // Guard: conversation must be active
@@ -537,6 +557,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         language: state.language,
         prefetchedCustomer: turnCtx.customer,
         stateGroundingInput,
+        preloadedInsights,
       })
     } catch (err) {
       logWarn({
