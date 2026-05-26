@@ -856,6 +856,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const step7Start = Date.now()
 
   let toolContext = await buildToolContext(state.customerId, state.conversationId, state.language)
+  toolContext.activeSkillPacks = state.activeSkillPacks
   const effectiveTools = effectivePacks.length > 0
     ? computeAllowedTools(stepAllowedTools, effectivePacks)
     : stepAllowedTools
@@ -1376,6 +1377,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       // Refresh tool context after tool executions (state may have changed)
       if (transitionOccurred) {
         toolContext = await buildToolContext(state.customerId, state.conversationId, state.language)
+        toolContext.activeSkillPacks = state.activeSkillPacks
       }
 
       round++
