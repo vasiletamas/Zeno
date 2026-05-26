@@ -19,6 +19,9 @@ export interface TurnContextConversation {
   activeSkillPacks: string[]
   productId: string | null
   product: { id: string; code: string; name: unknown } | null
+  candidateProductId: string | null
+  candidateConfidence: number | null
+  candidateSetAt: Date | null
   workflowSession: {
     id: string
     workflowId: string
@@ -168,6 +171,9 @@ export async function loadTurnContext(
     activeSkillPacks: (rawConversation.activeSkillPacks as string[]) ?? [],
     productId: rawConversation.productId,
     product: rawConversation.product,
+    candidateProductId: rawConversation.candidateProductId,
+    candidateConfidence: rawConversation.candidateConfidence,
+    candidateSetAt: rawConversation.candidateSetAt,
     workflowSession: rawConversation.workflowSession ?? null,
     application: (rawConversation as { application?: TurnContextConversation['application'] }).application ?? null,
   }
