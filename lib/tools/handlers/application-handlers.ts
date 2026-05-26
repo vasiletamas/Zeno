@@ -50,12 +50,19 @@ export const startApplication: ToolHandler = async (_args, context) => {
       }
     }
 
-    // Resolve product from context
-    const productId = context.product?.id
+    // Resolve product from context or fall back to the conversation candidate
+    let productId: string | null = context.product?.id ?? null
+    if (!productId) {
+      const conv = await prisma.conversation.findUnique({
+        where: { id: context.conversationId },
+        select: { candidateProductId: true },
+      })
+      productId = conv?.candidateProductId ?? null
+    }
     if (!productId) {
       return {
         success: false,
-        error: 'No product selected. Please set a product before starting an application.',
+        error: 'No product selected. Call set_candidate_product first or pass an explicit productId.',
       }
     }
 
@@ -73,6 +80,16 @@ export const startApplication: ToolHandler = async (_args, context) => {
         totalQuestions: progress.total,
       },
     })
+
+    // Promote candidate to committed: copy productId onto Conversation so
+    // future loaders read it directly and the derived phase becomes
+    // 'application'.
+    if (context.product?.id !== productId) {
+      await prisma.conversation.update({
+        where: { id: context.conversationId },
+        data: { productId },
+      })
+    }
 
     // Get first question
     const result = await getNextQuestion(APPLICATION_GROUP_CODES, context.conversationId)
