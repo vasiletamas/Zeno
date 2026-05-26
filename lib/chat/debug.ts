@@ -10,6 +10,8 @@
 import type { SSEEvent } from './stream-handler'
 import type { ReasoningGateInput, ReasoningGateOutput } from './reasoning-gate'
 import type { PromptSections } from './prompt-builder'
+import type { TurnContextCustomer } from './turn-context'
+import type { RawCustomerInsight } from './context-loaders'
 import { writeDebugEvent } from './debug-persistence'
 
 // ==============================================
@@ -87,12 +89,42 @@ export interface DebugTurnEndPayload {
   anomalies: unknown[]
 }
 
+export interface DebugIdentityMemoryEntry {
+  id: string
+  kind: string
+  text: string
+  createdAt: string
+}
+
+export interface DebugIdentityPayload {
+  traceId: string
+  conversationId: string
+  messageIndex: number
+  identity: {
+    cookieId: string
+    isAnonymous: boolean
+  }
+  customer: {
+    name: string | null
+    age: number | null
+    language: string
+    extractedProfile: Record<string, unknown>
+  }
+  consent: {
+    gdprConsentAt: string | null
+    gdprConsentScope: string | null
+    aiDisclosureAcknowledgedAt: string | null
+  }
+  memory: DebugIdentityMemoryEntry[]
+}
+
 // ==============================================
 // DEBUG EVENT UNION (the wire format)
 // ==============================================
 
 export type DebugEvent =
   | { event: 'debug:turn_start'; data: DebugTurnStartPayload }
+  | { event: 'debug:identity'; data: DebugIdentityPayload }
   | { event: 'debug:gate'; data: DebugGatePayload }
   | { event: 'debug:prompt'; data: DebugPromptPayload }
   | { event: 'debug:tool_call'; data: DebugToolCallPayload }
@@ -136,4 +168,71 @@ export function* debugYield(
  */
 export function isDev(): boolean {
   return process.env.NODE_ENV === 'development'
+}
+
+// ==============================================
+// IDENTITY PAYLOAD BUILDER
+// ==============================================
+
+function computeAge(dateOfBirth: Date | null, now: Date): number | null {
+  if (!dateOfBirth) return null
+  let age = now.getFullYear() - dateOfBirth.getFullYear()
+  const monthDiff = now.getMonth() - dateOfBirth.getMonth()
+  if (
+    monthDiff < 0 ||
+    (monthDiff === 0 && now.getDate() < dateOfBirth.getDate())
+  ) {
+    age--
+  }
+  return age
+}
+
+export interface BuildIdentityPayloadInput {
+  traceId: string
+  conversationId: string
+  messageIndex: number
+  customerId: string
+  customer: TurnContextCustomer
+  insights: RawCustomerInsight[]
+}
+
+/**
+ * Pure helper: assemble the debug:identity payload from already-loaded
+ * customer + insight data. Tested directly; called from the orchestrator
+ * only when isDev() && debugEnabled.
+ */
+export function buildIdentityPayload(
+  input: BuildIdentityPayloadInput,
+): DebugIdentityPayload {
+  const now = new Date()
+  return {
+    traceId: input.traceId,
+    conversationId: input.conversationId,
+    messageIndex: input.messageIndex,
+    identity: {
+      cookieId: input.customerId,
+      isAnonymous: input.customer.isAnonymous,
+    },
+    customer: {
+      name: input.customer.name,
+      age: computeAge(input.customer.dateOfBirth, now),
+      language: input.customer.language,
+      extractedProfile: input.customer.extractedProfile,
+    },
+    consent: {
+      gdprConsentAt: input.customer.gdprConsentAt
+        ? input.customer.gdprConsentAt.toISOString()
+        : null,
+      gdprConsentScope: input.customer.gdprConsentScope,
+      aiDisclosureAcknowledgedAt: input.customer.aiDisclosureAcknowledgedAt
+        ? input.customer.aiDisclosureAcknowledgedAt.toISOString()
+        : null,
+    },
+    memory: input.insights.map((i) => ({
+      id: i.id,
+      kind: i.category,
+      text: `${i.key}: ${i.value}`,
+      createdAt: i.createdAt.toISOString(),
+    })),
+  }
 }
