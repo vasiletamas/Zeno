@@ -31,7 +31,7 @@ describe('discovery flow (subsystem D regression)', () => {
     expect(effectiveTools).toContain('calculate_premium')
   })
 
-  it('agent has all five tools when workflow is active and pack contributes one extra', () => {
+  it('agent has all baseline tools when workflow is active and pack contributes one extra', () => {
     const workflowAllowedTools = ['save_application_answer']
     const packs: any[] = [
       { slug: 'life-insurance-discovery', allowedTools: ['calculate_premium'] },
@@ -45,12 +45,13 @@ describe('discovery flow (subsystem D regression)', () => {
         'list_products',
         'get_product_info',
         'set_conversation_product',
+        'set_candidate_product',
         'record_gdpr_consent',
         'acknowledge_ai_disclosure',
         'save_application_answer',
         'calculate_premium',
       ]),
     )
-    expect(effectiveTools).toHaveLength(7)
+    expect(effectiveTools).toHaveLength(8)
   })
 })
