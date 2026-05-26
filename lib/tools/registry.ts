@@ -11,6 +11,7 @@ import type { LLMToolDefinition } from '@/lib/llm/providers/types'
 import type { ToolDefinition, ToolHandler, ToolContext, ToolResult } from './types'
 import { prisma } from '@/lib/db'
 import { LRUCache } from '@/lib/cache/lru-cache'
+import { resolveProductRef, listAvailableProductRefs } from './resolve-product'
 
 // --- Handler imports ---
 import { checkDntStatus, startDntQuestionnaire, saveDntAnswer, signDnt } from './handlers/dnt-handlers'
@@ -290,10 +291,20 @@ const getProductInfoHandler: ToolHandler = async (
       return { success: false, error: 'Either productCode or productId is required.' }
     }
 
-    const where = productCode ? { code: productCode } : { id: productId! }
+    const ref = await resolveProductRef({ productCode, productId })
+    if (!ref) {
+      const available = await listAvailableProductRefs()
+      return {
+        success: false,
+        error:
+          `Product not found: "${productCode ?? productId}". ` +
+          `Available codes: ${available.map((p) => p.code).join(', ') || '(none)'}.`,
+        data: { availableProducts: available as unknown as Record<string, unknown>[] },
+      }
+    }
 
     const product = await prisma.product.findUnique({
-      where,
+      where: { id: ref.id },
       include: {
         pricingTiers: {
           where: { isActive: true },
@@ -317,17 +328,8 @@ const getProductInfoHandler: ToolHandler = async (
     })
 
     if (!product) {
-      return { success: false, error: `Product not found: ${productCode || productId}` }
+      return { success: false, error: `Product not found after resolve: ${ref.id}` }
     }
-
-    // NOTE: this tool used to emit a `show_product_cards` uiAction that drove
-    // the chat UI to render <ProductCard> components. That coupling was
-    // removed (subsystem D follow-up) — get_product_info is now pure data
-    // retrieval. The agent describes the product in prose using `data`. How
-    // (and whether) product presentation gets visual treatment is a separate
-    // design decision; uiActions should be reserved for cases where the
-    // system needs a specific structured answer from the customer (yes/no,
-    // multiple choice), not for free-form data display.
 
     return {
       success: true,
@@ -396,8 +398,20 @@ registerTool('get_product_info', {
   parameters: {
     type: 'object',
     properties: {
-      productCode: { type: 'string', description: 'Product code.' },
-      productId: { type: 'string', description: 'Product ID.' },
+      productId: {
+        type: 'string',
+        description:
+          "Preferred identifier. Use the exact 'id' value returned by list_products " +
+          "(a cuid like 'cmozcrkyz0007bs0ynxjnvclz'). Always prefer productId over productCode " +
+          "when you have it.",
+      },
+      productCode: {
+        type: 'string',
+        description:
+          "Fallback identifier. The exact 'code' value from list_products " +
+          "(lowercase slug, e.g. 'protect'). This is NOT the display name — " +
+          "do not pass values like 'Protect' or 'Allianz Protect'.",
+      },
     },
     additionalProperties: false,
   },
@@ -419,7 +433,8 @@ registerTool('compare_products', {
       productIds: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Array of product IDs to compare (2-5).',
+        description:
+          "Array of 2-5 product IDs (cuid values from list_products), not display names.",
       },
     },
     required: ['productIds'],
@@ -440,7 +455,11 @@ registerTool('set_conversation_product', {
   parameters: {
     type: 'object',
     properties: {
-      productId: { type: 'string', description: 'Product ID to set.' },
+      productId: {
+        type: 'string',
+        description:
+          "Product ID to commit (cuid from list_products, NOT the display name or code).",
+      },
       confidence: { type: 'number', description: 'Confidence level 0-100.' },
     },
     required: ['productId'],
@@ -463,7 +482,11 @@ registerTool('set_candidate_product', {
   parameters: {
     type: 'object',
     properties: {
-      productId: { type: 'string', description: 'Product ID to set as the candidate.' },
+      productId: {
+        type: 'string',
+        description:
+          "Product ID to set as the candidate (cuid from list_products, NOT the display name or code).",
+      },
       confidence: {
         type: 'integer',
         minimum: 0,

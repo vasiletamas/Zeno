@@ -6,6 +6,7 @@
 
 import { prisma } from '@/lib/db'
 import type { ToolHandler } from '@/lib/tools/types'
+import { resolveProductRef, listAvailableProductRefs } from '@/lib/tools/resolve-product'
 
 // ─────────────────────────────────────────────
 // compare_products
@@ -19,8 +20,24 @@ export const compareProducts: ToolHandler = async (args, context) => {
       return { success: false, error: 'At least 2 product IDs are required for comparison.' }
     }
 
+    const refs = await Promise.all(
+      productIds.map((id) => resolveProductRef({ productId: id })),
+    )
+    const canonicalIds = refs.filter((r): r is NonNullable<typeof r> => r !== null).map((r) => r.id)
+
+    if (canonicalIds.length < 2) {
+      const available = await listAvailableProductRefs()
+      return {
+        success: false,
+        error:
+          `Could not resolve enough valid products to compare. ` +
+          `Available codes: ${available.map((p) => p.code).join(', ') || '(none)'}.`,
+        data: { availableProducts: available as unknown as Record<string, unknown>[] },
+      }
+    }
+
     const products = await prisma.product.findMany({
-      where: { id: { in: productIds }, isActive: true },
+      where: { id: { in: canonicalIds }, isActive: true },
       include: {
         pricingTiers: {
           where: { isActive: true },
@@ -100,8 +117,20 @@ export const setConversationProduct: ToolHandler = async (args, context) => {
   const productId = args.productId as string
 
   try {
+    const ref = await resolveProductRef({ productId })
+    if (!ref) {
+      const available = await listAvailableProductRefs()
+      return {
+        success: false,
+        error:
+          `Product not found: "${productId}". ` +
+          `Available codes: ${available.map((p) => p.code).join(', ') || '(none)'}.`,
+        data: { availableProducts: available as unknown as Record<string, unknown>[] },
+      }
+    }
+
     const product = await prisma.product.findUnique({
-      where: { id: productId },
+      where: { id: ref.id },
     })
 
     if (!product || !product.isActive) {

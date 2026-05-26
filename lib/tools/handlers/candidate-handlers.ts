@@ -7,6 +7,7 @@
 
 import { prisma } from '@/lib/db'
 import type { ToolHandler } from '@/lib/tools/types'
+import { resolveProductRef, listAvailableProductRefs } from '@/lib/tools/resolve-product'
 
 export const setCandidateProduct: ToolHandler = async (args, context) => {
   const productId = args.productId as string
@@ -20,12 +21,24 @@ export const setCandidateProduct: ToolHandler = async (args, context) => {
   }
 
   try {
+    const ref = await resolveProductRef({ productId })
+    if (!ref) {
+      const available = await listAvailableProductRefs()
+      return {
+        success: false,
+        error:
+          `Product not found: "${productId}". ` +
+          `Available codes: ${available.map((p) => p.code).join(', ') || '(none)'}.`,
+        data: { availableProducts: available as unknown as Record<string, unknown>[] },
+      }
+    }
+
     const product = await prisma.product.findUnique({
-      where: { id: productId },
+      where: { id: ref.id },
       select: { id: true, name: true },
     })
     if (!product) {
-      return { success: false, error: `Product not found: ${productId}` }
+      return { success: false, error: `Product not found: ${ref.id}` }
     }
 
     const current = await prisma.conversation.findUnique({
@@ -39,12 +52,12 @@ export const setCandidateProduct: ToolHandler = async (args, context) => {
         : String(product.name)
 
     if (
-      current?.candidateProductId === productId &&
+      current?.candidateProductId === ref.id &&
       current?.candidateConfidence === confidence
     ) {
       return {
         success: true,
-        data: { candidateProductId: productId, candidateConfidence: confidence, unchanged: true },
+        data: { candidateProductId: ref.id, candidateConfidence: confidence, unchanged: true },
         message: `Candidate already set to ${productLabel} (confidence ${confidence}). No change.`,
         confirmation: {
           category: 'lifecycle',
@@ -58,7 +71,7 @@ export const setCandidateProduct: ToolHandler = async (args, context) => {
     await prisma.conversation.update({
       where: { id: context.conversationId },
       data: {
-        candidateProductId: productId,
+        candidateProductId: ref.id,
         candidateConfidence: confidence,
         candidateSetAt: new Date(),
       },
@@ -66,7 +79,7 @@ export const setCandidateProduct: ToolHandler = async (args, context) => {
 
     return {
       success: true,
-      data: { candidateProductId: productId, candidateConfidence: confidence },
+      data: { candidateProductId: ref.id, candidateConfidence: confidence },
       message: `Candidate product set to ${productLabel} with confidence ${confidence}.`,
       confirmation: {
         category: 'lifecycle',
