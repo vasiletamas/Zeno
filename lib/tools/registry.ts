@@ -17,6 +17,7 @@ import { checkDntStatus, startDntQuestionnaire, saveDntAnswer, signDnt } from '.
 import { startApplication, saveApplicationAnswer, getApplicationStatus, resumeApplication, cancelApplication } from './handlers/application-handlers'
 import { generateQuote, getQuoteDetails, acceptQuote, modifyQuote } from './handlers/quote-handlers'
 import { compareProducts, setConversationProduct } from './handlers/product-handlers'
+import { setCandidateProduct } from './handlers/candidate-handlers'
 import { getCustomerProfile, updateCustomerProfile } from './handlers/profile-handlers'
 import { getObjectionStrategy } from './handlers/objection-handlers'
 import { checkBdEligibility } from './handlers/bd-handlers'
@@ -351,6 +352,7 @@ const ALWAYS_ALLOWED_SET = new Set([
   'update_customer_profile',
   'get_objection_strategy',
   'set_conversation_product',
+  'set_candidate_product',
   'check_dnt_status',
 ])
 
@@ -451,6 +453,34 @@ registerTool('set_conversation_product', {
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
 }, setConversationProduct)
+
+registerTool('set_candidate_product', {
+  description:
+    "Set or update the candidate product the conversation is currently focused on. " +
+    "Use when the customer's intent is clear enough that you can confidently say 'we are talking about X.' " +
+    "Re-call to raise/lower confidence or to change the candidate if the customer pivots. " +
+    "The candidate is a SOFT binding for the presentation phase; it does NOT start an application.",
+  parameters: {
+    type: 'object',
+    properties: {
+      productId: { type: 'string', description: 'Product ID to set as the candidate.' },
+      confidence: {
+        type: 'integer',
+        minimum: 0,
+        maximum: 100,
+        description: 'Your confidence (0-100) that the customer is converging on this product.',
+      },
+    },
+    required: ['productId', 'confidence'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: STATUS_SET_CONVERSATION_PRODUCT,
+  alwaysAllowed: true,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
+}, setCandidateProduct)
 
 registerTool('get_objection_strategy', {
   description: 'Get a strategy for handling a specific customer objection type.',
