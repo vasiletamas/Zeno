@@ -18,6 +18,7 @@ import { estimateTokens } from '@/lib/chat/token-budget'
 import { LRUCache } from '@/lib/cache/lru-cache'
 import { findContextHit, type ContextHit } from '@/lib/insights/context-hits'
 import { logInfo } from '@/lib/errors/logger'
+import { calculateAge } from './age'
 import type { PromptSections } from './prompt-builder'
 
 // ==============================================
@@ -583,7 +584,7 @@ export async function loadCustomerContext(
   parts.push(`Language: ${customer.language}`)
 
   if (customer.dateOfBirth) {
-    const age = calculateAge(customer.dateOfBirth)
+    const age = calculateAge(customer.dateOfBirth, new Date())!
     parts.push(`Age: ${age}`)
   }
 
@@ -663,7 +664,7 @@ export function loadCustomerContextFromData(
   parts.push(`Language: ${data.language}`)
 
   if (data.dateOfBirth) {
-    const age = calculateAge(data.dateOfBirth)
+    const age = calculateAge(data.dateOfBirth, new Date())!
     parts.push(`Age: ${age}`)
   }
 
@@ -710,22 +711,6 @@ export function loadCustomerContextFromData(
   }
 
   return parts.length > 0 ? parts.join('\n') : null
-}
-
-/**
- * Calculate age from date of birth.
- */
-function calculateAge(dateOfBirth: Date): number {
-  const today = new Date()
-  let age = today.getFullYear() - dateOfBirth.getFullYear()
-  const monthDiff = today.getMonth() - dateOfBirth.getMonth()
-  if (
-    monthDiff < 0 ||
-    (monthDiff === 0 && today.getDate() < dateOfBirth.getDate())
-  ) {
-    age--
-  }
-  return age
 }
 
 const STALE_THRESHOLD_MS = 30 * 24 * 60 * 60 * 1000 // 30 days

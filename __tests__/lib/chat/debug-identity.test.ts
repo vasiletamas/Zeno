@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { buildIdentityPayload } from '@/lib/chat/debug'
 import type { TurnContextCustomer } from '@/lib/chat/turn-context'
 import type { RawCustomerInsight } from '@/lib/chat/context-loaders'
@@ -22,14 +22,11 @@ const baseArgs = {
   conversationId: 'conv1',
   messageIndex: 0,
   customerId: 'cust1',
+  now: new Date('2026-05-26T12:00:00Z'),
 }
 
 describe('buildIdentityPayload', () => {
-  afterEach(() => vi.useRealTimers())
-
   it('builds a payload with the expected shape', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-05-26T12:00:00Z'))
     const customer = makeCustomer({
       name: 'Ana',
       dateOfBirth: new Date('1992-01-10T00:00:00Z'),
@@ -92,5 +89,14 @@ describe('buildIdentityPayload', () => {
     const customer = makeCustomer()
     const payload = buildIdentityPayload({ ...baseArgs, customer, insights: [] })
     expect(payload.memory).toEqual([])
+  })
+
+  it('decrements age when birthday has not yet occurred this year', () => {
+    // DOB November 10, 1992; "now" is May 26, 2026 → still 33, not 34
+    const customer = makeCustomer({
+      dateOfBirth: new Date('1992-11-10T00:00:00Z'),
+    })
+    const payload = buildIdentityPayload({ ...baseArgs, customer, insights: [] })
+    expect(payload.customer.age).toBe(33)
   })
 })

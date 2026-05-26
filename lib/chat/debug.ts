@@ -12,6 +12,7 @@ import type { ReasoningGateInput, ReasoningGateOutput } from './reasoning-gate'
 import type { PromptSections } from './prompt-builder'
 import type { TurnContextCustomer } from './turn-context'
 import type { RawCustomerInsight } from './context-loaders'
+import { calculateAge } from './age'
 import { writeDebugEvent } from './debug-persistence'
 
 // ==============================================
@@ -174,19 +175,6 @@ export function isDev(): boolean {
 // IDENTITY PAYLOAD BUILDER
 // ==============================================
 
-function computeAge(dateOfBirth: Date | null, now: Date): number | null {
-  if (!dateOfBirth) return null
-  let age = now.getFullYear() - dateOfBirth.getFullYear()
-  const monthDiff = now.getMonth() - dateOfBirth.getMonth()
-  if (
-    monthDiff < 0 ||
-    (monthDiff === 0 && now.getDate() < dateOfBirth.getDate())
-  ) {
-    age--
-  }
-  return age
-}
-
 export interface BuildIdentityPayloadInput {
   traceId: string
   conversationId: string
@@ -194,6 +182,7 @@ export interface BuildIdentityPayloadInput {
   customerId: string
   customer: TurnContextCustomer
   insights: RawCustomerInsight[]
+  now: Date
 }
 
 /**
@@ -204,7 +193,6 @@ export interface BuildIdentityPayloadInput {
 export function buildIdentityPayload(
   input: BuildIdentityPayloadInput,
 ): DebugIdentityPayload {
-  const now = new Date()
   return {
     traceId: input.traceId,
     conversationId: input.conversationId,
@@ -215,7 +203,7 @@ export function buildIdentityPayload(
     },
     customer: {
       name: input.customer.name,
-      age: computeAge(input.customer.dateOfBirth, now),
+      age: calculateAge(input.customer.dateOfBirth, input.now),
       language: input.customer.language,
       extractedProfile: input.customer.extractedProfile,
     },
