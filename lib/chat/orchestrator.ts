@@ -718,6 +718,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         messages: complianceMessages,
         workflowStepCode: state.workflowStepCode,
         customerProfile: null,
+        phase: 'application', // TEMP: real phase wiring in Task 9
       })
       state.complianceResult = complianceResult
       if (!complianceResult.passed && complianceResult.gaps.length > 0) {

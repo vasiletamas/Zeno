@@ -195,6 +195,7 @@ describe('executeComplianceCheck — fail-open behaviour', () => {
       messages: [{ role: 'user', content: 'Tell me the cheapest plan.' }],
       workflowStepCode: 'quote_presentation',
       customerProfile: { age: 42 },
+      phase: 'application',
     })
 
     expect(result.passed).toBe(true)
@@ -209,6 +210,7 @@ describe('executeComplianceCheck — fail-open behaviour', () => {
       messages: [],
       workflowStepCode: null,
       customerProfile: null,
+      phase: 'application',
     })
 
     expect(result.passed).toBe(true)
@@ -243,6 +245,7 @@ describe('executeComplianceCheck — parses valid response with gaps', () => {
       messages: [{ role: 'user', content: 'Just give me the cheapest option.' }],
       workflowStepCode: 'recommendation',
       customerProfile: { age: 35, occupation: 'engineer' },
+      phase: 'application',
     })
 
     expect(result.passed).toBe(false)
@@ -262,6 +265,7 @@ describe('executeComplianceCheck — parses valid response with gaps', () => {
       messages: [{ role: 'user', content: 'I confirmed my needs.' }],
       workflowStepCode: 'needs_confirmed',
       customerProfile: null,
+      phase: 'application',
     })
 
     expect(result.passed).toBe(true)
@@ -284,6 +288,7 @@ describe('executeComplianceCheck — parses valid response with gaps', () => {
       messages: [{ role: 'user', content: 'test' }],
       workflowStepCode: null,
       customerProfile: null,
+      phase: 'application',
     })
 
     // compliance-checker uses its own JSON extractor (not gate parser)
