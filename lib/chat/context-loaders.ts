@@ -732,20 +732,42 @@ const STALE_THRESHOLD_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
 const MAX_MEMORY_TOKENS = 500
 
 /**
- * Load customer memory section.
- * Queries CustomerInsight table and formats insights by category.
- * Marks insights older than 30 days as (unverified).
+ * Raw `CustomerInsight` row type as returned by Prisma's findMany.
+ * Exposed so callers (orchestrator debug path) can pre-fetch once.
  */
-export async function loadCustomerMemory(
+export type RawCustomerInsight = Awaited<
+  ReturnType<typeof prisma.customerInsight.findMany>
+>[number]
+
+/**
+ * Fetch the raw CustomerInsight rows for a customer, ordered by confidence
+ * then recency. Exposed so the orchestrator's debug path can pre-fetch
+ * once and then pass the array into both loadCustomerMemory (for prompt
+ * text) and the debug:identity event (for the structured payload).
+ */
+export async function loadCustomerInsights(
   customerId: string,
-): Promise<string | null> {
-  const insights = await prisma.customerInsight.findMany({
+): Promise<RawCustomerInsight[]> {
+  return prisma.customerInsight.findMany({
     where: { customerId },
     orderBy: [
       { confidence: 'desc' },
       { lastConfirmedAt: 'desc' },
     ],
   })
+}
+
+/**
+ * Load customer memory section.
+ * Queries CustomerInsight table (or uses preloaded rows if provided) and
+ * formats insights by category. Marks insights older than 30 days as
+ * (unverified).
+ */
+export async function loadCustomerMemory(
+  customerId: string,
+  preloadedInsights?: RawCustomerInsight[],
+): Promise<string | null> {
+  const insights = preloadedInsights ?? (await loadCustomerInsights(customerId))
 
   if (insights.length === 0) return null
 
