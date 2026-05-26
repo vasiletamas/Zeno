@@ -17,11 +17,22 @@ function makeCustomer(overrides: Partial<TurnContextCustomer> = {}): TurnContext
   }
 }
 
+const baseConversation = {
+  mode: 'SALES',
+  productId: null,
+  product: null,
+  candidateProductId: null,
+  candidateConfidence: null,
+  candidateSetAt: null,
+  application: null,
+} as const
+
 const baseArgs = {
   traceId: 't1',
   conversationId: 'conv1',
   messageIndex: 0,
   customerId: 'cust1',
+  conversation: baseConversation,
   now: new Date('2026-05-26T12:00:00Z'),
 }
 
@@ -68,6 +79,15 @@ describe('buildIdentityPayload', () => {
         gdprConsentScope: 'sales',
         aiDisclosureAcknowledgedAt: '2026-05-26T10:14:00.000Z',
       },
+      conversation: {
+        phase: 'presentation',
+        productId: null,
+        productCode: null,
+        productName: null,
+        candidateProductId: null,
+        candidateConfidence: null,
+        candidateSetAt: null,
+      },
       memory: [
         {
           id: 'i1',
@@ -76,6 +96,29 @@ describe('buildIdentityPayload', () => {
           createdAt: '2026-05-20T12:00:00.000Z',
         },
       ],
+    })
+  })
+
+  it('surfaces phase, candidate, and committed product in the conversation block', () => {
+    const customer = makeCustomer()
+    const conversation = {
+      mode: 'SALES',
+      productId: 'p-protect',
+      product: { code: 'protect', name: { ro: 'Protect', en: 'Protect' } },
+      candidateProductId: 'p-protect',
+      candidateConfidence: 70,
+      candidateSetAt: new Date('2026-05-26T10:30:00Z'),
+      application: { status: 'OPEN' },
+    }
+    const payload = buildIdentityPayload({ ...baseArgs, customer, conversation, insights: [] })
+    expect(payload.conversation).toEqual({
+      phase: 'application',
+      productId: 'p-protect',
+      productCode: 'protect',
+      productName: 'Protect',
+      candidateProductId: 'p-protect',
+      candidateConfidence: 70,
+      candidateSetAt: '2026-05-26T10:30:00.000Z',
     })
   })
 

@@ -77,6 +77,14 @@ export function diffIdentity(
     scalarDiffs,
   )
 
+  // Conversation state scalars (phase, product, candidate)
+  diffScalars(
+    current.conversation as unknown as Record<string, unknown>,
+    previous.conversation as unknown as Record<string, unknown>,
+    'conversation',
+    scalarDiffs,
+  )
+
   // Memory — new insights by id
   const prevIds = new Set(previous.memory.map((m) => m.id))
   for (const m of current.memory) {

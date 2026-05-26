@@ -18,6 +18,15 @@ function makeIdentity(overrides: Partial<NonNullable<DebugTurn['identity']>> = {
       gdprConsentScope: null,
       aiDisclosureAcknowledgedAt: null,
     },
+    conversation: {
+      phase: 'presentation',
+      productId: null,
+      productCode: null,
+      productName: null,
+      candidateProductId: null,
+      candidateConfidence: null,
+      candidateSetAt: null,
+    },
     memory: [],
     ...overrides,
   }
@@ -72,6 +81,26 @@ describe('diffIdentity', () => {
     expect(r.scalarDiffs.has('consent.gdprConsentAt')).toBe(true)
     expect(r.scalarDiffs.has('consent.gdprConsentScope')).toBe(true)
     expect(r.changes).toBe(2)
+  })
+
+  it('flags a phase or candidate change in the conversation block', () => {
+    const previous = makeIdentity()
+    const current = makeIdentity({
+      conversation: {
+        phase: 'application',
+        productId: 'p-protect',
+        productCode: 'protect',
+        productName: 'Protect',
+        candidateProductId: 'p-protect',
+        candidateConfidence: 70,
+        candidateSetAt: '2026-05-26T10:30:00.000Z',
+      },
+    })
+    const r = diffIdentity(current, previous)
+    expect(r.scalarDiffs.get('conversation.phase')).toEqual({ now: 'application', was: 'presentation' })
+    expect(r.scalarDiffs.has('conversation.productId')).toBe(true)
+    expect(r.scalarDiffs.has('conversation.candidateProductId')).toBe(true)
+    expect(r.changes).toBeGreaterThanOrEqual(3)
   })
 
   it('treats null and undefined as equal for scalar comparison', () => {

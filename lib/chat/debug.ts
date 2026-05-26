@@ -13,6 +13,7 @@ import type { PromptSections } from './prompt-builder'
 import type { TurnContextCustomer } from './turn-context'
 import type { RawCustomerInsight } from './context-loaders'
 import { calculateAge } from './age'
+import { getConversationPhase } from './phase'
 import { writeDebugEvent } from './debug-persistence'
 
 // ==============================================
@@ -116,6 +117,15 @@ export interface DebugIdentityPayload {
     gdprConsentScope: string | null
     aiDisclosureAcknowledgedAt: string | null
   }
+  conversation: {
+    phase: 'presentation' | 'application' | 'post_sale'
+    productId: string | null
+    productCode: string | null
+    productName: string | null
+    candidateProductId: string | null
+    candidateConfidence: number | null
+    candidateSetAt: string | null
+  }
   memory: DebugIdentityMemoryEntry[]
 }
 
@@ -181,8 +191,31 @@ export interface BuildIdentityPayloadInput {
   messageIndex: number
   customerId: string
   customer: TurnContextCustomer
+  conversation: {
+    mode: string
+    productId: string | null
+    product: { code: string; name: unknown } | null
+    candidateProductId: string | null
+    candidateConfidence: number | null
+    candidateSetAt: Date | null
+    application: { status: string } | null
+  }
   insights: RawCustomerInsight[]
   now: Date
+}
+
+function extractLocalizedName(
+  name: unknown,
+  language: string,
+): string | null {
+  if (!name) return null
+  if (typeof name === 'string') return name
+  if (typeof name === 'object') {
+    const map = name as Record<string, unknown>
+    const v = map[language] ?? map.ro ?? map.en
+    return typeof v === 'string' ? v : null
+  }
+  return null
 }
 
 /**
@@ -214,6 +247,17 @@ export function buildIdentityPayload(
       gdprConsentScope: input.customer.gdprConsentScope,
       aiDisclosureAcknowledgedAt: input.customer.aiDisclosureAcknowledgedAt
         ? input.customer.aiDisclosureAcknowledgedAt.toISOString()
+        : null,
+    },
+    conversation: {
+      phase: getConversationPhase(input.conversation),
+      productId: input.conversation.productId,
+      productCode: input.conversation.product?.code ?? null,
+      productName: extractLocalizedName(input.conversation.product?.name, input.customer.language),
+      candidateProductId: input.conversation.candidateProductId,
+      candidateConfidence: input.conversation.candidateConfidence,
+      candidateSetAt: input.conversation.candidateSetAt
+        ? input.conversation.candidateSetAt.toISOString()
         : null,
     },
     memory: input.insights.map((i) => ({

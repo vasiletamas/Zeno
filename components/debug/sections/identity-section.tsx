@@ -81,6 +81,27 @@ export function IdentitySection({ identity, previousIdentity }: Props) {
         </Row>
       </Group>
 
+      <Group title="Conversation State">
+        <Row label="phase" path="conversation.phase" diff={diff}>
+          <PhaseBadge phase={identity.conversation.phase} />
+        </Row>
+        <Row label="product" path="conversation.productId" diff={diff}>
+          {identity.conversation.productId
+            ? `✓ ${identity.conversation.productName ?? identity.conversation.productCode ?? identity.conversation.productId}`
+            : '✗ not set (no application yet)'}
+        </Row>
+        <Row label="candidate" path="conversation.candidateProductId" diff={diff}>
+          {identity.conversation.candidateProductId
+            ? `${identity.conversation.candidateProductId.slice(0, 8)}… (conf ${identity.conversation.candidateConfidence ?? '?'})`
+            : '—'}
+        </Row>
+        {identity.conversation.candidateSetAt && (
+          <Row label="candidate set" path="conversation.candidateSetAt" diff={diff}>
+            {formatTimestamp(identity.conversation.candidateSetAt)}
+          </Row>
+        )}
+      </Group>
+
       <Group title={`Memory (${identity.memory.length} insight${identity.memory.length === 1 ? '' : 's'})`}>
         {identity.memory.length === 0 ? (
           <div className="text-gray-400">— no cross-conversation insights yet —</div>
@@ -143,6 +164,19 @@ function Row({
         )}
       </span>
     </div>
+  )
+}
+
+function PhaseBadge({ phase }: { phase: 'presentation' | 'application' | 'post_sale' }) {
+  const styles: Record<string, string> = {
+    presentation: 'bg-blue-100 text-blue-800',
+    application: 'bg-emerald-100 text-emerald-800',
+    post_sale: 'bg-purple-100 text-purple-800',
+  }
+  return (
+    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${styles[phase] ?? 'bg-gray-100 text-gray-800'}`}>
+      {phase}
+    </span>
   )
 }
 
