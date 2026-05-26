@@ -57,7 +57,7 @@ The event is gated through the existing `debugYield(state.debugEnabled, ...)` he
 
 ### Insertion point in `lib/chat/orchestrator.ts`
 
-A single `debugYield` call after the existing `loadTurnContext` call completes and after `loadCustomerMemory` (or wherever memory is loaded in the current flow — the implementation plan will confirm the exact line). The snapshot is built inline from the already-loaded values; no extra DB queries are issued for the debug event.
+A single `debugYield` call after the existing `loadTurnContext` call completes, gated on `isDev() && debugEnabled`. To populate the structured `memory` field without issuing a second DB query, the orchestrator pre-fetches the raw `CustomerInsight` rows once (in dev+debug only) and threads them through `loadAllSections` → `loadCustomerMemory` via an optional `preloadedInsights` parameter, so the existing memory formatting reuses the same rows. Net DB query count is identical to prod.
 
 ### `lib/chat/debug.ts`
 
@@ -121,20 +121,20 @@ diff(current: DebugIdentityEvent, previous: DebugIdentityEvent | null): {
 
 ## Testing
 
-Per the project's TDD rule, each runtime behaviour gets a failing test before implementation.
+Per the project's TDD rule, each runtime behaviour gets a failing test before implementation. The project currently has no React component-test setup (vitest is configured for `.test.ts` files in a node environment, no jsdom, no `@testing-library/react`). Rather than scaffold that for one component, the only non-trivial logic — the diff algorithm — is extracted into a pure helper and tested in isolation. The component itself is presentational and is covered by manual verification.
 
-### Unit — `__tests__/lib/chat/debug.identity.test.ts`
+### Unit — `__tests__/lib/chat/debug-identity.test.ts`
 
-1. Given a synthetic `Customer` (with `dateOfBirth`, `extractedProfile`, both consent fields populated) and two `CustomerInsight` rows, `emitIdentity()` returns a payload with the expected shape, ISO-8601 date strings, and computed `age`.
+1. Given a synthetic `Customer` (with `dateOfBirth`, `extractedProfile`, both consent fields populated) and two raw `CustomerInsight` rows, the `buildIdentityPayload()` helper returns a payload with the expected shape, ISO-8601 date strings, and computed `age`.
 2. Given a `Customer` with `dateOfBirth: null`, `age` is `null` (not `0`, not throwing).
-3. Given `memory: []`, the payload's `memory` is `[]` (not `undefined`).
+3. Given `insights: []`, the payload's `memory` is `[]` (not `undefined`).
 
-### Unit — `__tests__/components/debug/identity-section.test.tsx`
+### Unit — `__tests__/components/debug/identity-diff.test.ts`
 
-1. Rendering with no previous turn: no `(was: …)` annotations appear, no `[N changes]` chip.
-2. Rendering with a previous turn where `extractedProfile.familySize` changed from `null` to `3`: the `familySize` row has the yellow highlight, the `(was: —)` annotation, and the header chip shows `[1 change this turn]`.
-3. Rendering with a new insight (id present in current, absent in previous): the new insight item has the new-item visual marker, the chip count increments.
-4. Rendering with `memory: []`: shows the zero-state string, not the expander.
+1. `diffIdentity(current, null)` (first turn): `changes === 0`, `scalarDiffs` empty, `newMemoryIds` empty.
+2. `diffIdentity(current, previous)` where `extractedProfile.familySize` changed from `null` to `3`: `scalarDiffs` contains exactly the path `customer.extractedProfile.familySize` with `{ now: 3, was: null }`, `changes === 1`.
+3. `diffIdentity(current, previous)` where a new insight id appears in `current`: `newMemoryIds` contains exactly that id, `changes` includes it in the count.
+4. `diffIdentity(current, previous)` where consent flipped from `null` to a timestamp: `scalarDiffs` contains `consent.gdprConsentAt`, `changes === 1`.
 
 ### Manual verification (per CLAUDE.md "every runtime behaviour change needs a verification step")
 
