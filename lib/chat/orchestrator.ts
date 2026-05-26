@@ -249,6 +249,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
   // Auto-infer the candidate product on the FIRST turn of conversations
   // that don't yet have one. Keyword-based, deterministic, ~5-10ms.
+  // Best-effort: a failure here must not break the turn.
   // See docs/superpowers/specs/2026-05-26-zeno-phase-model-design.md.
   //
   // Use turnCtx.conversation.messageCount (the DB-loaded value as of this
@@ -260,24 +261,34 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     turnCtx.conversation.productId === null &&
     turnCtx.conversation.messageCount === 0
   ) {
-    const catalog = await prisma.product.findMany({
-      where: { isActive: true },
-      select: { id: true, insuranceType: true },
-    })
-    const interests = (turnCtx.customer.extractedProfile as { interests?: string[] } | null)?.interests ?? null
-    const guess = inferCandidate(input.message, interests, catalog)
-    if (guess) {
-      await prisma.conversation.update({
-        where: { id: state.conversationId },
-        data: {
-          candidateProductId: guess.productId,
-          candidateConfidence: guess.confidence,
-          candidateSetAt: new Date(),
-        },
+    try {
+      const catalog = await prisma.product.findMany({
+        where: { isActive: true },
+        select: { id: true, insuranceType: true },
       })
-      turnCtx.conversation.candidateProductId = guess.productId
-      turnCtx.conversation.candidateConfidence = guess.confidence
-      turnCtx.conversation.candidateSetAt = new Date()
+      const interests = (turnCtx.customer.extractedProfile as { interests?: string[] } | null)?.interests ?? null
+      const guess = inferCandidate(input.message, interests, catalog)
+      if (guess) {
+        await prisma.conversation.update({
+          where: { id: state.conversationId },
+          data: {
+            candidateProductId: guess.productId,
+            candidateConfidence: guess.confidence,
+            candidateSetAt: new Date(),
+          },
+        })
+        turnCtx.conversation.candidateProductId = guess.productId
+        turnCtx.conversation.candidateConfidence = guess.confidence
+        turnCtx.conversation.candidateSetAt = new Date()
+      }
+    } catch (err) {
+      logWarn({
+        layer: 'orchestrator',
+        category: 'candidate_inference',
+        message: 'Auto-candidate-assignment failed, continuing without candidate',
+        context: { conversationId: state.conversationId, customerId: state.customerId },
+        error: err,
+      })
     }
   }
 
