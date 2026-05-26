@@ -9,6 +9,7 @@
 import type {
   DebugEvent,
   DebugGatePayload,
+  DebugIdentityPayload,
   DebugPromptPayload,
   DebugToolResultPayload,
   DebugTurnEndPayload,
@@ -32,6 +33,7 @@ export interface DebugTurn {
   userMessage: string
   language: 'en' | 'ro'
   startedAt: number
+  identity?: Omit<DebugIdentityPayload, 'traceId'>
   gate?: Omit<DebugGatePayload, 'traceId'>
   prompt?: Omit<DebugPromptPayload, 'traceId'>
   toolCalls: DebugTurnToolCall[]
@@ -72,6 +74,11 @@ export function reduceDebugEvent(state: DebugState, event: DebugEvent): DebugSta
       }
       const turns = [turn, ...state.turns].slice(0, MAX_TURNS)
       return { turns }
+    }
+
+    case 'debug:identity': {
+      const { traceId, ...rest } = event.data
+      return updateTurn(state, traceId, (t) => ({ ...t, identity: rest }))
     }
 
     case 'debug:gate': {
