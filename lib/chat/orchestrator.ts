@@ -30,6 +30,8 @@ import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
 import { loadAllSections, loadStateGrounding, loadCustomerInsights, type WorkflowSessionData, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
 import { withDefaultDiscoveryTools } from './default-tools'
 import { loadTurnContext, type TurnContext } from './turn-context'
+import { getConversationPhase } from './phase'
+import { inferCandidate } from './candidate-inference'
 import { resolveAgent } from './agent-resolver'
 import { getActiveSkillPacks, mergeSkillPackSections, computeAllowedTools } from '@/lib/skills/skill-pack-loader'
 import { executeComplianceCheck, type ComplianceCheckResult } from './compliance-checker'
@@ -243,6 +245,40 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       data: { errorId, type: 'internal', message: 'Service temporarily unavailable', retryable: true },
     }
     return
+  }
+
+  // Auto-infer the candidate product on the FIRST turn of conversations
+  // that don't yet have one. Keyword-based, deterministic, ~5-10ms.
+  // See docs/superpowers/specs/2026-05-26-zeno-phase-model-design.md.
+  //
+  // Use turnCtx.conversation.messageCount (the DB-loaded value as of this
+  // turn's resolve step) rather than state.messageCount; the user message
+  // has not yet been saved at this point, so the DB value is 0 on the
+  // very first turn and >0 on subsequent turns.
+  if (
+    turnCtx.conversation.candidateProductId === null &&
+    turnCtx.conversation.productId === null &&
+    turnCtx.conversation.messageCount === 0
+  ) {
+    const catalog = await prisma.product.findMany({
+      where: { isActive: true },
+      select: { id: true, insuranceType: true },
+    })
+    const interests = (turnCtx.customer.extractedProfile as { interests?: string[] } | null)?.interests ?? null
+    const guess = inferCandidate(input.message, interests, catalog)
+    if (guess) {
+      await prisma.conversation.update({
+        where: { id: state.conversationId },
+        data: {
+          candidateProductId: guess.productId,
+          candidateConfidence: guess.confidence,
+          candidateSetAt: new Date(),
+        },
+      })
+      turnCtx.conversation.candidateProductId = guess.productId
+      turnCtx.conversation.candidateConfidence = guess.confidence
+      turnCtx.conversation.candidateSetAt = new Date()
+    }
   }
 
   // Pre-fetch raw insights when in dev+debug so we can both emit the
@@ -718,7 +754,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         messages: complianceMessages,
         workflowStepCode: state.workflowStepCode,
         customerProfile: null,
-        phase: 'application', // TEMP: real phase wiring in Task 9
+        phase: getConversationPhase(turnCtx.conversation),
       })
       state.complianceResult = complianceResult
       if (!complianceResult.passed && complianceResult.gaps.length > 0) {
