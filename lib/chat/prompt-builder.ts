@@ -36,6 +36,7 @@ export interface PromptSections {
   workflowInstructions: string | null
   questionnaireContext: string | null
   productContext: string | null
+  catalogOverview: string | null
 }
 
 export interface GateSelection {
@@ -72,6 +73,7 @@ const SECTION_REGISTRY: SectionConfig[] = [
   { key: 'constraints',         priority: 2,    layer: 'constitution', alwaysInclude: true,  prefix: 'CRITICAL CONSTRAINTS:' },
   { key: 'stateGrounding',      priority: 2.5,  layer: 'constitution', alwaysInclude: true,  prefix: '' },
   { key: 'capabilityManifest',  priority: 3,    layer: 'constitution', alwaysInclude: false, prefix: 'WHAT I CAN DO:' },
+  { key: 'catalogOverview',     priority: 3.5,  layer: 'stable',      alwaysInclude: true,  prefix: '=== CATALOG (the ONLY products we sell) ===' },
   { key: 'productContext',      priority: 4,  layer: 'stable',      alwaysInclude: false, prefix: '=== PRODUCT CONTEXT ===' },
   { key: 'coachingBriefing',    priority: 5,  layer: 'stable',      alwaysInclude: false, prefix: '=== PRODUCT SALES PLAYBOOK ===' },
   { key: 'domainGuidance',      priority: 6,  layer: 'stable',      alwaysInclude: false, prefix: '=== DOMAIN GUIDANCE ===' },

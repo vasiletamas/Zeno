@@ -54,15 +54,16 @@ describe('main-chat agent constraints', () => {
     )
   })
 
-  it('main-chat system prompt has the CATALOG FIRST rule', () => {
+  it('main-chat system prompt tells the agent to use the catalog overview, not query blind', () => {
     const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
-    expect(mainChat?.systemPrompt).toMatch(/CATALOG FIRST/)
-    expect(mainChat?.systemPrompt).toMatch(/list_products.*matching category/i)
+    expect(mainChat?.systemPrompt).toMatch(/USE THE CATALOG OVERVIEW/)
+    expect(mainChat?.systemPrompt).toMatch(/Do NOT call list_products for a category the catalog shows is empty/)
   })
 
-  it('main-chat system prompt forbids naming unfetched products', () => {
+  it('main-chat system prompt requires fetching before quoting product specifics', () => {
     const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
-    expect(mainChat?.systemPrompt).toMatch(/NEVER NAME OR QUOTE A PRODUCT YOU HAVEN'T FETCHED/)
+    expect(mainChat?.systemPrompt).toMatch(/NAME FROM THE CATALOG, QUOTE FROM THE TOOL/)
+    expect(mainChat?.systemPrompt).toMatch(/may NOT state its product code, describe its features/)
   })
 
   it('main-chat system prompt grounds discovery questions in product dimensions', () => {
