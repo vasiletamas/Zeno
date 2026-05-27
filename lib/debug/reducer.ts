@@ -11,6 +11,7 @@ import type {
   DebugGatePayload,
   DebugIdentityPayload,
   DebugPromptPayload,
+  DebugToolNarrationPayload,
   DebugToolResultPayload,
   DebugTurnEndPayload,
 } from '@/lib/chat/debug'
@@ -37,6 +38,7 @@ export interface DebugTurn {
   gate?: Omit<DebugGatePayload, 'traceId'>
   prompt?: Omit<DebugPromptPayload, 'traceId'>
   toolCalls: DebugTurnToolCall[]
+  toolNarration?: Omit<DebugToolNarrationPayload, 'traceId'>
   endedAt?: number
   totals?: Omit<DebugTurnEndPayload, 'traceId'>
 }
@@ -107,6 +109,11 @@ export function reduceDebugEvent(state: DebugState, event: DebugEvent): DebugSta
           tc.toolCallId === toolCallId ? { ...tc, result: rest } : tc,
         ),
       }))
+    }
+
+    case 'debug:tool_narration': {
+      const { traceId, ...rest } = event.data
+      return updateTurn(state, traceId, (t) => ({ ...t, toolNarration: rest }))
     }
 
     case 'debug:turn_end': {

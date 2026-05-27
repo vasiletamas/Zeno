@@ -10,6 +10,7 @@
 import type { SSEEvent } from './stream-handler'
 import type { ReasoningGateInput, ReasoningGateOutput } from './reasoning-gate'
 import type { PromptSections } from './prompt-builder'
+import type { ToolNarrationResult } from './tool-narration-detector'
 import type { TurnContextCustomer } from './turn-context'
 import type { RawCustomerInsight } from './context-loaders'
 import { calculateAge } from './age'
@@ -81,6 +82,10 @@ export interface DebugToolResultPayload {
   }
 }
 
+export interface DebugToolNarrationPayload extends ToolNarrationResult {
+  traceId: string
+}
+
 export interface DebugTurnEndPayload {
   traceId: string
   phases: Record<string, unknown>
@@ -140,6 +145,7 @@ export type DebugEvent =
   | { event: 'debug:prompt'; data: DebugPromptPayload }
   | { event: 'debug:tool_call'; data: DebugToolCallPayload }
   | { event: 'debug:tool_result'; data: DebugToolResultPayload }
+  | { event: 'debug:tool_narration'; data: DebugToolNarrationPayload }
   | { event: 'debug:turn_end'; data: DebugTurnEndPayload }
 
 // ==============================================

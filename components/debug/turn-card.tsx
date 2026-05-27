@@ -5,6 +5,7 @@ import type { DebugTurn } from '@/lib/debug/reducer'
 import { GateSection } from './sections/gate-section'
 import { PromptSection } from './sections/prompt-section'
 import { ToolsSection } from './sections/tools-section'
+import { ToolNarrationSection } from './sections/tool-narration-section'
 import { IdentitySection } from './sections/identity-section'
 
 interface TurnCardProps {
@@ -18,6 +19,7 @@ export function TurnCard({ turn, previousTurn, defaultOpen }: TurnCardProps) {
   const [openGate, setOpenGate] = useState(defaultOpen)
   const [openPrompt, setOpenPrompt] = useState(defaultOpen)
   const [openTools, setOpenTools] = useState(defaultOpen)
+  const [openToolNarration, setOpenToolNarration] = useState(defaultOpen)
 
   const latency = turn.totals?.latencyMs
   const preview =
@@ -68,6 +70,17 @@ export function TurnCard({ turn, previousTurn, defaultOpen }: TurnCardProps) {
         onToggle={() => setOpenTools(!openTools)}
       >
         <ToolsSection toolCalls={turn.toolCalls} />
+      </Subsection>
+      <Subsection
+        title={
+          turn.toolNarration && !turn.toolNarration.clean
+            ? `Tool Narration ⚠ ${turn.toolNarration.violations.length}`
+            : 'Tool Narration'
+        }
+        open={openToolNarration}
+        onToggle={() => setOpenToolNarration(!openToolNarration)}
+      >
+        <ToolNarrationSection toolNarration={turn.toolNarration} />
       </Subsection>
     </div>
   )
