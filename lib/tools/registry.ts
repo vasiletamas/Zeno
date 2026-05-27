@@ -12,6 +12,8 @@ import type { ToolDefinition, ToolHandler, ToolContext, ToolResult } from './typ
 import { prisma } from '@/lib/db'
 import { LRUCache } from '@/lib/cache/lru-cache'
 import { resolveProductRef, listAvailableProductRefs } from './resolve-product'
+import { shapeProductInfo, type RawProduct } from './shape-product-info'
+import { calculateAge } from '@/lib/chat/age'
 
 // --- Handler imports ---
 import { checkDntStatus, startDntQuestionnaire, saveDntAnswer, signDnt } from './handlers/dnt-handlers'
@@ -331,9 +333,28 @@ const getProductInfoHandler: ToolHandler = async (
       return { success: false, error: `Product not found after resolve: ${ref.id}` }
     }
 
+    // Resolve the customer's age (best-effort) to trim age-banded coverages.
+    // Prefer dateOfBirth; fall back to the agent-saved extractedProfile.age.
+    // Any failure here just means we return all age bands.
+    let age: number | undefined
+    try {
+      const customer = await prisma.customer.findUnique({
+        where: { id: context.customerId },
+        select: { dateOfBirth: true, extractedProfile: true },
+      })
+      if (customer?.dateOfBirth) {
+        age = calculateAge(customer.dateOfBirth, new Date()) ?? undefined
+      } else {
+        const profileAge = (customer?.extractedProfile as { age?: unknown } | null)?.age
+        if (typeof profileAge === 'number') age = profileAge
+      }
+    } catch {
+      // age is optional — fall back to all bands
+    }
+
     return {
       success: true,
-      data: { product: product as unknown as Record<string, unknown> },
+      data: { product: shapeProductInfo(product as unknown as RawProduct, { age }) as unknown as Record<string, unknown> },
       message: `Product details for ${product.code}.`,
     }
   } catch (err: unknown) {
@@ -421,8 +442,10 @@ registerTool('get_product_info', {
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffects: false,
-  cacheable: true,
-  cacheTtlMs: 300_000,
+  // Not cacheable: output is shaped per customer age, and the tool cache keys
+  // on args only (no customer context) — caching would leak one customer's
+  // age-trimmed result to another. The lookup + pure shaping is cheap.
+  cacheable: false,
 }, getProductInfoHandler)
 
 registerTool('compare_products', {
