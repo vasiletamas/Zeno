@@ -11,8 +11,11 @@ export async function resolveGroupCodes(
   productId: string | null,
   phase: QuestionPhase,
 ): Promise<string[]> {
+  const productFilter = productId
+    ? [{ productId }, { productId: null }]
+    : [{ productId: null }]
   const groups = await prisma.questionGroup.findMany({
-    where: { phase, OR: [{ productId }, { productId: null }] },
+    where: { phase, OR: productFilter },
     orderBy: { orderIndex: 'asc' },
     select: { code: true },
   })

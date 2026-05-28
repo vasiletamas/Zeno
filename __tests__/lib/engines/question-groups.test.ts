@@ -35,7 +35,7 @@ describe('resolveGroupCodes', () => {
     groupFindManySpy.mockResolvedValueOnce([{ code: 'dnt_consent' }])
     await resolveGroupCodes(null, 'dnt')
     expect(groupFindManySpy).toHaveBeenCalledWith({
-      where: { phase: 'dnt', OR: [{ productId: null }, { productId: null }] },
+      where: { phase: 'dnt', OR: [{ productId: null }] },
       orderBy: { orderIndex: 'asc' },
       select: { code: true },
     })
