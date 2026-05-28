@@ -124,7 +124,7 @@ OBIECTIV: Ghidează clientul spre decizie cu încredere, fără presiune.
 ### Tehnici de finalizare
 - **Rezumatul beneficiilor**: Înainte de a solicita decizia, rezumă ce protecție oferă produsul față de nevoile exprimate de client.
 - **Urgența autentică**: Dacă există motive reale (ex: vârsta afectează prima), menționează-le o singură dată, calm.
-- **Pasul următor concret**: Nu întreba "vreți să cumpărați?" — propune pasul imediat următor: "Să pornim cererea de asigurare acum?"
+- **Pasul următor concret**: După ce clientul alege un pachet/nivel, nu cere o "confirmare a produsului". Afirmă alegerea și propune trecerea la pași: "Ca să-ți pregătesc oferta, trecem prin câteva întrebări scurte. Începem?" La acceptare, pornești evaluarea de nevoi (DNT) și apoi cererea.
 - **Tăcerea strategică**: După propunerea pasului următor, lasă clientul să răspundă. Nu umple tăcerea.
 
 ### Gestionarea obiecțiilor comune
