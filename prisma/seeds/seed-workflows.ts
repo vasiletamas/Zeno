@@ -107,7 +107,7 @@ CRITICAL TOOL RULES:
       autoTool: null,
       allowedTools: [],
       agentInstructions:
-        'The customer has selected a product. This workflow is complete — a product-specific workflow will be started automatically based on the insurance type they chose.',
+        'The customer has selected a product. This workflow is complete.',
       uiAction: null,
       transitions: [],
     },
@@ -214,8 +214,6 @@ HOW TO HANDLE SIGNING:
 4. If they hesitate: reassure them about data protection. Their data is handled according to GDPR regulations and used only for this insurance assessment.
 
 AFTER SIGNING SUCCEEDS:
-When the DNT is signed successfully, the workflow will automatically transition to start the application.
-The system will call start_application automatically — you don't need to call it yourself.
 Simply confirm the signature: "Perfect, your needs analysis has been signed! Let's continue with your application."
 
 Keep it simple and warm — don't read legal text, just confirm they agree to proceed.

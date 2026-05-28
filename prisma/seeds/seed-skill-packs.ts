@@ -16,7 +16,7 @@ interface SkillPackDef {
   priority: number
 }
 
-const SKILL_PACKS: SkillPackDef[] = [
+export const SKILL_PACKS: SkillPackDef[] = [
   // ── 1. Life Insurance Discovery ──────────────────────────
   {
     slug: 'life-insurance-discovery',
@@ -164,8 +164,13 @@ Apply these rules whether the customer writes in Romanian or English — transla
       'modify_quote',
       'get_objection_strategy',
       'initiate_payment',
+      'check_dnt_status',
+      'start_dnt_questionnaire',
+      'save_dnt_answer',
+      'sign_dnt',
       'start_application',
       'save_application_answer',
+      'generate_quote',
     ],
     constraints:
       'Fii ferm și direct, dar niciodată agresiv sau repetitiv. O singură mențiune a urgenței per conversație. / Be assertive but never aggressive or repetitive. Mention urgency at most once per conversation.',
@@ -225,6 +230,7 @@ One question at a time. Confirm answers before proceeding. Show progress. Handle
       'check_bd_eligibility',
       'get_customer_profile',
       'save_customer_field',
+      'generate_quote',
     ],
     constraints: null,
     flags: { persuasive: false, empathetic: true },

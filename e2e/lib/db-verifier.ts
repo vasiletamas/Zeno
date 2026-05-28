@@ -136,17 +136,17 @@ export async function verifyHappyPath(
     ),
   )
 
-  // 4. WorkflowSession.data contains dntSignedAt
-  const session = await prisma.workflowSession.findUnique({
-    where: { conversationId },
+  // 4. Conversation.dntSignedAt is set
+  const convDnt = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { dntSignedAt: true },
   })
-  const sessionData = (session?.data as Record<string, unknown>) ?? {}
   checks.push(
     check(
-      'WorkflowSession.data has dntSignedAt',
+      'Conversation.dntSignedAt is set',
       'non-null',
-      sessionData.dntSignedAt ?? null,
-      sessionData.dntSignedAt != null,
+      convDnt?.dntSignedAt ?? null,
+      convDnt?.dntSignedAt != null,
     ),
   )
 
@@ -662,16 +662,17 @@ export async function verifyDntPauseResume(
     ),
   )
 
-  // 5. WorkflowSession exists
-  const session = await prisma.workflowSession.findUnique({
-    where: { conversationId },
+  // 5. DNT signed (Conversation.dntSignedAt)
+  const convDntResume = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { dntSignedAt: true },
   })
   checks.push(
     check(
-      'WorkflowSession exists',
-      true,
-      session !== null,
-      session !== null,
+      'DNT signed (Conversation.dntSignedAt)',
+      'non-null',
+      convDntResume?.dntSignedAt ?? null,
+      convDntResume?.dntSignedAt != null,
     ),
   )
 
