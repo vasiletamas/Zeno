@@ -16,7 +16,7 @@ describe('debug reducer — tool result confirmation (subsystem C)', () => {
         traceId: 't1',
         round: 0,
         toolCallId: 'tc-1',
-        name: 'set_conversation_product',
+        name: 'list_products',
         args: { productId: 'prod-1' },
         partition: 'writing',
       },

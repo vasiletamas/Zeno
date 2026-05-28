@@ -246,8 +246,6 @@ function deriveConditionValue(
       return data.policyId ? 'policy_issued' : null
     case 'check_bd_eligibility':
       return data.eligible ? 'bd_eligible' : 'bd_not_eligible'
-    case 'set_conversation_product':
-      return data.productId ? 'product_selected' : null
     default:
       // Generic: tool completed successfully
       return `${toolName}_success`

@@ -12,7 +12,6 @@ describe('orchestrator tool list assembly (subsystem D)', () => {
 
     expect(stepAllowedTools).toContain('list_products')
     expect(stepAllowedTools).toContain('get_product_info')
-    expect(stepAllowedTools).toContain('set_conversation_product')
   })
 
   it('includes discovery tools alongside workflow tools when both present', () => {

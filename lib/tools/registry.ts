@@ -19,7 +19,7 @@ import { calculateAge } from '@/lib/chat/age'
 import { checkDntStatus, startDntQuestionnaire, saveDntAnswer, signDnt } from './handlers/dnt-handlers'
 import { startApplication, saveApplicationAnswer, getApplicationStatus, resumeApplication, cancelApplication } from './handlers/application-handlers'
 import { generateQuote, getQuoteDetails, acceptQuote, modifyQuote } from './handlers/quote-handlers'
-import { compareProducts, setConversationProduct } from './handlers/product-handlers'
+import { compareProducts } from './handlers/product-handlers'
 import { setCandidateProduct } from './handlers/candidate-handlers'
 import { getCustomerProfile, updateCustomerProfile } from './handlers/profile-handlers'
 import { getObjectionStrategy } from './handlers/objection-handlers'
@@ -211,7 +211,7 @@ const STATUS_GET_PRODUCT_INFO = {
   ],
 }
 
-const STATUS_SET_CONVERSATION_PRODUCT = {
+const STATUS_SET_CANDIDATE_PRODUCT = {
   ro: [
     'Confirm produsul selectat',
     'Salvez alegerea ta',
@@ -374,7 +374,6 @@ const ALWAYS_ALLOWED_SET = new Set([
   'get_customer_profile',
   'update_customer_profile',
   'get_objection_strategy',
-  'set_conversation_product',
   'set_candidate_product',
   'check_dnt_status',
 ])
@@ -473,29 +472,6 @@ registerTool('compare_products', {
   cacheTtlMs: 300_000,
 }, compareProducts)
 
-registerTool('set_conversation_product', {
-  description: 'Set the product focus for the current conversation.',
-  parameters: {
-    type: 'object',
-    properties: {
-      productId: {
-        type: 'string',
-        description:
-          "Product ID to commit (cuid from list_products, NOT the display name or code).",
-      },
-      confidence: { type: 'number', description: 'Confidence level 0-100.' },
-    },
-    required: ['productId'],
-    additionalProperties: false,
-  },
-  executionMode: 'blocking',
-  customerVisible: false,
-  statusMessage: STATUS_SET_CONVERSATION_PRODUCT,
-  alwaysAllowed: true,
-  allowedRoles: ALL_ROLES,
-  sideEffect: 'lifecycle',
-}, setConversationProduct)
-
 registerTool('set_candidate_product', {
   description:
     "Set or update the candidate product the conversation is currently focused on. " +
@@ -522,7 +498,7 @@ registerTool('set_candidate_product', {
   },
   executionMode: 'blocking',
   customerVisible: false,
-  statusMessage: STATUS_SET_CONVERSATION_PRODUCT,
+  statusMessage: STATUS_SET_CANDIDATE_PRODUCT,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
