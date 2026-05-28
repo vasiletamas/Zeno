@@ -10,19 +10,15 @@ import {
   validateAnswer,
   calculateProgress,
 } from '@/lib/engines/questionnaire-engine'
+import { resolveGroupCodes, resolveActiveProductId } from '@/lib/engines/question-groups'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackDntCompleted } from '@/lib/analytics/events'
 import { bumpInsightOnAnswer } from './insight-bump'
 
-// All DNT group codes in order
-const DNT_GROUP_CODES = [
-  'dnt_consent',
-  'dnt_general',
-  'dnt_life_type',
-  'dnt_life_financial',
-  'dnt_life_investment',
-  'dnt_sustainability',
-]
+async function dntGroupCodes(context: { conversationId: string; product?: { id: string } }) {
+  const productId = await resolveActiveProductId(context.conversationId, context.product?.id)
+  return resolveGroupCodes(productId, 'dnt')
+}
 
 // ─────────────────────────────────────────────
 // check_dnt_status
@@ -33,26 +29,17 @@ export const checkDntStatus: ToolHandler = async (_args, context) => {
     const { conversationId } = context
 
     // Calculate progress across all DNT groups
-    const progress = await calculateProgress(DNT_GROUP_CODES, conversationId)
+    const codes = await dntGroupCodes(context)
+    const progress = await calculateProgress(codes, conversationId)
 
-    // Check WorkflowSession.data for signing metadata
-    let isSigned = false
-    let signedAt: string | null = null
-    let validUntil: string | null = null
-
-    if (context.workflowSession) {
-      const session = await prisma.workflowSession.findUnique({
-        where: { id: context.workflowSession.id },
-      })
-      if (session?.data) {
-        const data = session.data as Record<string, unknown>
-        if (data.dntSignedAt) {
-          isSigned = true
-          signedAt = data.dntSignedAt as string
-          validUntil = (data.dntValidUntil as string) ?? null
-        }
-      }
-    }
+    // Read signing state from Conversation
+    const conv = await prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { dntSignedAt: true, dntValidUntil: true },
+    })
+    const isSigned = !!conv?.dntSignedAt && (!conv.dntValidUntil || conv.dntValidUntil > new Date())
+    const signedAt = conv?.dntSignedAt?.toISOString() ?? null
+    const validUntil = conv?.dntValidUntil?.toISOString() ?? null
 
     return {
       success: true,
@@ -82,7 +69,8 @@ export const checkDntStatus: ToolHandler = async (_args, context) => {
 
 export const startDntQuestionnaire: ToolHandler = async (_args, context) => {
   try {
-    const result = await getNextQuestion(DNT_GROUP_CODES, context.conversationId)
+    const codes = await dntGroupCodes(context)
+    const result = await getNextQuestion(codes, context.conversationId)
 
     if (!result) {
       return {
@@ -150,7 +138,7 @@ export const saveDntAnswer: ToolHandler = async (args, context) => {
       if (!q) return { success: false, error: 'Question not found.' }
       questionMeta = { type: q.type, options: q.options, validationRules: q.validationRules }
     } else {
-      const next = await getNextQuestion(DNT_GROUP_CODES, context.conversationId)
+      const next = await getNextQuestion(await dntGroupCodes(context), context.conversationId)
       if (!next) {
         return { success: false, error: 'All DNT questions have already been answered.' }
       }
@@ -220,7 +208,7 @@ export const saveDntAnswer: ToolHandler = async (args, context) => {
     }
 
     // Get next question
-    const nextResult = await getNextQuestion(DNT_GROUP_CODES, context.conversationId)
+    const nextResult = await getNextQuestion(await dntGroupCodes(context), context.conversationId)
 
     if (!nextResult) {
       return {
@@ -293,7 +281,8 @@ export const signDnt: ToolHandler = async (args, context) => {
     }
 
     // Verify all DNT questions answered
-    const progress = await calculateProgress(DNT_GROUP_CODES, context.conversationId)
+    const codes = await dntGroupCodes(context)
+    const progress = await calculateProgress(codes, context.conversationId)
     if (progress.percentage < 100) {
       return {
         success: false,
@@ -301,31 +290,12 @@ export const signDnt: ToolHandler = async (args, context) => {
       }
     }
 
-    // Save signing data to WorkflowSession.data
-    if (!context.workflowSession) {
-      return { success: false, error: 'No active workflow session found.' }
-    }
-
     const now = new Date()
     const validUntil = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000)
 
-    // Read existing data and merge
-    const session = await prisma.workflowSession.findUnique({
-      where: { id: context.workflowSession.id },
-    })
-    const existingData = (session?.data ?? {}) as Record<string, unknown>
-
-    await prisma.workflowSession.update({
-      where: { id: context.workflowSession.id },
-      data: {
-        data: {
-          ...existingData,
-          dntSignedAt: now.toISOString(),
-          dntSignatureConfirmed: true,
-          dntGdprConsent: true,
-          dntValidUntil: validUntil.toISOString(),
-        },
-      },
+    await prisma.conversation.update({
+      where: { id: context.conversationId },
+      data: { dntSignedAt: now, dntValidUntil: validUntil },
     })
 
     trackDntCompleted(context.customerId)
