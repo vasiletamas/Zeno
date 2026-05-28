@@ -90,7 +90,6 @@ export async function generateDntReport(policyId: string): Promise<Buffer> {
                     },
                     orderBy: { answeredAt: 'asc' },
                   },
-                  workflowSession: true,
                 },
               },
             },
@@ -104,9 +103,6 @@ export async function generateDntReport(policyId: string): Promise<Buffer> {
   const application = quote?.application
   const conversation = application?.conversation
   const answers = conversation?.answers ?? []
-  const workflowSession = conversation?.workflowSession
-  const sessionData = (workflowSession?.data as Record<string, unknown>) ?? {}
-
   // Decrypt CNP for masked display
   let maskedCnp = '-'
   if (customer.cnpEncrypted && customer.cnpIv && customer.cnpTag) {
@@ -406,18 +402,19 @@ export async function generateDntReport(policyId: string): Promise<Buffer> {
   doc.setFontSize(10)
   doc.setFont('helvetica', 'normal')
 
-  const dntSignedAt = sessionData.dntSignedAt
-    ? formatDate(new Date(sessionData.dntSignedAt as string))
+  const dntSignedAt = conversation?.dntSignedAt
+    ? formatDate(new Date(conversation.dntSignedAt))
     : '-'
 
-  const validityDate = new Date()
-  validityDate.setFullYear(validityDate.getFullYear() + 1)
+  const validityDate = conversation?.dntValidUntil
+    ? new Date(conversation.dntValidUntil)
+    : null
 
   const confirmLines = [
     `Clientul a confirmat semnatura electronica: Da`,
     `Consimtamant GDPR: Da`,
     `Data semnarii: ${dntSignedAt}`,
-    `Valabilitate: ${formatDate(validityDate)}`,
+    `Valabilitate: ${validityDate ? formatDate(validityDate) : '-'}`,
   ]
   for (const line of confirmLines) {
     doc.text(line, margin, y)

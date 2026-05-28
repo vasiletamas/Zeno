@@ -129,6 +129,8 @@ export const saveDntAnswer: ToolHandler = async (args, context) => {
   const questionIdArg = args.questionId as string | undefined
 
   try {
+    const codes = await dntGroupCodes(context)
+
     // Resolve current question
     let questionId = questionIdArg
     let questionMeta: { type: string; options: unknown; validationRules: unknown } | null = null
@@ -138,7 +140,7 @@ export const saveDntAnswer: ToolHandler = async (args, context) => {
       if (!q) return { success: false, error: 'Question not found.' }
       questionMeta = { type: q.type, options: q.options, validationRules: q.validationRules }
     } else {
-      const next = await getNextQuestion(await dntGroupCodes(context), context.conversationId)
+      const next = await getNextQuestion(codes, context.conversationId)
       if (!next) {
         return { success: false, error: 'All DNT questions have already been answered.' }
       }
@@ -208,7 +210,7 @@ export const saveDntAnswer: ToolHandler = async (args, context) => {
     }
 
     // Get next question
-    const nextResult = await getNextQuestion(await dntGroupCodes(context), context.conversationId)
+    const nextResult = await getNextQuestion(codes, context.conversationId)
 
     if (!nextResult) {
       return {
