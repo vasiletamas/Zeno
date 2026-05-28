@@ -45,7 +45,8 @@ import { CircuitOpenError, TimeoutError } from '@/lib/errors/types'
 import { eventBus, initObservability, getTurnCost, getTurnAnomalies, getTurnToolHistory } from '@/lib/events'
 import { validateSideEffectClaims } from './side-effect-validator'
 import { applyABTestVariant } from '@/lib/self-improvement/ab-test-assigner'
-import { debugYield, isDev, buildIdentityPayload } from './debug'
+import { debugYield, isDev, buildIdentityPayload, recordDebugEvent, type DebugEvent } from './debug'
+import { persistTurnDebug } from './turn-debug-persistence'
 
 // ==============================================
 // CONSTANTS
@@ -137,6 +138,7 @@ interface TurnState {
   conversationMode: string
   activeSkillPacks: string[]
   complianceResult: ComplianceCheckResult | null
+  debugEvents: DebugEvent[]
 }
 
 // ==============================================
@@ -179,6 +181,15 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     conversationMode: 'SALES',
     activeSkillPacks: [],
     complianceResult: null,
+    debugEvents: [],
+  }
+
+  // Records every debug event for DB persistence (always), then yields it to
+  // the live SSE stream only when the debug gate is open. Single chokepoint so
+  // the two concerns never drift apart.
+  function* recordAndYield(event: DebugEvent): Generator<SSEEvent> {
+    recordDebugEvent(state, event)
+    yield* debugYield(isDev(), debugEnabled, event)
   }
 
   eventBus.emit({
@@ -189,7 +200,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     timestamp: state.startMs,
   })
 
-  yield* debugYield(isDev(), debugEnabled, {
+  yield* recordAndYield({
     event: 'debug:turn_start',
     data: {
       traceId: state.traceId,
@@ -293,45 +304,44 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     }
   }
 
-  // Pre-fetch raw insights when in dev+debug so we can both emit the
-  // structured identity event AND pass them into loadAllSections without
-  // a second DB query. A failure in this debug-only side path must never
-  // break the user-facing turn — log and continue.
+  // Pre-fetch raw insights every turn so the persisted debug record's identity
+  // card is complete even when the live debug stream is off, and so the same
+  // rows thread into loadAllSections (no second query). The SSE yield inside
+  // recordAndYield is still gated. A failure here must never break the turn —
+  // log and continue with no preloaded insights.
   let preloadedInsights: RawCustomerInsight[] | undefined
-  if (isDev() && debugEnabled) {
-    try {
-      preloadedInsights = await loadCustomerInsights(state.customerId)
-      yield* debugYield(isDev(), debugEnabled, {
-        event: 'debug:identity',
-        data: buildIdentityPayload({
-          traceId: state.traceId,
-          conversationId: state.conversationId,
-          messageIndex: state.messageCount,
-          customerId: state.customerId,
-          customer: turnCtx.customer,
-          conversation: {
-            mode: turnCtx.conversation.mode,
-            productId: turnCtx.conversation.productId,
-            product: turnCtx.conversation.product,
-            candidateProductId: turnCtx.conversation.candidateProductId,
-            candidateConfidence: turnCtx.conversation.candidateConfidence,
-            candidateSetAt: turnCtx.conversation.candidateSetAt,
-            application: turnCtx.conversation.application,
-          },
-          insights: preloadedInsights,
-          now: new Date(),
-        }),
-      })
-    } catch (err) {
-      logWarn({
-        layer: 'orchestrator',
-        category: 'debug',
-        message: 'Failed to emit debug:identity event',
-        context: { conversationId: state.conversationId, customerId: state.customerId },
-        error: err,
-      })
-      preloadedInsights = undefined
-    }
+  try {
+    preloadedInsights = await loadCustomerInsights(state.customerId)
+    yield* recordAndYield({
+      event: 'debug:identity',
+      data: buildIdentityPayload({
+        traceId: state.traceId,
+        conversationId: state.conversationId,
+        messageIndex: state.messageCount,
+        customerId: state.customerId,
+        customer: turnCtx.customer,
+        conversation: {
+          mode: turnCtx.conversation.mode,
+          productId: turnCtx.conversation.productId,
+          product: turnCtx.conversation.product,
+          candidateProductId: turnCtx.conversation.candidateProductId,
+          candidateConfidence: turnCtx.conversation.candidateConfidence,
+          candidateSetAt: turnCtx.conversation.candidateSetAt,
+          application: turnCtx.conversation.application,
+        },
+        insights: preloadedInsights,
+        now: new Date(),
+      }),
+    })
+  } catch (err) {
+    logWarn({
+      layer: 'orchestrator',
+      category: 'debug',
+      message: 'Failed to build/record debug:identity event',
+      context: { conversationId: state.conversationId, customerId: state.customerId },
+      error: err,
+    })
+    preloadedInsights = undefined
   }
 
   // Guard: conversation must be active
@@ -695,7 +705,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const { gateOutput, gateSelection } = gateResult
   const { agentSlug, agentConfig, sections } = contextResult
 
-  yield* debugYield(isDev(), debugEnabled, {
+  yield* recordAndYield({
     event: 'debug:gate',
     data: { ...gateResult.gateDebug, traceId: state.traceId },
   })
@@ -811,7 +821,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const buildResult = buildPrompt(mergedSections, gateSelection)
   const { prompt: systemPrompt } = buildResult
 
-  yield* debugYield(isDev(), debugEnabled, {
+  yield* recordAndYield({
     event: 'debug:prompt',
     data: {
       sections: mergedSections,
@@ -939,7 +949,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       }
     }
 
-    yield* debugYield(isDev(), debugEnabled, {
+    yield* recordAndYield({
       event: 'debug:tool_call',
       data: {
         round: 0,
@@ -971,7 +981,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       state.traceId,
     )
 
-    yield* debugYield(isDev(), debugEnabled, {
+    yield* recordAndYield({
       event: 'debug:tool_result',
       data: {
         toolCallId: tc.id,
@@ -1177,7 +1187,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
       // --- Phase 0: Fire-and-forget background tools ---
       for (const tc of background) {
-        yield* debugYield(isDev(), debugEnabled, {
+        yield* recordAndYield({
           event: 'debug:tool_call',
           data: {
             round,
@@ -1209,7 +1219,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           error: err,
         }))
 
-        yield* debugYield(isDev(), debugEnabled, {
+        yield* recordAndYield({
           event: 'debug:tool_result',
           data: {
             toolCallId: tc.id,
@@ -1230,7 +1240,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       // --- Phase 1: Execute read-only tools in parallel ---
       if (readOnly.length > 0) {
         for (const tc of readOnly) {
-          yield* debugYield(isDev(), debugEnabled, {
+          yield* recordAndYield({
             event: 'debug:tool_call',
             data: {
               round,
@@ -1283,7 +1293,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           const def = getToolDefinition(tc.name)
           resultMap.set(tc.id, { pipelineResult, def })
 
-          yield* debugYield(isDev(), debugEnabled, {
+          yield* recordAndYield({
             event: 'debug:tool_result',
             data: {
               toolCallId: tc.id,
@@ -1323,7 +1333,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           }
         }
 
-        yield* debugYield(isDev(), debugEnabled, {
+        yield* recordAndYield({
           event: 'debug:tool_call',
           data: {
             round,
@@ -1361,7 +1371,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
         resultMap.set(tc.id, { pipelineResult, def })
 
-        yield* debugYield(isDev(), debugEnabled, {
+        yield* recordAndYield({
           event: 'debug:tool_result',
           data: {
             toolCallId: tc.id,
@@ -1622,7 +1632,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     anomalies: getTurnAnomalies(state.traceId),
   })
 
-  yield* debugYield(isDev(), debugEnabled, {
+  yield* recordAndYield({
     event: 'debug:turn_end',
     data: {
       traceId: state.traceId,
@@ -1633,6 +1643,15 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       latencyMs,
       anomalies: getTurnAnomalies(state.traceId),
     },
+  })
+
+  // Persist the full debug record for this turn. Always-on (no debug gate),
+  // fire-and-forget, errors swallowed inside persistTurnDebug.
+  void persistTurnDebug({
+    conversationId: state.conversationId,
+    messageIndex: state.messageCount,
+    traceId: state.traceId,
+    events: state.debugEvents,
   })
 
   // =============================================
