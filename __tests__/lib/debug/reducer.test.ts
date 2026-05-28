@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { reduceDebugEvent, type DebugState, EMPTY_STATE } from '@/lib/debug/reducer'
+import { reduceDebugEvent, buildTurnDebugPayload, type DebugState, EMPTY_STATE } from '@/lib/debug/reducer'
 import type { DebugEvent } from '@/lib/chat/debug'
 
 function start(traceId: string, idx: number): DebugEvent {
@@ -82,5 +82,31 @@ describe('reduceDebugEvent', () => {
   it('ignores events for unknown traceIds (no turn_start seen)', () => {
     const s = reduceDebugEvent(EMPTY_STATE, gate('unknown'))
     expect(s.turns).toEqual([])
+  })
+})
+
+describe('buildTurnDebugPayload', () => {
+  it('reduces a full event sequence into one DebugTurn with tool args + results', () => {
+    const events: DebugEvent[] = [
+      start('t1', 3),
+      {
+        event: 'debug:tool_call',
+        data: { traceId: 't1', round: 0, toolCallId: 'tc1', name: 'list_products', args: { insuranceType: 'life' }, partition: 'readOnly' },
+      },
+      {
+        event: 'debug:tool_result',
+        data: { traceId: 't1', toolCallId: 'tc1', success: true, durationMs: 5, cached: false, data: { items: 2 } },
+      },
+      end('t1'),
+    ]
+    const turn = buildTurnDebugPayload(events)
+    expect(turn?.traceId).toBe('t1')
+    expect(turn?.toolCalls[0].args).toEqual({ insuranceType: 'life' })
+    expect(turn?.toolCalls[0].result?.data).toEqual({ items: 2 })
+    expect(turn?.totals?.totalInputTokens).toBe(1)
+  })
+
+  it('returns null when there are no events', () => {
+    expect(buildTurnDebugPayload([])).toBeNull()
   })
 })

@@ -119,3 +119,16 @@ export function reduceDebugEvent(state: DebugState, event: DebugEvent): DebugSta
     }
   }
 }
+
+/**
+ * Reduce a full turn's worth of debug events into the single DebugTurn that
+ * the panel renders. Used server-side to build the DB payload, so the stored
+ * shape and the live UI shape stay identical. Returns null for an empty list.
+ */
+export function buildTurnDebugPayload(events: DebugEvent[]): DebugTurn | null {
+  let state: DebugState = EMPTY_STATE
+  for (const event of events) {
+    state = reduceDebugEvent(state, event)
+  }
+  return state.turns[0] ?? null
+}
