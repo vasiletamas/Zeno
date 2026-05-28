@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useChat, type ChatMessage } from '@/lib/hooks/use-chat'
 import { useLanguage } from '@/lib/i18n/language-context'
 import { t } from '@/lib/i18n/translations'
@@ -9,6 +9,7 @@ import { MessageList } from './message-list'
 import { SuggestionPills } from './suggestion-pills'
 import { ChatInput } from './chat-input'
 import { useDebug } from '@/components/debug/debug-provider'
+import type { DebugTurn } from '@/lib/debug/reducer'
 import { DebugToggle } from '@/components/debug/debug-toggle'
 import { DebugDrawer } from '@/components/debug/debug-drawer'
 
@@ -43,6 +44,24 @@ export default function ChatPage({
     onDebugEvent: debug.onDebugEvent,
     extraHeaders: debug.extraHeaders,
   })
+
+  // Replay this conversation's persisted debug turns into the panel on load
+  // (and whenever debug is toggled on), so a refresh doesn't lose history.
+  useEffect(() => {
+    if (!debug.enabled || !conversationId) return
+    let cancelled = false
+    fetch(`/api/conversations/${conversationId}/debug`)
+      .then((r) => (r.ok ? r.json() : { turns: [] }))
+      .then((body: { turns: DebugTurn[] }) => {
+        if (!cancelled) debug.hydrate(body.turns)
+      })
+      .catch(() => {
+        /* dev-only convenience; ignore fetch failures */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [conversationId, debug.enabled, debug.hydrate])
 
   const handleSuggestionSelect = (text: string) => {
     sendMessage(text)

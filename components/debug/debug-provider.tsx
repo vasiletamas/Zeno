@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useMemo, useReducer, useSyncExternalStore } from 'react'
 import type { DebugEvent } from '@/lib/chat/debug'
-import { EMPTY_STATE, reduceDebugEvent, type DebugState, type DebugTurn } from '@/lib/debug/reducer'
+import { EMPTY_STATE, debugReducer, type DebugTurn } from '@/lib/debug/reducer'
 
 const STORAGE_KEY = 'zeno_debug'
 
@@ -48,6 +48,7 @@ interface DebugContextValue {
   onDebugEvent: (event: { event: string; data: Record<string, unknown> }) => void
   extraHeaders: Record<string, string>
   clearLog: () => void
+  hydrate: (turns: DebugTurn[]) => void
 }
 
 const DebugContext = createContext<DebugContextValue | null>(null)
@@ -56,11 +57,7 @@ export function DebugProvider({ children }: { children: React.ReactNode }) {
   const enabled = useSyncExternalStore(subscribeEnabled, readEnabled, serverSnapshot)
   const setEnabled = useCallback((b: boolean) => writeEnabled(b), [])
 
-  const [state, dispatch] = useReducer(
-    (s: DebugState, e: DebugEvent | { type: 'CLEAR' }) =>
-      'type' in e ? EMPTY_STATE : reduceDebugEvent(s, e),
-    EMPTY_STATE,
-  )
+  const [state, dispatch] = useReducer(debugReducer, EMPTY_STATE)
 
   const onDebugEvent = useCallback(
     (event: { event: string; data: Record<string, unknown> }) => {
@@ -76,10 +73,11 @@ export function DebugProvider({ children }: { children: React.ReactNode }) {
   )
 
   const clearLog = useCallback(() => dispatch({ type: 'CLEAR' }), [])
+  const hydrate = useCallback((turns: DebugTurn[]) => dispatch({ type: 'HYDRATE', turns }), [])
 
   const value = useMemo<DebugContextValue>(
-    () => ({ enabled, setEnabled, turns: state.turns, onDebugEvent, extraHeaders, clearLog }),
-    [enabled, setEnabled, state.turns, onDebugEvent, extraHeaders, clearLog],
+    () => ({ enabled, setEnabled, turns: state.turns, onDebugEvent, extraHeaders, clearLog, hydrate }),
+    [enabled, setEnabled, state.turns, onDebugEvent, extraHeaders, clearLog, hydrate],
   )
 
   return <DebugContext.Provider value={value}>{children}</DebugContext.Provider>
@@ -100,5 +98,6 @@ export function useDebug(): DebugContextValue {
     onDebugEvent: () => undefined,
     extraHeaders: {},
     clearLog: () => undefined,
+    hydrate: () => undefined,
   }
 }
