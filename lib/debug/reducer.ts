@@ -120,6 +120,29 @@ export function reduceDebugEvent(state: DebugState, event: DebugEvent): DebugSta
   }
 }
 
+export type DebugAction =
+  | DebugEvent
+  | { type: 'CLEAR' }
+  | { type: 'HYDRATE'; turns: DebugTurn[] }
+
+/**
+ * Reducer used by DebugProvider. Handles the two control actions (CLEAR,
+ * HYDRATE) and delegates every debug:* event to reduceDebugEvent. DebugEvent
+ * has an `event` field and no `type` field, so `'type' in action` cleanly
+ * distinguishes control actions from events.
+ */
+export function debugReducer(state: DebugState, action: DebugAction): DebugState {
+  if ('type' in action) {
+    switch (action.type) {
+      case 'CLEAR':
+        return EMPTY_STATE
+      case 'HYDRATE':
+        return { turns: action.turns.slice(0, MAX_TURNS) }
+    }
+  }
+  return reduceDebugEvent(state, action)
+}
+
 /**
  * Reduce a full turn's worth of debug events into the single DebugTurn that
  * the panel renders. Used server-side to build the DB payload, so the stored

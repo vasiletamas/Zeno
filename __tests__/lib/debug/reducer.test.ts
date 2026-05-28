@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { reduceDebugEvent, buildTurnDebugPayload, type DebugState, EMPTY_STATE } from '@/lib/debug/reducer'
+import { reduceDebugEvent, buildTurnDebugPayload, debugReducer, type DebugState, type DebugTurn, EMPTY_STATE } from '@/lib/debug/reducer'
 import type { DebugEvent } from '@/lib/chat/debug'
 
 function start(traceId: string, idx: number): DebugEvent {
@@ -108,5 +108,27 @@ describe('buildTurnDebugPayload', () => {
 
   it('returns null when there are no events', () => {
     expect(buildTurnDebugPayload([])).toBeNull()
+  })
+})
+
+describe('debugReducer', () => {
+  it('CLEAR resets to an empty state', () => {
+    let s = debugReducer(EMPTY_STATE, start('t1', 0))
+    s = debugReducer(s, { type: 'CLEAR' })
+    expect(s.turns).toEqual([])
+  })
+
+  it('HYDRATE replaces turns (newest-first, capped at 50)', () => {
+    const seed: DebugTurn[] = Array.from({ length: 55 }, (_, i) => ({
+      traceId: `h${i}`, conversationId: 'c1', messageIndex: i, userMessage: 'x', language: 'en', startedAt: 0, toolCalls: [],
+    }))
+    const s = debugReducer(EMPTY_STATE, { type: 'HYDRATE', turns: seed })
+    expect(s.turns).toHaveLength(50)
+    expect(s.turns[0].traceId).toBe('h0')
+  })
+
+  it('passes debug events through to reduceDebugEvent', () => {
+    const s = debugReducer(EMPTY_STATE, start('t1', 0))
+    expect(s.turns[0].traceId).toBe('t1')
   })
 })
