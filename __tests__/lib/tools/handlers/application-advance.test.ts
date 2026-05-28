@@ -56,6 +56,19 @@ describe('startApplication DNT gate', () => {
     expect(appCreateSpy).not.toHaveBeenCalled()
   })
 
+  it('blocks when DNT signature has expired', async () => {
+    convFindUniqueSpy.mockResolvedValue({
+      dntSignedAt: new Date(Date.now() - 1_000_000_000),
+      dntValidUntil: new Date(Date.now() - 1),
+      candidateProductId: 'p-protect',
+      productId: 'p-protect',
+    })
+    const result = await startApplication({}, CONTEXT)
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/DNT/i)
+    expect(appCreateSpy).not.toHaveBeenCalled()
+  })
+
   it('starts the application (product-derived groups) when DNT is signed', async () => {
     const future = new Date(Date.now() + 1000 * 60 * 60)
     convFindUniqueSpy.mockResolvedValue({ dntSignedAt: new Date(), dntValidUntil: future, candidateProductId: 'p-protect', productId: 'p-protect' })

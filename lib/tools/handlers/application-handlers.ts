@@ -64,8 +64,10 @@ export const startApplication: ToolHandler = async (_args, context) => {
       }
     }
 
-    // Calculate total questions for the application groups (product-derived)
-    const codes = await appGroupCodes(context)
+    // Calculate total questions for the application groups (product-derived).
+    // productId is guaranteed non-null here; use it directly to avoid a
+    // second conversation.findUnique inside resolveActiveProductId.
+    const codes = await resolveGroupCodes(productId, 'application')
     const progress = await calculateProgress(codes, context.conversationId)
 
     // Create Application record
