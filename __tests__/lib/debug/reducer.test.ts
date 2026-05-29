@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { reduceDebugEvent, type DebugState, EMPTY_STATE } from '@/lib/debug/reducer'
+import { reduceDebugEvent, buildTurnDebugPayload, debugReducer, type DebugState, type DebugTurn, EMPTY_STATE } from '@/lib/debug/reducer'
 import type { DebugEvent } from '@/lib/chat/debug'
 
 function start(traceId: string, idx: number): DebugEvent {
@@ -107,5 +107,53 @@ describe('reduceDebugEvent', () => {
       data: { traceId: 't1', clean: true, violations: [] },
     })
     expect(s.turns[0].toolNarration).toEqual({ clean: true, violations: [] })
+  })
+})
+
+describe('buildTurnDebugPayload', () => {
+  it('reduces a full event sequence into one DebugTurn with tool args + results', () => {
+    const events: DebugEvent[] = [
+      start('t1', 3),
+      {
+        event: 'debug:tool_call',
+        data: { traceId: 't1', round: 0, toolCallId: 'tc1', name: 'list_products', args: { insuranceType: 'life' }, partition: 'readOnly' },
+      },
+      {
+        event: 'debug:tool_result',
+        data: { traceId: 't1', toolCallId: 'tc1', success: true, durationMs: 5, cached: false, data: { items: 2 } },
+      },
+      end('t1'),
+    ]
+    const turn = buildTurnDebugPayload(events)
+    expect(turn?.traceId).toBe('t1')
+    expect(turn?.toolCalls[0].args).toEqual({ insuranceType: 'life' })
+    expect(turn?.toolCalls[0].result?.data).toEqual({ items: 2 })
+    expect(turn?.totals?.totalInputTokens).toBe(1)
+  })
+
+  it('returns null when there are no events', () => {
+    expect(buildTurnDebugPayload([])).toBeNull()
+  })
+})
+
+describe('debugReducer', () => {
+  it('CLEAR resets to an empty state', () => {
+    let s = debugReducer(EMPTY_STATE, start('t1', 0))
+    s = debugReducer(s, { type: 'CLEAR' })
+    expect(s.turns).toEqual([])
+  })
+
+  it('HYDRATE replaces turns (newest-first, capped at 50)', () => {
+    const seed: DebugTurn[] = Array.from({ length: 55 }, (_, i) => ({
+      traceId: `h${i}`, conversationId: 'c1', messageIndex: i, userMessage: 'x', language: 'en', startedAt: 0, toolCalls: [],
+    }))
+    const s = debugReducer(EMPTY_STATE, { type: 'HYDRATE', turns: seed })
+    expect(s.turns).toHaveLength(50)
+    expect(s.turns[0].traceId).toBe('h0')
+  })
+
+  it('passes debug events through to reduceDebugEvent', () => {
+    const s = debugReducer(EMPTY_STATE, start('t1', 0))
+    expect(s.turns[0].traceId).toBe('t1')
   })
 })

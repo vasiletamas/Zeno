@@ -172,6 +172,19 @@ export function* debugYield(
   }
 }
 
+/**
+ * Append a debug event to a sink's accumulator, UNCONDITIONALLY. This is the
+ * always-on counterpart to debugYield: debugYield gates the live SSE stream
+ * (dev + x-zeno-debug), while recordDebugEvent always captures the event so
+ * the full turn can be persisted to the DB regardless of the debug gate.
+ */
+export function recordDebugEvent(
+  sink: { debugEvents: DebugEvent[] },
+  event: DebugEvent,
+): void {
+  sink.debugEvents.push(event)
+}
+
 // ==============================================
 // MODULE-LEVEL DEV FLAG
 // ==============================================

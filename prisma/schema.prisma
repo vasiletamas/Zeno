@@ -328,6 +328,7 @@ model Conversation {
   answers          Answer[]
   application      Application?
   turnTraces       TurnTrace[]
+  turnDebugs       TurnDebug[]
   score            ConversationScore?
   simulationConversation SimulationConversation?
 }
@@ -650,6 +651,19 @@ model TurnTrace {
   latencyMs      Int?
   provider       String?
   model          String?
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+
+  @@index([conversationId, messageIndex])
+}
+
+model TurnDebug {
+  id             String   @id @default(cuid())
+  conversationId String
+  messageIndex   Int
+  traceId        String   @unique
+  payload        Json
   createdAt      DateTime @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id])
