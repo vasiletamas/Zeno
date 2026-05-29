@@ -31,11 +31,6 @@ const compareProductsSchema = z.object({
   productIds: z.array(z.string()).min(2).max(5),
 }).strict()
 
-const setConversationProductSchema = z.object({
-  productId: z.string().min(1, 'Product ID is required'),
-  confidence: z.number().min(0).max(100).optional(),
-}).strict()
-
 const getObjectionStrategySchema = z.object({
   objectionType: z.enum([
     'price_base', 'price_addon', 'price_total',
@@ -167,7 +162,6 @@ const toolSchemas: Record<string, ZodType> = {
   list_products: listProductsSchema,
   get_product_info: getProductInfoSchema,
   compare_products: compareProductsSchema,
-  set_conversation_product: setConversationProductSchema,
   get_objection_strategy: getObjectionStrategySchema,
 
   // Profile

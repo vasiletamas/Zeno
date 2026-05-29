@@ -83,6 +83,31 @@ describe('reduceDebugEvent', () => {
     const s = reduceDebugEvent(EMPTY_STATE, gate('unknown'))
     expect(s.turns).toEqual([])
   })
+
+  it('attaches debug:tool_narration violations to the matching turn', () => {
+    let s = reduceDebugEvent(EMPTY_STATE, start('t1', 0))
+    s = reduceDebugEvent(s, {
+      event: 'debug:tool_narration',
+      data: {
+        traceId: 't1',
+        clean: false,
+        violations: [{ category: 'permission', matchedPhrase: 'Vrei să verific' }],
+      },
+    })
+    expect(s.turns[0].toolNarration).toEqual({
+      clean: false,
+      violations: [{ category: 'permission', matchedPhrase: 'Vrei să verific' }],
+    })
+  })
+
+  it('records a clean debug:tool_narration result', () => {
+    let s = reduceDebugEvent(EMPTY_STATE, start('t1', 0))
+    s = reduceDebugEvent(s, {
+      event: 'debug:tool_narration',
+      data: { traceId: 't1', clean: true, violations: [] },
+    })
+    expect(s.turns[0].toolNarration).toEqual({ clean: true, violations: [] })
+  })
 })
 
 describe('buildTurnDebugPayload', () => {

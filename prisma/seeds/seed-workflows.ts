@@ -57,7 +57,6 @@ const PRODUCT_DISCOVERY: WorkflowDef = {
         'compare_products',
         'get_customer_profile',
         'update_customer_profile',
-        'set_conversation_product',
         'get_objection_strategy',
       ],
       agentInstructions: `You are in the needs discovery phase. No product has been selected yet. Your goal is to understand the customer's situation and guide them to the right insurance product.
@@ -76,11 +75,11 @@ PRODUCT DISCOVERY:
 - If the customer is comparing options, use compare_products to show the differences clearly.
 - Use get_objection_strategy if the customer raises concerns or hesitations.
 
-WHEN TO SET THE PRODUCT:
-- Call set_conversation_product as soon as the customer shows alignment with a specific product.
+WHEN TO SET THE CANDIDATE PRODUCT:
+- Call set_candidate_product as soon as the customer shows alignment with a specific product.
 - Alignment signals: "That sounds good", "Let's go with that one", "Yes, I'm interested", confirming after your recommendation, asking about next steps for a specific product.
-- Do NOT over-qualify. Once you know the insurance type and the customer has expressed a preference, set the product. You don't need every detail (exact budget, riders, etc.) before setting it.
-- If the customer clearly states what they want from the start ("I want life insurance"), confirm briefly and set the product. Don't force unnecessary discovery.
+- Do NOT over-qualify. Once you know the insurance type and the customer has expressed a preference, set the candidate. You don't need every detail (exact budget, riders, etc.) before setting it.
+- If the customer clearly states what they want from the start ("I want life insurance"), confirm briefly and set the candidate. Don't force unnecessary discovery.
 
 CRITICAL TOOL RULES:
 - ALWAYS use tools rather than describing actions. Call list_products, don't say "we have life insurance products."
@@ -88,7 +87,7 @@ CRITICAL TOOL RULES:
 - When a tool fails, explain the error and suggest alternatives.
 - Don't ask for permission to use tools — just use them when appropriate.
 
-After you call set_conversation_product, a product-specific workflow will activate automatically to guide the next steps (regulatory forms, application, quote).`,
+`,
       uiAction: null,
       transitions: [
         {
@@ -108,7 +107,7 @@ After you call set_conversation_product, a product-specific workflow will activa
       autoTool: null,
       allowedTools: [],
       agentInstructions:
-        'The customer has selected a product. This workflow is complete — a product-specific workflow will be started automatically based on the insurance type they chose.',
+        'The customer has selected a product. This workflow is complete.',
       uiAction: null,
       transitions: [],
     },
@@ -215,8 +214,6 @@ HOW TO HANDLE SIGNING:
 4. If they hesitate: reassure them about data protection. Their data is handled according to GDPR regulations and used only for this insurance assessment.
 
 AFTER SIGNING SUCCEEDS:
-When the DNT is signed successfully, the workflow will automatically transition to start the application.
-The system will call start_application automatically — you don't need to call it yourself.
 Simply confirm the signature: "Perfect, your needs analysis has been signed! Let's continue with your application."
 
 Keep it simple and warm — don't read legal text, just confirm they agree to proceed.

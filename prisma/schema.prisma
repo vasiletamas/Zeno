@@ -304,6 +304,8 @@ model Conversation {
   candidateProductId  String?
   candidateConfidence Int?
   candidateSetAt      DateTime?
+  dntSignedAt         DateTime?
+  dntValidUntil       DateTime?
   status              ConversationStatus @default(ACTIVE)
   channel             String             @default("web")
   language            String             @default("ro")
@@ -433,6 +435,7 @@ model QuestionGroup {
   code        String   @unique
   name        Json
   productId   String?
+  phase       String?
   description String?
   orderIndex  Int      @default(0)
   createdAt   DateTime @default(now())

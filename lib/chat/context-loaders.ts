@@ -27,6 +27,7 @@ import type { PromptSections } from './prompt-builder'
 
 const productContextCache = new LRUCache<string, string | null>(5, 10 * 60 * 1000) // 10 min
 const coachingBriefingCache = new LRUCache<string, string | null>(5, 10 * 60 * 1000)
+const catalogOverviewCache = new LRUCache<string, string>(2, 10 * 60 * 1000) // keyed by language
 
 // ==============================================
 // TYPES
@@ -45,6 +46,13 @@ export interface WorkflowSessionData {
 interface LocalizedText {
   en: string
   ro: string
+}
+
+/** Minimal product shape for the catalog overview section */
+export interface CatalogProductSummary {
+  insuranceType: string
+  name: LocalizedText
+  description: LocalizedText
 }
 
 // ==============================================
@@ -294,6 +302,82 @@ export async function loadProductContext(
   const result = parts.join('\n')
   productContextCache.set(cacheKey, result)
   return result
+}
+
+// ==============================================
+// CATALOG OVERVIEW (always-on breadth grounding)
+// ==============================================
+
+function pickLocalized(v: LocalizedText | null | undefined, language: 'en' | 'ro'): string {
+  if (!v) return ''
+  return v[language] ?? v.ro ?? v.en ?? ''
+}
+
+function shortOneLine(s: string, max = 140): string {
+  const collapsed = s.replace(/\s+/g, ' ').trim()
+  if (collapsed.length <= max) return collapsed
+  const cut = collapsed.slice(0, max)
+  const lastSpace = cut.lastIndexOf(' ')
+  return (lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trimEnd() + '…'
+}
+
+/**
+ * Pure formatter for the catalog overview: one compact line per product,
+ * preceded by a header stating these are the ONLY products. This is the
+ * agent's breadth grounding — it must never imply a category exists when
+ * no product backs it. Specifics (coverages/prices) still come from
+ * get_product_info, not from this overview.
+ */
+export function buildCatalogOverview(
+  products: CatalogProductSummary[],
+  language: 'en' | 'ro',
+): string {
+  if (products.length === 0) {
+    return language === 'en'
+      ? 'The catalog currently has NO active products — there is nothing to sell right now.'
+      : 'Catalogul nu conține niciun produs activ în acest moment — nu avem ce vinde acum.'
+  }
+  const header =
+    language === 'en'
+      ? 'These are the ONLY products in the catalog (everything we can sell). Any category NOT listed here is NOT available — never imply otherwise:'
+      : 'Acestea sunt SINGURELE produse din catalog (tot ce putem vinde). Orice categorie care NU apare aici NU este disponibilă — nu sugera niciodată altceva:'
+  const lines = products.map(
+    (p) => `- [${p.insuranceType}] ${pickLocalized(p.name, language)} — ${shortOneLine(pickLocalized(p.description, language))}`,
+  )
+  return [header, ...lines].join('\n')
+}
+
+/**
+ * Load the catalog overview section. Always returns a string (the empty-catalog
+ * case still produces an explicit "nothing to sell" sentinel), so the section
+ * is always present and the agent is never left guessing what exists.
+ * Cached per language; the catalog is small and changes rarely.
+ */
+export async function loadCatalogOverview(language: 'en' | 'ro'): Promise<string> {
+  const cached = catalogOverviewCache.get(language)
+  if (cached !== undefined) return cached
+
+  const products = await prisma.product.findMany({
+    where: { isActive: true },
+    select: { insuranceType: true, name: true, description: true },
+    orderBy: { insuranceType: 'asc' },
+  })
+
+  const result = buildCatalogOverview(
+    products.map((p) => ({
+      insuranceType: p.insuranceType,
+      name: p.name as unknown as LocalizedText,
+      description: p.description as unknown as LocalizedText,
+    })),
+    language,
+  )
+  catalogOverviewCache.set(language, result)
+  return result
+}
+
+/** Test/admin hook: clear the cached catalog overview (call after product edits). */
+export function flushCatalogOverviewCache(): void {
+  catalogOverviewCache.clear()
 }
 
 /**
@@ -875,6 +959,7 @@ export async function loadAllSections(params: {
 
   // Async loaders — run in parallel
   const [
+    catalogOverview,
     productContext,
     coachingBriefing,
     questionnaireContext,
@@ -882,6 +967,7 @@ export async function loadAllSections(params: {
     customerMemory,
     agentKnowledge,
   ] = await Promise.all([
+    loadCatalogOverview(language),
     productId ? loadProductContext(productId, language) : null,
     (productId || workflowStepCode) ? loadCoachingBriefing(productId, workflowStepCode) : null,
     loadQuestionnaireContext(conversationId, customerId, workflowStepCode, language),
@@ -907,5 +993,6 @@ export async function loadAllSections(params: {
     workflowInstructions,
     questionnaireContext,
     productContext,
+    catalogOverview,
   }
 }

@@ -44,6 +44,7 @@ import { extractAndPersistInsights } from '@/lib/insights/extractor'
 import { CircuitOpenError, TimeoutError } from '@/lib/errors/types'
 import { eventBus, initObservability, getTurnCost, getTurnAnomalies, getTurnToolHistory } from '@/lib/events'
 import { validateSideEffectClaims } from './side-effect-validator'
+import { detectToolNarration, type ToolNarrationResult } from './tool-narration-detector'
 import { applyABTestVariant } from '@/lib/self-improvement/ab-test-assigner'
 import { debugYield, isDev, buildIdentityPayload, recordDebugEvent, type DebugEvent } from './debug'
 import { persistTurnDebug } from './turn-debug-persistence'
@@ -690,6 +691,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         workflowInstructions: null,
         questionnaireContext: null,
         productContext: null,
+        catalogOverview: null,
       }
     }
 
@@ -1493,6 +1495,43 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       error: err,
     })
   }
+
+  // =============================================
+  // STEP 7c — Tool-narration detection (Pathology 1 guard)
+  // =============================================
+  // The assistant must never narrate its tool use or ask the customer for
+  // permission to perform a lookup (see "TOOL USE IS INVISIBLE" in the main
+  // prompt). Detect leakage, emit an observability event when found, and
+  // surface the result every turn in the debug pane. Never fatal.
+  let toolNarration: ToolNarrationResult = { clean: true, violations: [] }
+  try {
+    toolNarration = detectToolNarration(finalContent, state.language)
+    if (!toolNarration.clean) {
+      eventBus.emit({
+        type: 'tool_narration:detected',
+        traceId: state.traceId,
+        conversationId: state.conversationId,
+        violations: toolNarration.violations,
+      })
+    }
+  } catch (err) {
+    logWarn({
+      layer: 'orchestrator',
+      category: 'tool_narration_detector',
+      message: 'Tool-narration detector threw',
+      context: { conversationId: state.conversationId },
+      error: err,
+    })
+  }
+
+  yield* debugYield(isDev(), debugEnabled, {
+    event: 'debug:tool_narration',
+    data: {
+      traceId: state.traceId,
+      clean: toolNarration.clean,
+      violations: toolNarration.violations,
+    },
+  })
 
   // =============================================
   // STEP 8 — Save assistant message

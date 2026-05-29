@@ -45,18 +45,15 @@ export async function verifyConsents(conversationId: string): Promise<{
     }
   }
 
-  // 2. Check WorkflowSession.data has dntSignedAt
-  const session = await prisma.workflowSession.findUnique({
-    where: { conversationId },
+  // 2. Check the DNT is signed and still valid (persisted on Conversation)
+  const conv = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { dntSignedAt: true, dntValidUntil: true },
   })
-
-  if (!session) {
+  const dntValid =
+    !!conv?.dntSignedAt && (!conv.dntValidUntil || conv.dntValidUntil > new Date())
+  if (!dntValid) {
     missing.push('DNT_SIGNATURE')
-  } else {
-    const sessionData = session.data as Record<string, unknown> | null
-    if (!sessionData?.dntSignedAt) {
-      missing.push('DNT_SIGNATURE')
-    }
   }
 
   return {

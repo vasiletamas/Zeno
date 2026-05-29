@@ -1,7 +1,7 @@
 /**
  * Product Handlers
  *
- * compare_products, set_conversation_product
+ * compare_products
  */
 
 import { prisma } from '@/lib/db'
@@ -109,60 +109,3 @@ export const compareProducts: ToolHandler = async (args, context) => {
   }
 }
 
-// ─────────────────────────────────────────────
-// set_conversation_product
-// ─────────────────────────────────────────────
-
-export const setConversationProduct: ToolHandler = async (args, context) => {
-  const productId = args.productId as string
-
-  try {
-    const ref = await resolveProductRef({ productId })
-    if (!ref) {
-      const available = await listAvailableProductRefs()
-      return {
-        success: false,
-        error:
-          `Product not found: "${productId}". ` +
-          `Available codes: ${available.map((p) => p.code).join(', ') || '(none)'}.`,
-        data: { availableProducts: available as unknown as Record<string, unknown>[] },
-      }
-    }
-
-    const product = await prisma.product.findUnique({
-      where: { id: ref.id },
-    })
-
-    if (!product || !product.isActive) {
-      return { success: false, error: 'Product not found or not available.' }
-    }
-
-    await prisma.conversation.update({
-      where: { id: context.conversationId },
-      data: { productId: product.id },
-    })
-
-    const name = product.name as { en: string; ro: string }
-    const lang = context.language ?? 'ro'
-
-    return {
-      success: true,
-      data: {
-        productSet: true,
-        productId: product.id,
-        productCode: product.code,
-        productName: name[lang],
-        insuranceType: product.insuranceType,
-      },
-      message: `Product set to ${name[lang]}.`,
-      confirmation: {
-        category: 'lifecycle',
-        label: lang === 'en' ? 'Selected product' : 'Produs selectat',
-        value: `${product.code} — ${name[lang]}`,
-        timestamp: new Date().toISOString(),
-      },
-    }
-  } catch (error) {
-    return { success: false, error: String(error) }
-  }
-}

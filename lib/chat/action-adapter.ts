@@ -97,13 +97,6 @@ export function adaptAction(action: UIAction): ToolCall | null {
       }
 
     // ── B1 legacy mappings ──
-    case 'select_product':
-      return {
-        id: `action_${Date.now()}`,
-        name: 'set_conversation_product',
-        arguments: action.payload,
-      }
-
     case 'start_dnt':
       return {
         id: `action_${Date.now()}`,

@@ -16,10 +16,7 @@ describe('discovery tool status messages', () => {
     expect(def?.statusMessage?.en?.length).toBeGreaterThan(0)
   })
 
-  it('set_conversation_product has bilingual status messages', () => {
-    const def = getToolDefinition('set_conversation_product')
-    expect(def?.statusMessage).toBeDefined()
-    expect(def?.statusMessage?.ro?.length).toBeGreaterThan(0)
-    expect(def?.statusMessage?.en?.length).toBeGreaterThan(0)
+  it('set_conversation_product is fully retired', () => {
+    expect(getToolDefinition('set_conversation_product')).toBeUndefined()
   })
 })

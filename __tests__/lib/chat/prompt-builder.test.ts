@@ -29,6 +29,7 @@ function makeSections(
     workflowInstructions: 'Ask the next DNT question.',
     questionnaireContext: 'Q5: What is your annual income?',
     productContext: 'Protect Standard I: 190 RON/year.',
+    catalogOverview: 'These are the ONLY products: - [LIFE] Protect — life cover.',
     ...overrides,
   }
 }
@@ -50,6 +51,20 @@ const ACTIVE_GATE: GateSelection = {
 // ==============================================
 
 describe('buildPrompt', () => {
+  it('always includes catalogOverview, even when the gate tries to exclude it', () => {
+    const sections = makeSections()
+    const gate: GateSelection = {
+      requiredSections: [],
+      excludedSections: ['catalogOverview', 'productContext', 'customerContext'],
+      confidence: 0.9,
+    }
+    const result = buildPrompt(sections, gate)
+    expect(result.includedSections).toContain('catalogOverview')
+    expect(result.prompt).toContain('the ONLY products')
+    // it is stable (cacheable) context, not part of the per-turn dynamic suffix
+    expect(result.stablePrefix).toContain('CATALOG')
+  })
+
   it('renders sections in priority order', () => {
     const sections = makeSections()
     const result = buildPrompt(sections, NO_GATE)

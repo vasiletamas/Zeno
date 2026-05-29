@@ -21,6 +21,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       description?: string
       orderIndex: number
       productId?: string | null
+      phase?: 'dnt' | 'application' | null
     },
     questions: Array<{
       code: string
@@ -43,6 +44,7 @@ export async function seedQuestions(prisma: PrismaClient) {
         description: groupDef.description ?? null,
         orderIndex: groupDef.orderIndex,
         productId: groupDef.productId ?? null,
+        phase: groupDef.phase ?? null,
       },
       create: {
         code: groupDef.code,
@@ -50,6 +52,7 @@ export async function seedQuestions(prisma: PrismaClient) {
         description: groupDef.description ?? null,
         orderIndex: groupDef.orderIndex,
         productId: groupDef.productId ?? null,
+        phase: groupDef.phase ?? null,
       },
     })
 
@@ -115,6 +118,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       name: { en: 'Consents', ro: 'Consimțăminte' },
       description: 'Regulatory consents required by IDD',
       orderIndex: 0,
+      phase: 'dnt',
     },
     [
       {
@@ -167,6 +171,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       name: { en: 'General Information', ro: 'Informații Generale' },
       description: 'Core demographic and regulatory questions applicable to all insurance types',
       orderIndex: 1,
+      phase: 'dnt',
     },
     [
       {
@@ -291,6 +296,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       name: { en: 'Life Insurance Type', ro: 'Tip Asigurare de Viață' },
       description: 'Controls which LIFE_FINANCIAL and LIFE_INVESTMENT questions appear',
       orderIndex: 2,
+      phase: 'dnt',
     },
     [
       {
@@ -318,6 +324,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       name: { en: 'Life Insurance - Financial Protection', ro: 'Asigurări de Viață - Protecție Financiară' },
       description: 'Financial protection questions, shown when DNT_LIFE_SUBTYPE = financial_protection or financial_and_investment',
       orderIndex: 3,
+      phase: 'dnt',
     },
     [
       {
@@ -471,6 +478,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       name: { en: 'Life Insurance - Investment', ro: 'Asigurări de Viață - Investiții' },
       description: 'Investment questions, shown when DNT_LIFE_SUBTYPE = financial_and_investment',
       orderIndex: 4,
+      phase: 'dnt',
     },
     [
       {
@@ -527,6 +535,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       name: { en: 'Sustainability Preferences', ro: 'Preferințe Dezvoltare Durabilă' },
       description: 'Sustainability preferences, shown when DNT_LIFE_SUBTYPE = financial_and_investment',
       orderIndex: 5,
+      phase: 'dnt',
     },
     [
       {
@@ -573,6 +582,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       description: 'Protect product application questions: health declaration, package choice, level, BD interest, payment',
       orderIndex: 6,
       productId: product.id,
+      phase: 'application',
     },
     [
       {
@@ -654,6 +664,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       description: 'Medical questionnaire for BD Treatment Abroad addon. Any YES = rejection.',
       orderIndex: 7,
       productId: product.id,
+      phase: 'application',
     },
     [
       {

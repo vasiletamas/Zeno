@@ -15,7 +15,6 @@ describe('discovery flow (subsystem D regression)', () => {
 
     expect(effectiveTools).toContain('list_products')
     expect(effectiveTools).toContain('get_product_info')
-    expect(effectiveTools).toContain('set_conversation_product')
   })
 
   it('agent retains discovery tools even when a pack contributes its own tools', () => {
@@ -44,7 +43,6 @@ describe('discovery flow (subsystem D regression)', () => {
       expect.arrayContaining([
         'list_products',
         'get_product_info',
-        'set_conversation_product',
         'set_candidate_product',
         'record_gdpr_consent',
         'acknowledge_ai_disclosure',
@@ -52,6 +50,6 @@ describe('discovery flow (subsystem D regression)', () => {
         'calculate_premium',
       ]),
     )
-    expect(effectiveTools).toHaveLength(8)
+    expect(effectiveTools).toHaveLength(7)
   })
 })

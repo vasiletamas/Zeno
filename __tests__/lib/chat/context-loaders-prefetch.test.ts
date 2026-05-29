@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/db', () => ({
   prisma: {
-    product: { findUnique: vi.fn() },
+    product: { findUnique: vi.fn(), findMany: vi.fn() },
     customer: { findUnique: vi.fn() },
     customerInsight: { findMany: vi.fn() },
     agentKnowledge: { findMany: vi.fn() },
@@ -36,6 +36,7 @@ describe('loadAllSections with prefetchedCustomer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     // Default mocks for parallel loaders that always run
+    vi.mocked(prisma.product.findMany).mockResolvedValue([])
     vi.mocked(prisma.customerInsight.findMany).mockResolvedValue([])
     vi.mocked(prisma.agentKnowledge.findMany).mockResolvedValue([])
     vi.mocked(prisma.question.findMany).mockResolvedValue([])

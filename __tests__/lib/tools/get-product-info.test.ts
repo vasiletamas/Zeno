@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const findUniqueSpy = vi.fn()
 const findFirstSpy = vi.fn()
 const findManySpy = vi.fn()
+const customerFindUniqueSpy = vi.fn()
 
 vi.mock('@/lib/db', () => ({
   prisma: {
@@ -10,6 +11,9 @@ vi.mock('@/lib/db', () => ({
       findUnique: (...args: unknown[]) => findUniqueSpy(...args),
       findFirst: (...args: unknown[]) => findFirstSpy(...args),
       findMany: (...args: unknown[]) => findManySpy(...args),
+    },
+    customer: {
+      findUnique: (...args: unknown[]) => customerFindUniqueSpy(...args),
     },
   },
 }))
@@ -35,6 +39,8 @@ describe('get_product_info handler', () => {
     findUniqueSpy.mockReset()
     findFirstSpy.mockReset()
     findManySpy.mockReset()
+    customerFindUniqueSpy.mockReset()
+    customerFindUniqueSpy.mockResolvedValue(null) // no age → all bands
   })
 
   it('resolves productCode with mismatched case ("Protect" → "protect")', async () => {
