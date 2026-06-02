@@ -26,116 +26,94 @@ async function appGroupCodes(context: { conversationId: string; product?: { id: 
 // start_application
 // ─────────────────────────────────────────────
 
-export const startApplication: ToolHandler = async (_args, context) => {
+export const startApplication: ToolHandler = async (args, context) => {
   try {
-    // Read conversation once — covers DNT gate, product resolution, and promotion check
+    const tierCode = args.tierCode as string | undefined
+    const levelCode = args.levelCode as string | undefined
+    const includesAddon = args.includesAddon as boolean | undefined
+
     const conv = await prisma.conversation.findUnique({
       where: { id: context.conversationId },
       select: { dntSignedAt: true, dntValidUntil: true, productId: true, candidateProductId: true },
     })
-
-    // Verify DNT is signed
     const dntValid = !!conv?.dntSignedAt && (!conv.dntValidUntil || conv.dntValidUntil > new Date())
-    if (!dntValid) {
-      return {
-        success: false,
-        error: 'DNT must be signed before starting an application.',
-      }
-    }
+    if (!dntValid) return { success: false, error: 'DNT must be signed before starting an application.' }
 
-    // Check no existing OPEN application for this conversation
-    const existing = await prisma.application.findUnique({
-      where: { conversationId: context.conversationId },
-    })
+    const existing = await prisma.application.findUnique({ where: { conversationId: context.conversationId } })
     if (existing && existing.status === 'OPEN') {
-      return {
-        success: true,
-        data: { alreadyExists: true, applicationId: existing.id },
-        message: 'An open application already exists for this conversation.',
-      }
+      return { success: true, data: { alreadyExists: true, applicationId: existing.id }, message: 'An open application already exists for this conversation.' }
     }
 
-    // Resolve product from context or fall back to the conversation candidate
-    let productId: string | null = context.product?.id ?? conv?.productId ?? conv?.candidateProductId ?? null
-    if (!productId) {
-      return {
-        success: false,
-        error: 'No product selected. Call set_candidate_product first or pass an explicit productId.',
-      }
+    const productId: string | null = context.product?.id ?? conv?.productId ?? conv?.candidateProductId ?? null
+    if (!productId) return { success: false, error: 'No product selected. Call set_candidate_product first or pass an explicit productId.' }
+
+    let tierId: string | null = null
+    if (tierCode) {
+      const tier = await prisma.pricingTier.findFirst({ where: { productId, code: tierCode } })
+      if (!tier) return { success: false, error: `Pricing tier "${tierCode}" not found for this product. Provide a valid tier code.` }
+      tierId = tier.id
     }
 
-    // Calculate total questions for the application groups (product-derived).
-    // productId is guaranteed non-null here; use it directly to avoid a
-    // second conversation.findUnique inside resolveActiveProductId.
+    let levelId: string | null = null
+    if (levelCode) {
+      if (!tierId) return { success: false, error: 'levelCode requires tierCode to be provided first.' }
+      const level = await prisma.pricingLevel.findFirst({ where: { tierId, code: levelCode } })
+      if (!level) return { success: false, error: `Pricing level "${levelCode}" not found for the selected tier. Provide a valid level code.` }
+      levelId = level.id
+    }
+
     const codes = await resolveGroupCodes(productId, 'application')
     const progress = await calculateProgress(codes, context.conversationId)
 
-    // Create Application record
     const application = await prisma.application.create({
       data: {
         conversationId: context.conversationId,
         customerId: context.customerId,
         productId,
+        tierId,
+        levelId,
+        includesAddon: includesAddon ?? false,
         status: 'OPEN',
         currentQuestionIndex: 0,
         totalQuestions: progress.total,
       },
     })
 
-    // Promote candidate to committed: copy productId onto Conversation so
-    // future loaders read it directly and the derived phase becomes
-    // 'application'.
-    if (context.product?.id !== productId) {
-      await prisma.conversation.update({
-        where: { id: context.conversationId },
-        data: { productId },
+    // Record the conversational selections as Answers so getNextQuestion skips them.
+    const recordSelection = async (questionCode: string, value: string) => {
+      const q = await prisma.question.findFirst({ where: { code: questionCode, group: { code: { in: codes } } } })
+      if (!q) return
+      await prisma.answer.upsert({
+        where: { questionId_conversationId: { questionId: q.id, conversationId: context.conversationId } },
+        create: { questionId: q.id, conversationId: context.conversationId, value },
+        update: { value, answeredAt: new Date() },
       })
     }
+    if (tierCode) await recordSelection('PACKAGE_CHOICE', tierCode)
+    if (levelCode) await recordSelection('PREMIUM_LEVEL', levelCode)
+    // !== undefined (not truthiness): includesAddon === false is a meaningful answer that must be recorded
+    if (includesAddon !== undefined) await recordSelection('BD_ADDON_INTEREST', String(includesAddon))
 
-    // Get first question
-    const result = await getNextQuestion(codes, context.conversationId)
-    if (!result) {
-      return {
-        success: false,
-        error: 'No application questions configured.',
-      }
+    if (context.product?.id !== productId) {
+      await prisma.conversation.update({ where: { id: context.conversationId }, data: { productId } })
     }
+
+    const result = await getNextQuestion(codes, context.conversationId)
+    if (!result) return { success: false, error: 'No application questions configured.' }
 
     const lang = context.language ?? 'ro'
     const q = result.question
     const text = q.text as { en: string; ro: string }
-
     return {
       success: true,
       data: {
         applicationStarted: true,
         applicationId: application.id,
-        currentQuestion: {
-          id: q.id,
-          code: q.code,
-          text: text[lang],
-          helpText: q.helpText ? (q.helpText as { en: string; ro: string })[lang] : null,
-          type: q.type,
-          options: q.options,
-        },
+        currentQuestion: { id: q.id, code: q.code, text: text[lang], helpText: q.helpText ? (q.helpText as { en: string; ro: string })[lang] : null, type: q.type, options: q.options },
         progress: result.progress,
       },
-      message: 'Application started. Let\'s begin with the first question.',
-      uiAction: {
-        type: 'show_question',
-        payload: {
-          question: {
-            id: q.id,
-            code: q.code,
-            text: q.text as { en: string; ro: string },
-            helpText: q.helpText as { en: string; ro: string } | null,
-            type: q.type,
-            options: q.options,
-          },
-          progress: result.progress,
-          groupType: 'application',
-        } as unknown as Record<string, unknown>,
-      },
+      message: 'Application started.',
+      uiAction: { type: 'show_question', payload: { question: { id: q.id, code: q.code, text: q.text as { en: string; ro: string }, helpText: q.helpText as { en: string; ro: string } | null, type: q.type, options: q.options }, progress: result.progress, groupType: 'application' } as unknown as Record<string, unknown> },
     }
   } catch (error) {
     return { success: false, error: String(error) }

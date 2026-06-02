@@ -655,6 +655,9 @@ registerTool('start_application', {
     type: 'object',
     properties: {
       productId: { type: 'string', description: 'Product ID to apply for.' },
+      tierCode: { type: 'string', description: 'Optional. Pricing tier code (e.g. "standard", "optim") the customer already chose conversationally. Resolves to Application.tierId and records the PACKAGE_CHOICE answer so it is not re-asked.' },
+      levelCode: { type: 'string', description: 'Optional. Pricing level code (e.g. "level_2") within the tier. Requires tierCode. Resolves to Application.levelId and records the PREMIUM_LEVEL answer.' },
+      includesAddon: { type: 'boolean', description: 'Optional. Whether the customer chose the add-on. Sets Application.includesAddon and records the BD_ADDON_INTEREST answer.' },
     },
     additionalProperties: false,
   },
