@@ -47,6 +47,7 @@ import { validateSideEffectClaims } from './side-effect-validator'
 import { detectToolNarration, type ToolNarrationResult } from './tool-narration-detector'
 import { applyABTestVariant } from '@/lib/self-improvement/ab-test-assigner'
 import { debugYield, isDev, buildIdentityPayload, recordDebugEvent, type DebugEvent } from './debug'
+import { serializeToolResultForModel } from './tool-result-serializer'
 import { persistTurnDebug } from './turn-debug-persistence'
 
 // ==============================================
@@ -1019,12 +1020,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     // Build tool result message for LLM
     const toolResultMessage: Message = {
       role: 'tool',
-      content: JSON.stringify({
-        success: pipelineResult.toolResult.success,
-        data: pipelineResult.toolResult.data,
-        error: pipelineResult.toolResult.error,
-        message: pipelineResult.toolResult.message,
-      }),
+      content: serializeToolResultForModel(pipelineResult.toolResult),
       toolCallId: tc.id,
     }
 
@@ -1417,12 +1413,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
         messages.push({
           role: 'tool',
-          content: JSON.stringify({
-            success: pipelineResult.toolResult.success,
-            data: pipelineResult.toolResult.data,
-            error: pipelineResult.toolResult.error,
-            message: pipelineResult.toolResult.message,
-          }),
+          content: serializeToolResultForModel(pipelineResult.toolResult),
           toolCallId: tc.id,
         })
 
