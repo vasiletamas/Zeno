@@ -111,11 +111,30 @@ describe('shapeProductInfo', () => {
     expect(out.coverageTypes.DEATH_ANY_CAUSE.category).toBe('life')
   })
 
-  it('keeps all premiums and amounts', () => {
+  it('keeps coverage amounts (premiumAnnual removed from shaped levels)', () => {
     const out = shapeProductInfo(raw)
-    expect(out.packages[0].levels[0].premiumAnnual).toBe(190)
     const amounts = out.packages[0].levels[0].coverages.map((c) => c.amount).sort((a, b) => a - b)
     expect(amounts).toEqual([10000, 10000, 29000, 40000])
+  })
+
+  it('removes premiumAnnual from shaped levels', () => {
+    const out = shapeProductInfo(raw)
+    for (const pkg of out.packages) {
+      for (const level of pkg.levels) {
+        expect(level).not.toHaveProperty('premiumAnnual')
+      }
+    }
+  })
+
+  it('removes premiums from shaped addons', () => {
+    const shaped = shapeProductInfo({
+      code: 'protect', name: { en: 'P', ro: 'P' }, description: { en: 'x', ro: 'x' }, insuranceType: 'LIFE',
+      pricingTiers: [],
+      addons: [{ code: 'ci', name: { en: 'CI', ro: 'CI' }, description: { en: 'x', ro: 'x' }, waitingPeriod: null, pricingRules: [{ minAge: 18, maxAge: 65, premiumAnnual: 50, currency: 'RON' }] }],
+    } as never)
+    for (const addon of shaped.addons) {
+      expect(addon).not.toHaveProperty('premiums')
+    }
   })
 
   it('without age, keeps all age bands (with ageBand annotations)', () => {
@@ -135,10 +154,11 @@ describe('shapeProductInfo', () => {
     expect(inval).toHaveLength(1)
   })
 
-  it('with age, trims the addon premium to the matching band', () => {
+  it('with age, addon coverages are still trimmed to matching band; no premiums field emitted', () => {
     const out = shapeProductInfo(raw, { age: 39 })
-    expect(out.addons[0].premiums).toHaveLength(1)
-    expect(out.addons[0].premiums[0].premiumAnnual).toBe(350) // the 31–45 band
+    // premiums field must not be on addon anymore
+    expect(out.addons[0]).not.toHaveProperty('premiums')
+    // coverage amounts are still kept
     expect(out.addons[0].coverages[0].amount).toBe(2000000)
   })
 

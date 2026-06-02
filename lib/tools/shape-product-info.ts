@@ -9,8 +9,8 @@
  *   - drops defaultPlaybook, ids, timestamps, isActive, insightKeys
  *   - dedups coverage types into a `coverageTypes` legend; coverage rows
  *     reference a type by code instead of inlining the whole object
- *   - when the customer's age is known, trims age-based coverages and the
- *     addon premium to the matching band (collapses dozens of rows to one)
+ *   - when the customer's age is known, trims age-based coverages to the
+ *     matching band (collapses dozens of rows to one)
  *
  * Pure function — no DB, no caching concerns. The handler resolves age and
  * calls this.
@@ -112,7 +112,6 @@ interface ShapedCoverage {
 interface ShapedLevel {
   code: string
   name: LocalizedText
-  premiumAnnual: number
   currency: string
   coverages: ShapedCoverage[]
 }
@@ -128,7 +127,6 @@ interface ShapedAddon {
   name: LocalizedText
   description: LocalizedText
   waitingPeriod: string | null
-  premiums: Array<{ minAge: number; maxAge: number; premiumAnnual: number; currency: string }>
   coverages: ShapedCoverage[]
 }
 
@@ -208,29 +206,18 @@ export function shapeProductInfo(
     levels: (tier.levels ?? []).map((level) => ({
       code: level.code,
       name: level.name,
-      premiumAnnual: level.premiumAnnual,
       currency: level.currency,
       coverages: shapeCoverages(level.coverageAmounts, age, coverageTypes),
     })),
   }))
 
-  const addons: ShapedAddon[] = (raw.addons ?? []).map((addon) => {
-    let premiums = (addon.pricingRules ?? []).map((r) => ({
-      minAge: r.minAge,
-      maxAge: r.maxAge,
-      premiumAnnual: r.premiumAnnual,
-      currency: r.currency,
-    }))
-    if (age != null) premiums = premiums.filter((p) => ageInBand(age, p.minAge, p.maxAge))
-    return {
-      code: addon.code,
-      name: addon.name,
-      description: addon.description,
-      waitingPeriod: addon.waitingPeriod ?? null,
-      premiums,
-      coverages: shapeCoverages(addon.coverageAmounts, age, coverageTypes),
-    }
-  })
+  const addons: ShapedAddon[] = (raw.addons ?? []).map((addon) => ({
+    code: addon.code,
+    name: addon.name,
+    description: addon.description,
+    waitingPeriod: addon.waitingPeriod ?? null,
+    coverages: shapeCoverages(addon.coverageAmounts, age, coverageTypes),
+  }))
 
   return {
     code: raw.code,

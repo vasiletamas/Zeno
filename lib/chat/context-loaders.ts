@@ -259,18 +259,22 @@ export async function loadProductContext(
     }
   }
 
-  // Pricing tiers and levels
+  // Pricing tiers and levels — show only the product-level premium RANGE, never per-level numbers.
   if (product.pricingTiers.length > 0) {
     parts.push('')
     parts.push('Pricing:')
-    for (const tier of product.pricingTiers) {
-      const tierName = (tier.name as unknown as LocalizedText)[language]
-      const levelParts = tier.levels.map((level) => {
-        const levelName = (level.name as unknown as LocalizedText)[language]
-        return `${levelName} = ${level.premiumAnnual} RON/year`
-      })
-      parts.push(`${tierName}: ${levelParts.join(', ')}`)
+    const pr = product.premiumRange as unknown
+    let range: string | undefined
+    if (typeof pr === 'string') {
+      range = pr
+    } else if (pr && typeof pr === 'object') {
+      const o = pr as Record<string, unknown>
+      if (typeof o[language] === 'string') range = o[language] as string
+      else if (typeof o.en === 'string' || typeof o.ro === 'string') range = (o[language] ?? o.en ?? o.ro) as string
+      else if (typeof o.min === 'number' && typeof o.max === 'number') range = `${o.min}-${o.max} ${o.currency ?? 'RON'}/${o.frequency ?? 'year'}`
     }
+    if (range) parts.push(`Premium range: ${range}`)
+    else parts.push('Exact pricing is available only via generate_quote, after the application is complete.')
   }
 
   // Addons
@@ -283,15 +287,6 @@ export async function loadProductContext(
     for (const ca of addon.coverageAmounts) {
       const ctName = (ca.coverageType.name as unknown as LocalizedText)[language]
       parts.push(`- ${ctName}: ${ca.amount.toLocaleString()} ${ca.currency}`)
-    }
-
-    // Age-based pricing rules
-    if (addon.pricingRules.length > 0) {
-      const ageParts = addon.pricingRules.map(
-        (rule) =>
-          `${rule.minAge}-${rule.maxAge} = ${rule.premiumAnnual} RON/year`,
-      )
-      parts.push(`- Age-based pricing: ${ageParts.join(', ')}`)
     }
 
     if (addon.waitingPeriod) {

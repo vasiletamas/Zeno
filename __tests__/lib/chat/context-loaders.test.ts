@@ -1,15 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+const findUniqueSpy = vi.fn()
+
 vi.mock('@/lib/db', () => ({
   prisma: {
     customerInsight: { findMany: vi.fn() },
     agentKnowledge: { findMany: vi.fn() },
+    product: { findUnique: (...a: unknown[]) => findUniqueSpy(...a) },
   },
 }))
 
 const { prisma } = await import('@/lib/db')
 
-const { loadCustomerMemory, loadAgentKnowledge } = await import('@/lib/chat/context-loaders')
+const { loadCustomerMemory, loadAgentKnowledge, loadProductContext } = await import('@/lib/chat/context-loaders')
 
 describe('loadCustomerMemory', () => {
   beforeEach(() => { vi.clearAllMocks() })
@@ -85,5 +88,27 @@ describe('loadAgentKnowledge', () => {
     expect(result).toContain('price_objection')
     expect(result).toContain('75%')
     expect(result).toContain('n=20')
+  })
+})
+
+describe('loadProductContext', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+
+  it('renders the product premium RANGE and omits per-level premium numbers', async () => {
+    findUniqueSpy.mockResolvedValueOnce({
+      id: 'prod-1', code: 'protect', name: { en: 'Protect', ro: 'Protect' }, description: { en: 'x', ro: 'x' },
+      insuranceType: 'LIFE', subType: 'TERM', features: [],
+      premiumRange: { min: 290, max: 640, currency: 'RON', frequency: 'annual' },
+      pricingTiers: [{ name: { en: 'Basic', ro: 'Bază' }, isActive: true, orderIndex: 0, levels: [
+        { name: { en: 'Level 1', ro: 'Nivel 1' }, premiumAnnual: 290, currency: 'RON', isActive: true },
+        { name: { en: 'Level 2', ro: 'Nivel 2' }, premiumAnnual: 350, currency: 'RON', isActive: true },
+      ] }], addons: [],
+    })
+    const result = await loadProductContext('prod-1', 'en')
+    expect(result).not.toBeNull()
+    expect(result).toContain('Pricing:')
+    expect(result).toContain('Premium range: 290-640 RON/annual') // the range renders from {min,max,currency,frequency}
+    expect(result).not.toContain('350') // a per-level-only price must NOT leak
+    expect(result).not.toMatch(/\d+\s*RON\/year/) // old per-level format must be gone
   })
 })
