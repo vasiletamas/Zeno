@@ -37,7 +37,7 @@ describe('Sentry Logger Transport', () => {
       tags: { layer: 'gateway', category: 'transient', errorId },
       level: 'error',
     }))
-    expect(options?.extra).toEqual(expect.objectContaining({ provider: 'OPENAI' }))
+    expect((options as { extra?: unknown })?.extra).toEqual(expect.objectContaining({ provider: 'OPENAI' }))
   })
 
   it('sends fatals to Sentry with fatal level', () => {
@@ -49,7 +49,7 @@ describe('Sentry Logger Transport', () => {
 
     expect(mockCapture).toHaveBeenCalledOnce()
     const [, options] = mockCapture.mock.calls[0]
-    expect(options?.level).toBe('fatal')
+    expect((options as { level?: unknown })?.level).toBe('fatal')
   })
 
   it('does NOT send warnings to Sentry', () => {

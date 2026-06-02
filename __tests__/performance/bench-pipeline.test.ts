@@ -370,17 +370,17 @@ function setupDefaultPrismaMocks(overrides?: {
   vi.mocked(prisma.conversation.findUnique).mockResolvedValue(conversation as never)
 
   // Product and question mocks for context loaders
-  if ((prisma as Record<string, unknown>).product) {
-    vi.mocked((prisma as { product: { findUnique: ReturnType<typeof vi.fn> } }).product.findUnique).mockResolvedValue(null as never)
+  if ((prisma as unknown as Record<string, unknown>).product) {
+    vi.mocked((prisma as unknown as { product: { findUnique: ReturnType<typeof vi.fn> } }).product.findUnique).mockResolvedValue(null as never)
   }
-  if ((prisma as Record<string, unknown>).question) {
-    vi.mocked((prisma as { question: { findMany: ReturnType<typeof vi.fn> } }).question.findMany).mockResolvedValue([] as never)
+  if ((prisma as unknown as Record<string, unknown>).question) {
+    vi.mocked((prisma as unknown as { question: { findMany: ReturnType<typeof vi.fn> } }).question.findMany).mockResolvedValue([] as never)
   }
-  if ((prisma as Record<string, unknown>).answer) {
-    vi.mocked((prisma as { answer: { findMany: ReturnType<typeof vi.fn> } }).answer.findMany).mockResolvedValue([] as never)
+  if ((prisma as unknown as Record<string, unknown>).answer) {
+    vi.mocked((prisma as unknown as { answer: { findMany: ReturnType<typeof vi.fn> } }).answer.findMany).mockResolvedValue([] as never)
   }
-  if ((prisma as Record<string, unknown>).application) {
-    vi.mocked((prisma as { application: { findUnique: ReturnType<typeof vi.fn> } }).application.findUnique).mockResolvedValue(null as never)
+  if ((prisma as unknown as Record<string, unknown>).application) {
+    vi.mocked((prisma as unknown as { application: { findUnique: ReturnType<typeof vi.fn> } }).application.findUnique).mockResolvedValue(null as never)
   }
 }
 

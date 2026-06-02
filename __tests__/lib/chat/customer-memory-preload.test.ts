@@ -14,10 +14,12 @@ const { loadCustomerMemory, loadCustomerInsights } = await import('@/lib/chat/co
 const sampleInsight = {
   id: 'i1',
   customerId: 'c1',
-  category: 'preferences',
+  productId: null,
+  category: 'PREFERENCE',
   key: 'language',
   value: 'ro',
   confidence: 0.9,
+  source: 'conv-1',
   lastConfirmedAt: new Date('2026-05-20T12:00:00Z'),
   createdAt: new Date('2026-05-20T12:00:00Z'),
   updatedAt: new Date('2026-05-20T12:00:00Z'),
@@ -29,7 +31,7 @@ describe('loadCustomerMemory — preloaded insights', () => {
     const text = await loadCustomerMemory('c1', [sampleInsight])
     expect(findManySpy).not.toHaveBeenCalled()
     expect(text).toContain('language: ro')
-    expect(text).toContain('preferences:')
+    expect(text).toContain('PREFERENCE:')
   })
 
   it('falls back to querying when no preloaded insights are passed', async () => {

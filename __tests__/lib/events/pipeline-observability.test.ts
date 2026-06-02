@@ -47,7 +47,7 @@ describe('Pipeline Observability Integration', () => {
     registerOtelSubscriber(bus)
 
     // Record all events for verification
-    bus.on('*', (event) => allEvents.push(event))
+    bus.on('*', (event) => { allEvents.push(event) })
   })
 
   it('full pipeline simulation: cost calculated, anomalies detected, spans created', async () => {

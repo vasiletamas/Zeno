@@ -49,7 +49,7 @@ async function main() {
 
   const phase = convo.mode === 'POST_SALE'
     ? 'post_sale'
-    : (convo.application && convo.application.status !== 'COMPLETED' && convo.application.status !== 'ABANDONED'
+    : (convo.application && convo.application.status !== 'COMPLETED'
         ? 'application'
         : 'presentation')
 

@@ -360,14 +360,15 @@ export async function driveConversation(options: DriverOptions): Promise<Convers
     },
   })
 
-  // Bridge terminal customer outcomes (not system errors) into the Conversation table
-  // so the self-improvement scorer picks them up.
-  if (finalStatus === 'COMPLETED' || finalStatus === 'ABANDONED') {
+  // Bridge a COMPLETED customer outcome into the Conversation table so the
+  // self-improvement scorer picks it up. (ABANDONED is already bridged inline
+  // above before its early return; FAILED is a system error, intentionally skipped.)
+  if (finalStatus === 'COMPLETED') {
     await prisma.conversation.update({
       where: { id: conversationId },
       data: {
-        status: finalStatus,
-        ...(finalStatus === 'COMPLETED' ? { completedAt: new Date() } : {}),
+        status: 'COMPLETED',
+        completedAt: new Date(),
       },
     })
   }

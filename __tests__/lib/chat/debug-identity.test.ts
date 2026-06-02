@@ -51,10 +51,12 @@ describe('buildIdentityPayload', () => {
       {
         id: 'i1',
         customerId: 'cust1',
-        category: 'preferences',
+        productId: null,
+        category: 'PREFERENCE',
         key: 'language',
         value: 'ro',
         confidence: 0.9,
+        source: 'conv-1',
         lastConfirmedAt: new Date('2026-05-20T12:00:00Z'),
         createdAt: new Date('2026-05-20T12:00:00Z'),
         updatedAt: new Date('2026-05-20T12:00:00Z'),
@@ -91,7 +93,7 @@ describe('buildIdentityPayload', () => {
       memory: [
         {
           id: 'i1',
-          kind: 'preferences',
+          kind: 'PREFERENCE',
           text: 'language: ro',
           createdAt: '2026-05-20T12:00:00.000Z',
         },

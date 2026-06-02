@@ -59,7 +59,7 @@ function classify(text: string): 'ADVANCE' | 'STALL' | 'OTHER' {
   return 'OTHER'
 }
 
-async function trial(n: number): Promise<{ deflectAfterDa: number }> {
+async function trial(n: number): Promise<{ stallAfterDa: number }> {
   const lang = 'ro' as const
   const customer = await prisma.customer.create({ data: { isAnonymous: true, language: lang } })
   const conv = await prisma.conversation.create({
