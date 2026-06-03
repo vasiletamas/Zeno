@@ -18,6 +18,7 @@ import { calculateAge } from '@/lib/chat/age'
 // --- Handler imports ---
 import { checkDntStatus, startDntQuestionnaire, saveDntAnswer, signDnt } from './handlers/dnt-handlers'
 import { startApplication, saveApplicationAnswer, getApplicationStatus, resumeApplication, cancelApplication } from './handlers/application-handlers'
+import { setAnswer } from './handlers/set-answer-handlers'
 import { generateQuote, getQuoteDetails, acceptQuote, modifyQuote } from './handlers/quote-handlers'
 import { compareProducts } from './handlers/product-handlers'
 import { getStateHandler } from './handlers/state-handlers'
@@ -705,6 +706,28 @@ registerTool('save_application_answer', {
   allowedRoles: ALL_ROLES,
   sideEffect: 'save',
 }, saveApplicationAnswer)
+
+registerTool('set_answer', {
+  description:
+    'Answer any question by its code, within the active DNT or application groups. ' +
+    'Supports editing previously answered questions. ' +
+    'Special codes PACKAGE_CHOICE, PREMIUM_LEVEL, BD_ADDON_INTEREST also update Application tier/level/addon.',
+  parameters: {
+    type: 'object',
+    properties: {
+      questionCode: { type: 'string', description: 'The question code to answer (e.g. "HAS_DEPENDENTS", "PACKAGE_CHOICE", "PREMIUM_LEVEL", "BD_ADDON_INTEREST").' },
+      value: { type: 'string', description: 'The answer value (will be normalized based on question type).' },
+    },
+    required: ['questionCode', 'value'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  alwaysAllowed: false,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'save',
+}, setAnswer)
 
 registerTool('resume_application', {
   description: 'Resume a previously paused application.',
