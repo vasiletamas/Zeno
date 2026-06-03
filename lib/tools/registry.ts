@@ -18,6 +18,7 @@ import { calculateAge } from '@/lib/chat/age'
 // --- Handler imports ---
 import { checkDntStatus, startDntQuestionnaire, saveDntAnswer, signDnt } from './handlers/dnt-handlers'
 import { startApplication, saveApplicationAnswer, getApplicationStatus, resumeApplication, cancelApplication } from './handlers/application-handlers'
+import { changeSelection } from './handlers/change-selection-handlers'
 import { setAnswer } from './handlers/set-answer-handlers'
 import { generateQuote, getQuoteDetails, acceptQuote, modifyQuote } from './handlers/quote-handlers'
 import { compareProducts } from './handlers/product-handlers'
@@ -774,6 +775,28 @@ registerTool('cancel_application', {
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
 }, cancelApplication)
+
+registerTool('change_selection', {
+  description: 'Change the insurance package tier, premium level, or add-on selection on an existing application (same product). Automatically expires any active quote so a new one can be generated with the updated selection.',
+  parameters: {
+    type: 'object',
+    properties: {
+      tier: { type: 'string', description: 'Pricing tier code to switch to (e.g. "standard", "optim"). Omit to keep the current tier.' },
+      level: { type: 'string', description: 'Premium level code to switch to (e.g. "level_1", "level_2"). Omit to keep the current level.' },
+      addon: { type: 'boolean', description: 'true to include the add-on, false to remove it, omit to keep current.' },
+    },
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: true,
+  statusMessage: {
+    ro: ['Actualizez selecția ta...', 'Salvez noile alegeri', 'Modific pachetul'],
+    en: ['Updating your selection...', 'Saving your new choices', 'Modifying your package'],
+  },
+  alwaysAllowed: false,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
+}, changeSelection)
 
 // --- Quote ---
 
