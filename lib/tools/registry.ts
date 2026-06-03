@@ -20,6 +20,7 @@ import { checkDntStatus, startDntQuestionnaire, saveDntAnswer, signDnt } from '.
 import { startApplication, saveApplicationAnswer, getApplicationStatus, resumeApplication, cancelApplication } from './handlers/application-handlers'
 import { generateQuote, getQuoteDetails, acceptQuote, modifyQuote } from './handlers/quote-handlers'
 import { compareProducts } from './handlers/product-handlers'
+import { getStateHandler } from './handlers/state-handlers'
 import { setCandidateProduct } from './handlers/candidate-handlers'
 import { getCustomerProfile, updateCustomerProfile } from './handlers/profile-handlers'
 import { getObjectionStrategy } from './handlers/objection-handlers'
@@ -376,6 +377,7 @@ const ALWAYS_ALLOWED_SET = new Set([
   'get_objection_strategy',
   'set_candidate_product',
   'check_dnt_status',
+  'get_current_state',
 ])
 
 // ==============================================
@@ -471,6 +473,22 @@ registerTool('compare_products', {
   cacheable: true,
   cacheTtlMs: 300_000,
 }, compareProducts)
+
+registerTool('get_current_state', {
+  description: 'Get the current conversation state (phase, product, selection, consents, application, quote, answers, next action).',
+  parameters: {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  alwaysAllowed: true,
+  allowedRoles: ALL_ROLES,
+  sideEffects: false,
+  cacheable: false,
+}, getStateHandler)
 
 registerTool('set_candidate_product', {
   description:
