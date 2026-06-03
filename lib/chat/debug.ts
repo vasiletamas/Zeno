@@ -13,6 +13,7 @@ import type { PromptSections } from './prompt-builder'
 import type { ToolNarrationResult } from './tool-narration-detector'
 import type { TurnContextCustomer } from './turn-context'
 import type { RawCustomerInsight } from './context-loaders'
+import type { DerivedState } from './derive-state'
 import { calculateAge } from './age'
 import { getConversationPhase } from './phase'
 import { writeDebugEvent } from './debug-persistence'
@@ -36,6 +37,15 @@ export interface DebugGatePayload {
   input?: ReasoningGateInput
   output?: ReasoningGateOutput
   durationMs: number
+  /**
+   * The phase derived this turn (replaces the old reasoning-gate output).
+   */
+  derivedPhase?: string
+  /**
+   * The full DerivedState snapshot for this turn, surfaced to the debug
+   * drawer's "State" panel. Null when derivation failed.
+   */
+  derivedState?: DerivedState | null
 }
 
 export interface DebugPromptPayload {

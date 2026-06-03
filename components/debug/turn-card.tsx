@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import type { DebugTurn } from '@/lib/debug/reducer'
-import { GateSection } from './sections/gate-section'
+import { StateSection } from './sections/state-section'
 import { PromptSection } from './sections/prompt-section'
 import { ToolsSection } from './sections/tools-section'
 import { ToolNarrationSection } from './sections/tool-narration-section'
@@ -51,11 +51,11 @@ export function TurnCard({ turn, previousTurn, defaultOpen }: TurnCardProps) {
         />
       </Subsection>
       <Subsection
-        title="Gate"
+        title="State"
         open={openGate}
         onToggle={() => setOpenGate(!openGate)}
       >
-        <GateSection gate={turn.gate} />
+        <StateSection gate={turn.gate} />
       </Subsection>
       <Subsection
         title="Prompt"

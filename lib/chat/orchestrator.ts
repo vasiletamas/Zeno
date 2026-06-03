@@ -426,23 +426,23 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const gatePromise = (async (): Promise<{
     derived: DerivedState | null
     gateSelection: GateSelection
-    gateDebug: { skipped: boolean; derivedPhase?: string; error?: boolean; durationMs: number }
+    gateDebug: { skipped: boolean; derivedPhase?: string; error?: boolean; durationMs: number; derivedState?: DerivedState | null }
   }> => {
     eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'reasoning_gate', timestamp: Date.now() })
     const start = Date.now()
     let derived: DerivedState | null = null
     let gateSelection: GateSelection
-    let gateDebug: { skipped: boolean; derivedPhase?: string; error?: boolean; durationMs: number }
+    let gateDebug: { skipped: boolean; derivedPhase?: string; error?: boolean; durationMs: number; derivedState?: DerivedState | null }
     try {
       derived = await deriveState(state.conversationId)
       gateSelection = { requiredSections: getRequiredSectionsForPhase(derived.phase), excludedSections: [], confidence: 1 }
       state.phases['reasoningGate'] = { durationMs: Date.now() - start, derivedPhase: derived.phase }
-      gateDebug = { skipped: false, derivedPhase: derived.phase, durationMs: Date.now() - start }
+      gateDebug = { skipped: false, derivedPhase: derived.phase, derivedState: derived, durationMs: Date.now() - start }
     } catch (err: unknown) {
       logWarn({ layer: 'orchestrator', category: 'derive_state', message: 'deriveState failed, using DISCOVERY', context: { conversationId: state.conversationId }, error: err })
       gateSelection = { requiredSections: getRequiredSectionsForPhase('DISCOVERY'), excludedSections: [], confidence: 1 }
       state.phases['reasoningGate'] = { durationMs: Date.now() - start, error: true }
-      gateDebug = { skipped: false, error: true, durationMs: Date.now() - start }
+      gateDebug = { skipped: false, error: true, derivedState: null, durationMs: Date.now() - start }
     }
     state.phases['step3_reasoning_gate'] = Date.now() - start
     eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'reasoning_gate', durationMs: Date.now() - start })
