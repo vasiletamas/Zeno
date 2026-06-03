@@ -46,10 +46,16 @@ describe('discovery flow (subsystem D regression)', () => {
         'set_candidate_product',
         'record_gdpr_consent',
         'acknowledge_ai_disclosure',
+        'get_current_state',
+        'set_answer',
+        'change_selection',
+        'switch_product',
+        'preview_product_requirements',
         'save_application_answer',
         'calculate_premium',
       ]),
     )
-    expect(effectiveTools).toHaveLength(7)
+    // 10 baseline discovery/state tools + 1 workflow tool + 1 pack tool
+    expect(effectiveTools).toHaveLength(12)
   })
 })

@@ -12,6 +12,11 @@ export const DEFAULT_DISCOVERY_TOOLS = [
   'set_candidate_product',
   'record_gdpr_consent',
   'acknowledge_ai_disclosure',
+  'get_current_state',
+  'set_answer',
+  'change_selection',
+  'switch_product',
+  'preview_product_requirements',
 ] as const
 
 /**

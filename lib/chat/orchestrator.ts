@@ -24,8 +24,9 @@ import { executeToolWithPipeline } from '@/lib/tools/pipeline'
 import { buildToolContext } from './context-builder'
 import { createSSEStream, pickStatusMessage, type SSEEvent } from './stream-handler'
 import type { ToolContext, PipelineResult, ToolResult } from '@/lib/tools/types'
-import { buildPrompt, detectFastPath, FAST_PATH_GATE, type GateSelection, type PromptSections } from './prompt-builder'
-import { executeReasoningGate, formatGateBriefing, type ReasoningGateInput, type ReasoningGateOutput } from './reasoning-gate'
+import { buildPrompt, type GateSelection, type PromptSections } from './prompt-builder'
+import { getRequiredSectionsForPhase, formatDerivedBriefing } from './phase-sections-map'
+import { deriveState, type DerivedState } from './derive-state'
 import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
 import { loadAllSections, loadStateGrounding, loadCustomerInsights, type WorkflowSessionData, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
 import { withDefaultDiscoveryTools } from './default-tools'
@@ -409,11 +410,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // STEPS 3+4 — Reasoning gate + Context assembly (parallel)
   // =============================================
 
-  // Determine if fast path applies
-  const hasActiveQuestionnaire = !!(state.workflowStepCode &&
-    (['dnt_questionnaire', 'application_fill'].includes(state.workflowStepCode) ||
-      state.workflowStepCode.includes('bd')))
-
   // Determine allowed tools for this step (hoisted for use in gate + skill pack scoping).
   // DEFAULT_DISCOVERY_TOOLS are merged in as a baseline so the agent always has
   // catalog tools during the pre-workflow discovery phase. See
@@ -422,156 +418,35 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     turnCtx.conversation.workflowSession?.currentStep.allowedTools ?? [],
   )
 
-  // --- gatePromise: Step 3 — Reasoning gate ---
+  // --- gatePromise: Step 3 — Deterministic state derivation (replaces the
+  // reasoning-gate LLM pre-pass). deriveState() is a cheap DB read (no LLM), so
+  // it always runs; the phase it returns drives section selection + the
+  // situational briefing. The event phase label stays 'reasoning_gate' so
+  // existing observability/perf tests keep their span name.
   const gatePromise = (async (): Promise<{
-    gateOutput: ReasoningGateOutput | null
+    derived: DerivedState | null
     gateSelection: GateSelection
-    gateDebug: {
-      skipped: boolean
-      reason?: 'fast_path' | 'synthetic'
-      input?: ReasoningGateInput
-      output?: ReasoningGateOutput
-      durationMs: number
-    }
+    gateDebug: { skipped: boolean; derivedPhase?: string; error?: boolean; durationMs: number }
   }> => {
     eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'reasoning_gate', timestamp: Date.now() })
-    const gatePhaseStart = Date.now()
-
-    let gateOutput: ReasoningGateOutput | null = null
+    const start = Date.now()
+    let derived: DerivedState | null = null
     let gateSelection: GateSelection
-    let gateDebug: {
-      skipped: boolean
-      reason?: 'fast_path' | 'synthetic'
-      input?: ReasoningGateInput
-      output?: ReasoningGateOutput
-      durationMs: number
+    let gateDebug: { skipped: boolean; derivedPhase?: string; error?: boolean; durationMs: number }
+    try {
+      derived = await deriveState(state.conversationId)
+      gateSelection = { requiredSections: getRequiredSectionsForPhase(derived.phase), excludedSections: [], confidence: 1 }
+      state.phases['reasoningGate'] = { durationMs: Date.now() - start, derivedPhase: derived.phase }
+      gateDebug = { skipped: false, derivedPhase: derived.phase, durationMs: Date.now() - start }
+    } catch (err: unknown) {
+      logWarn({ layer: 'orchestrator', category: 'derive_state', message: 'deriveState failed, using DISCOVERY', context: { conversationId: state.conversationId }, error: err })
+      gateSelection = { requiredSections: getRequiredSectionsForPhase('DISCOVERY'), excludedSections: [], confidence: 1 }
+      state.phases['reasoningGate'] = { durationMs: Date.now() - start, error: true }
+      gateDebug = { skipped: false, error: true, durationMs: Date.now() - start }
     }
-
-    if (detectFastPath(input.message, hasActiveQuestionnaire) && !input.syntheticToolCall) {
-      // Fast path: skip reasoning gate
-      gateSelection = FAST_PATH_GATE
-      state.phases['reasoningGate'] = { skipped: true, fastPath: true, durationMs: 0 }
-      gateDebug = {
-        skipped: true,
-        reason: 'fast_path',
-        durationMs: 0,
-      }
-    } else if (input.syntheticToolCall) {
-      // Synthetic tool call: skip gate
-      gateSelection = { requiredSections: [], excludedSections: [], confidence: 0 }
-      state.phases['reasoningGate'] = { skipped: true, syntheticAction: true, durationMs: 0 }
-      gateDebug = {
-        skipped: true,
-        reason: 'synthetic',
-        durationMs: 0,
-      }
-    } else {
-      // Full reasoning gate — read from turnCtx instead of querying DB
-      const gateStart = Date.now()
-      let gateInput: ReasoningGateInput | undefined
-
-      try {
-        // Recent messages from turnCtx (already chronological)
-        const last3Messages = turnCtx.recentMessages
-          .slice(-3)
-          .map((m) => ({ role: m.role, content: m.content.slice(0, 300) }))
-
-        // Customer profile from turnCtx
-        const extractedProfile = turnCtx.customer.extractedProfile
-        const customerAge = turnCtx.customer.dateOfBirth
-          ? Math.floor((Date.now() - turnCtx.customer.dateOfBirth.getTime()) / (365.25 * 24 * 60 * 60 * 1000))
-          : null
-
-        // Application from turnCtx
-        const application = turnCtx.conversation.application
-
-        // Skill packs from turnCtx
-        const allSkillPacks = turnCtx.activeSkillPacks
-
-        // Available tools: filter by workflow step's allowed tools if applicable
-        const gateStepTools = turnCtx.conversation.workflowSession?.currentStep.allowedTools ?? []
-        const availableToolDefs = getToolsForLLM(gateStepTools.length > 0 ? gateStepTools : undefined)
-        const availableToolNames = availableToolDefs.map((t) => t.function.name)
-
-        // Current questionnaire question text (for gate context)
-        const currentQuestionText: string | null = null
-        // We'll leave this null since loading questionnaire context is handled in context assembly
-
-        gateInput = {
-          lastUserMessage: input.message,
-          last3Messages,
-          hasActiveQuestionnaire,
-          currentQuestionText,
-          workflowStepCode: state.workflowStepCode,
-          availableTools: availableToolNames,
-          customerProfile: {
-            name: turnCtx.customer.name ?? null,
-            age: customerAge,
-            family: typeof extractedProfile.familySize === 'number'
-              ? `family of ${extractedProfile.familySize}`
-              : typeof extractedProfile.hasChildren === 'boolean'
-                ? (extractedProfile.hasChildren ? 'has children' : 'no children')
-                : null,
-            occupation: typeof extractedProfile.occupation === 'string'
-              ? extractedProfile.occupation
-              : null,
-            isReturningCustomer: false, // P2: returning customer detection
-          },
-          businessState: {
-            selectedProduct: turnCtx.conversation.product?.id ?? null,
-            dntProgress: null, // Simplified: DNT progress tracked via questionnaire
-            applicationProgress: application
-              ? `${application.currentQuestionIndex}/${application.totalQuestions} (${application.status})`
-              : null,
-            hasQuote: !!application?.quote,
-            quoteValue: application?.quote?.premiumAnnual ?? null,
-            hasPolicy: !!application?.quote?.policy,
-          },
-          currentMode: state.conversationMode,
-          availableSkillPacks: allSkillPacks,
-          activeSkillPacks: state.activeSkillPacks,
-        }
-
-        gateOutput = await executeReasoningGate(gateInput)
-        gateSelection = {
-          requiredSections: gateOutput.requiredSections,
-          excludedSections: gateOutput.excludedSections,
-          confidence: gateOutput.confidence,
-        }
-        state.phases['reasoningGate'] = {
-          durationMs: Date.now() - gateStart,
-          complexity: gateOutput.complexity,
-          situationType: gateOutput.situationType,
-          confidence: gateOutput.confidence,
-        }
-      } catch (err: unknown) {
-        // Reasoning gate failure is non-fatal: use defaults
-        logWarn({
-          layer: 'orchestrator',
-          category: 'reasoning_gate',
-          message: 'Reasoning gate failed, using defaults',
-          context: { conversationId: state.conversationId },
-          error: err,
-        })
-        gateSelection = { requiredSections: [], excludedSections: [], confidence: 0 }
-        state.phases['reasoningGate'] = {
-          durationMs: Date.now() - gateStart,
-          error: true,
-        }
-      }
-
-      gateDebug = {
-        skipped: false,
-        input: gateInput,
-        output: gateOutput ?? undefined,
-        durationMs: Date.now() - gateStart,
-      }
-    }
-
-    state.phases['step3_reasoning_gate'] = Date.now() - gatePhaseStart
-    eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'reasoning_gate', durationMs: Date.now() - gatePhaseStart })
-
-    return { gateOutput, gateSelection, gateDebug }
+    state.phases['step3_reasoning_gate'] = Date.now() - start
+    eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'reasoning_gate', durationMs: Date.now() - start })
+    return { derived, gateSelection, gateDebug }
   })()
 
   // --- contextPromise: Step 4 — Context assembly (without situationalBriefing, patched after gate) ---
@@ -705,7 +580,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // --- Await both in parallel ---
   const [gateResult, contextResult] = await Promise.all([gatePromise, contextPromise])
 
-  const { gateOutput, gateSelection } = gateResult
+  const { derived, gateSelection } = gateResult
   const { agentSlug, agentConfig, sections } = contextResult
 
   yield* recordAndYield({
@@ -713,12 +588,13 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     data: { ...gateResult.gateDebug, traceId: state.traceId },
   })
 
-  // Patch situationalBriefing from gate output
-  const situationalBriefing = gateOutput ? formatGateBriefing(gateOutput) : null
-  sections.situationalBriefing = situationalBriefing
+  // Patch situationalBriefing from the derived state (phase + next best action)
+  sections.situationalBriefing = derived ? formatDerivedBriefing(derived) : null
 
   // --- Skill pack loading and merging ---
-  const recommendedSlugs = gateOutput?.recommendedSkillPacks ?? []
+  // Gate-driven skill-pack recommendations are gone; workflow/pack-driven packs
+  // still flow through the existing activation path below.
+  const recommendedSlugs: string[] = []
   const activePacks = recommendedSlugs.length > 0
     ? await getActiveSkillPacks(recommendedSlugs)
     : []
@@ -755,29 +631,13 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     ? mergeSkillPackSections(sections as unknown as Record<string, string | null>, effectivePacks) as unknown as PromptSections
     : sections
 
-  // --- Mode transition from gate output ---
-  if (
-    gateOutput?.modeTransition &&
-    gateOutput.confidence > 0.7 &&
-    gateOutput.modeTransition !== state.conversationMode
-  ) {
-    const previousMode = state.conversationMode
-    state.conversationMode = gateOutput.modeTransition
-    await prisma.conversation.update({
-      where: { id: state.conversationId },
-      data: { mode: gateOutput.modeTransition },
-    })
-    eventBus.emit({
-      type: 'mode:transition',
-      traceId: state.traceId,
-      from: previousMode,
-      to: state.conversationMode,
-      conversationId: state.conversationId,
-    })
-  }
-
   // --- Conditional compliance check ---
-  if (gateOutput?.complianceRelevant) {
+  // Compliance is now triggered deterministically by the derived phase rather
+  // than by the LLM gate's complianceRelevant flag.
+  const complianceRelevant = derived
+    ? ['CONSENT', 'QUESTIONNAIRE', 'QUOTE', 'CLOSING'].includes(derived.phase)
+    : false
+  if (complianceRelevant) {
     // Use recent messages from turnCtx instead of querying DB again
     const complianceMessages: Message[] = turnCtx.recentMessages
       .slice(-10)
@@ -1615,8 +1475,8 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   state.phases['promptAssembly'] = {
     sectionSizes: buildResult.sectionSizes,
     gateActive: buildResult.gateActive,
-    gateComplexity: gateOutput?.complexity ?? null,
-    fastPath: gateSelection === FAST_PATH_GATE,
+    derivedPhase: derived?.phase ?? null,
+    fastPath: false,
     includedSections: buildResult.includedSections,
     excludedSections: buildResult.excludedSections,
   }
