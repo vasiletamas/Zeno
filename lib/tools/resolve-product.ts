@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db'
+import { stripDiacritics, lookupAlias } from '@/lib/products/aliases'
 
-export type MatchedBy = 'id' | 'code-exact' | 'code-normalized' | 'name'
+export type MatchedBy = 'id' | 'code-exact' | 'code-normalized' | 'name' | 'alias'
 
 export interface ProductResolveInput {
   productId?: string
@@ -64,6 +65,27 @@ export async function resolveProductRef(
     })
     if (byName.length === 1) {
       return { id: byName[0].id, code: byName[0].code, matchedBy: 'name' }
+    }
+
+    // Diacritic-insensitive code match (e.g. "locuință" -> "locuinta"). Skipped when
+    // there are no diacritics, since the case-insensitive match above already covered that.
+    const stripped = stripDiacritics(rawCode.toLowerCase())
+    if (stripped !== rawCode.toLowerCase()) {
+      const dia = await prisma.product.findFirst({
+        where: { code: { equals: stripped, mode: 'insensitive' } },
+        select: { id: true, code: true },
+      })
+      if (dia) return { id: dia.id, code: dia.code, matchedBy: 'code-normalized' }
+    }
+
+    // Alias fallback (e.g. "home"/"casa" -> property; "viata" -> LIFE)
+    const alias = lookupAlias(rawCode)
+    if (alias) {
+      const byAlias = await prisma.product.findFirst({
+        where: { code: { equals: alias.productCode, mode: 'insensitive' } },
+        select: { id: true, code: true },
+      })
+      if (byAlias) return { id: byAlias.id, code: byAlias.code, matchedBy: 'alias' }
     }
   }
 
