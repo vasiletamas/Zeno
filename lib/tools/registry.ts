@@ -22,6 +22,7 @@ import { changeSelection } from './handlers/change-selection-handlers'
 import { setAnswer } from './handlers/set-answer-handlers'
 import { generateQuote, getQuoteDetails, acceptQuote, modifyQuote } from './handlers/quote-handlers'
 import { compareProducts } from './handlers/product-handlers'
+import { previewProductRequirements } from './handlers/preview-handlers'
 import { getStateHandler } from './handlers/state-handlers'
 import { setCandidateProduct } from './handlers/candidate-handlers'
 import { switchProduct } from './handlers/product-switch-handler'
@@ -380,6 +381,7 @@ const ALWAYS_ALLOWED_SET = new Set([
   'list_products',
   'get_product_info',
   'compare_products',
+  'preview_product_requirements',
   'get_customer_profile',
   'update_customer_profile',
   'get_objection_strategy',
@@ -482,6 +484,27 @@ registerTool('compare_products', {
   cacheable: true,
   cacheTtlMs: 300_000,
 }, compareProducts)
+
+registerTool('preview_product_requirements', {
+  description:
+    'Preview which questions would carry over (already answered) vs remain missing ' +
+    'if the customer switches to a candidate product. Read-only, no writes.',
+  parameters: {
+    type: 'object',
+    properties: {
+      productId: { type: 'string', description: 'The candidate product ID (cuid from list_products) to preview requirements for.' },
+    },
+    required: ['productId'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  alwaysAllowed: true,
+  allowedRoles: ALL_ROLES,
+  sideEffects: false,
+  cacheable: false,
+}, previewProductRequirements)
 
 registerTool('get_current_state', {
   description: 'Get the current conversation state (phase, product, selection, consents, application, quote, answers, next action).',
