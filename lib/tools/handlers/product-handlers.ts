@@ -87,8 +87,6 @@ export const compareProducts: ToolHandler = async (args, context) => {
               return {
                 code: l.code,
                 name: levelName[lang],
-                premiumAnnual: l.premiumAnnual,
-                currency: l.currency,
               }
             }),
           }
