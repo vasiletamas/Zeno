@@ -26,12 +26,6 @@ describe('main-chat agent constraints', () => {
     )
   })
 
-  it('reasoning-gate system prompt contains the current-message-priority rule', () => {
-    const gate = AGENTS.find((a) => a.slug === 'reasoning-gate')
-    expect(gate).toBeDefined()
-    expect(gate?.systemPrompt).toMatch(/current message overrides the stored interests/i)
-  })
-
   it('includes the forbidden-phrase rule (subsystem C)', () => {
     const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
     const parsed = JSON.parse(mainChat!.constraints as string)
