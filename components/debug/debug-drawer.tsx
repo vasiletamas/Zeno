@@ -23,6 +23,28 @@ function DebugDrawerInner({ open, onOpenChange }: DebugDrawerProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onOpenChange])
 
+  const conversationId = turns[0]?.conversationId ?? null
+
+  async function downloadExport() {
+    if (!conversationId) return
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/export`)
+      if (!res.ok) return
+      const data = await res.json()
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `zeno-conversation-${conversationId}.json`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      /* best-effort download; ignore */
+    }
+  }
+
   return (
     <aside
       data-testid="debug-drawer"
@@ -39,6 +61,15 @@ function DebugDrawerInner({ open, onOpenChange }: DebugDrawerProps) {
             />
             <span>enabled</span>
           </label>
+          <button
+            type="button"
+            onClick={downloadExport}
+            disabled={!conversationId}
+            title={conversationId ? 'Download the full conversation + per-turn replay (JSON)' : 'Send a message first'}
+            className="text-[11px] font-mono underline hover:no-underline disabled:opacity-40 disabled:no-underline"
+          >
+            download
+          </button>
           <button
             type="button"
             onClick={clearLog}
