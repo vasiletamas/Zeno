@@ -148,7 +148,7 @@ export async function deriveState(conversationId: string): Promise<DerivedState>
     selection = {
       tier: tierCode,
       level: levelCode,
-      addon: application.includesAddon || null,
+      addon: application.includesAddon,
     }
 
     // Required / answered / missing for the application questionnaire
