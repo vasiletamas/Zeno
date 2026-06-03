@@ -64,4 +64,20 @@ describe('main-chat agent constraints', () => {
     expect(mainChat?.systemPrompt).toMatch(/SPECIFIC PRICES ONLY VIA QUOTE/)
     expect(mainChat?.systemPrompt).toMatch(/premiumRange/)
   })
+
+  it('requires passing tier/level/addon to start_application', () => {
+    const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
+    expect(mainChat?.systemPrompt).toMatch(/tierCode.*levelCode.*includesAddon/i)
+    expect(mainChat?.systemPrompt).toMatch(/not.*re-?asked/i)
+  })
+  it('requires honest tool-error handling (no silent "not available")', () => {
+    const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
+    expect(mainChat?.systemPrompt).toMatch(/success:\s*false/i)
+    expect(mainChat?.systemPrompt).toMatch(/read the error/i)
+  })
+  it('requires generate_quote immediately on completion', () => {
+    const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
+    expect(mainChat?.systemPrompt).toMatch(/COMPLETION RULE/i)
+    expect(mainChat?.systemPrompt).toMatch(/(isComplete|readyForQuote)[^\n]*generate_quote/i)
+  })
 })
