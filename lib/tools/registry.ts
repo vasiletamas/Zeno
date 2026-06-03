@@ -24,6 +24,7 @@ import { generateQuote, getQuoteDetails, acceptQuote, modifyQuote } from './hand
 import { compareProducts } from './handlers/product-handlers'
 import { getStateHandler } from './handlers/state-handlers'
 import { setCandidateProduct } from './handlers/candidate-handlers'
+import { switchProduct } from './handlers/product-switch-handler'
 import { getCustomerProfile, updateCustomerProfile } from './handlers/profile-handlers'
 import { getObjectionStrategy } from './handlers/objection-handlers'
 import { checkBdEligibility } from './handlers/bd-handlers'
@@ -227,6 +228,11 @@ const STATUS_SET_CANDIDATE_PRODUCT = {
   ],
 }
 
+const STATUS_SWITCH_PRODUCT = {
+  ro: ['Schimb produsul selectat', 'Trec la noul produs', 'Re\u00eencarc op\u021biunile pentru noul produs'],
+  en: ['Switching to a new product', 'Loading new product options', 'Updating your selection'],
+}
+
 // ==============================================
 // STUB HANDLER (for background-only tools)
 // ==============================================
@@ -378,6 +384,7 @@ const ALWAYS_ALLOWED_SET = new Set([
   'update_customer_profile',
   'get_objection_strategy',
   'set_candidate_product',
+  'switch_product',
   'check_dnt_status',
   'get_current_state',
 ])
@@ -523,6 +530,27 @@ registerTool('set_candidate_product', {
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
 }, setCandidateProduct)
+
+registerTool('switch_product', {
+  description:
+    'Switch to a different insurance product within the same conversation. ' +
+    'Resets any prior tier/level/addon selections (invalid for the new product), ' +
+    'expires any DRAFT quote, and recomputes required questions. Shared answers carry over automatically.',
+  parameters: {
+    type: 'object',
+    properties: {
+      productId: { type: 'string', description: 'Product ID to switch to (cuid from list_products, NOT the display name or code).' },
+    },
+    required: ['productId'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: STATUS_SWITCH_PRODUCT,
+  alwaysAllowed: true,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
+}, switchProduct)
 
 registerTool('get_objection_strategy', {
   description: 'Get a strategy for handling a specific customer objection type.',
