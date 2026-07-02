@@ -1,45 +1,33 @@
 import { describe, it, expect } from 'vitest'
-import { getRequiredSectionsForPhase } from '@/lib/chat/phase-sections-map'
+import { getRequiredSectionsFor, formatDerivedBriefing } from '@/lib/chat/phase-sections-map'
+import { deriveAndExpose } from '@/lib/engines/derive-and-expose'
+import { makeSnapshot } from '../engines/snapshot-fixtures'
+import { PHASES, APP_SUBPHASES } from '@/lib/engines/domain-types'
 
-describe('getRequiredSectionsForPhase', () => {
-  it('DISCOVERY phase includes catalogOverview, capabilityManifest, customerContext', () => {
-    const s = getRequiredSectionsForPhase('DISCOVERY')
-    expect(s).toContain('catalogOverview')
-    expect(s).toContain('capabilityManifest')
-    expect(s).toContain('customerContext')
-    expect(s).not.toContain('questionnaireContext')
+describe('getRequiredSectionsFor (A1 content-preserving mapping)', () => {
+  it('DISCOVERY absorbs the old SELECTION extras', () => {
+    const s = getRequiredSectionsFor('DISCOVERY', null)
+    for (const k of ['capabilityManifest', 'customerContext', 'customerMemory', 'agentKnowledge', 'productContext', 'coachingBriefing']) expect(s).toContain(k)
   })
-  it('SELECTION phase includes productContext, coachingBriefing, catalogOverview', () => {
-    const s = getRequiredSectionsForPhase('SELECTION')
-    expect(s).toContain('productContext')
-    expect(s).toContain('coachingBriefing')
-    expect(s).toContain('catalogOverview')
-    expect(s).not.toContain('questionnaireContext')
+  it('APPLICATION/DNT inherits the old CONSENT payload', () => {
+    expect(getRequiredSectionsFor('APPLICATION', 'DNT')).toContain('complianceGuidance')
   })
-  it('CONSENT phase includes constraints, complianceGuidance', () => {
-    const s = getRequiredSectionsForPhase('CONSENT')
-    expect(s).toContain('constraints')
-    expect(s).toContain('complianceGuidance')
-    expect(s).not.toContain('questionnaireContext')
+  it('APPLICATION/QUESTIONNAIRE keeps questionnaireContext + complianceGuidance', () => {
+    const s = getRequiredSectionsFor('APPLICATION', 'QUESTIONNAIRE')
+    expect(s).toContain('questionnaireContext'); expect(s).toContain('complianceGuidance')
   })
-  it('QUESTIONNAIRE phase includes questionnaireContext, workflowInstructions', () => {
-    const s = getRequiredSectionsForPhase('QUESTIONNAIRE')
-    expect(s).toContain('questionnaireContext')
-    expect(s).toContain('workflowInstructions')
-    expect(s).not.toContain('productContext')
+  it('is total over the full phase×subphase matrix (no throw, always includes situationalBriefing)', () => {
+    for (const p of PHASES) for (const sub of [...APP_SUBPHASES, null]) {
+      expect(getRequiredSectionsFor(p, p === 'APPLICATION' ? sub : null)).toContain('situationalBriefing')
+    }
   })
-  it('QUOTE phase includes productContext, coachingBriefing', () => {
-    const s = getRequiredSectionsForPhase('QUOTE')
-    expect(s).toContain('productContext')
-    expect(s).toContain('coachingBriefing')
-  })
-  it('CLOSING phase includes productContext, constraints', () => {
-    const s = getRequiredSectionsForPhase('CLOSING')
-    expect(s).toContain('productContext')
-    expect(s).toContain('constraints')
-  })
-  it('All phases include stateGrounding (alwaysInclude)', () => {
-    const phases = ['DISCOVERY', 'SELECTION', 'CONSENT', 'QUESTIONNAIRE', 'QUOTE', 'CLOSING'] as const
-    for (const p of phases) expect(getRequiredSectionsForPhase(p)).toContain('stateGrounding')
+})
+
+describe('formatDerivedBriefing (new vocabulary)', () => {
+  it('renders phase, subphase and the engine nextBestAction', () => {
+    const r = deriveAndExpose(makeSnapshot({ application: { id: 'a', status: 'OPEN', tier: null, level: null, addon: null, answeredCount: 0, requiredCount: 6, missingCodes: ['Q1'] } }))
+    const text = formatDerivedBriefing(r.state, r.actions)
+    expect(text).toContain('Phase: APPLICATION/DNT')
+    expect(text).toContain('Next best action:')
   })
 })

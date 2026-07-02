@@ -1,51 +1,29 @@
-import type { DerivedState, Phase } from '@/lib/chat/derive-state'
+import type { Phase, AppSubphase, DerivedStateV3, ExposedActions } from '@/lib/engines/domain-types'
 
-/**
- * Deterministic phase → required prompt sections. Replaces the reasoning gate's
- * section selection. The alwaysInclude sections are always present; phaseSpecific
- * adds per-phase sections. All keys must exist in prompt-builder's SECTION_REGISTRY.
- */
-export function getRequiredSectionsForPhase(phase: Phase): string[] {
-  const alwaysIncluded = [
-    'agentIdentity',
-    'constraints',
-    'stateGrounding',
-    'catalogOverview',
-    'situationalBriefing',
-    'workflowInstructions',
-  ]
-  const phaseSpecific: Record<Phase, string[]> = {
-    DISCOVERY: ['capabilityManifest', 'customerContext', 'customerMemory', 'agentKnowledge'],
-    SELECTION: ['productContext', 'coachingBriefing', 'customerContext'],
-    CONSENT: ['complianceGuidance'],
-    QUESTIONNAIRE: ['questionnaireContext', 'complianceGuidance'],
-    QUOTE: ['productContext', 'coachingBriefing', 'complianceGuidance'],
-    CLOSING: ['productContext', 'complianceGuidance'],
-  }
-  return [...new Set([...alwaysIncluded, ...phaseSpecific[phase]])]
+const ALWAYS = ['agentIdentity', 'constraints', 'stateGrounding', 'catalogOverview', 'situationalBriefing', 'workflowInstructions']
+const BY_PHASE: Record<Phase, string[]> = {
+  DISCOVERY: ['capabilityManifest', 'customerContext', 'customerMemory', 'agentKnowledge', 'productContext', 'coachingBriefing'], // old DISCOVERY ∪ old SELECTION
+  APPLICATION: [], // subphase-driven
+  QUOTE: ['productContext', 'coachingBriefing', 'complianceGuidance'], // old QUOTE set
+  PAYMENT: ['productContext', 'complianceGuidance'], // old CLOSING set until A4 adds paymentContext
+  POLICY: ['productContext', 'complianceGuidance'], // old CLOSING set until A4 adds policyContext
 }
-
-/**
- * Deterministic replacement for the gate's situational briefing. Surfaces the
- * derived phase + next best action (+ selection / remaining questions) so the
- * model is grounded in where the conversation is and what to do next. The
- * "=== SITUATIONAL ANALYSIS ===" header is added by the section renderer.
- */
-export function formatDerivedBriefing(state: DerivedState): string {
+const BY_SUBPHASE: Record<AppSubphase, string[]> = {
+  DNT: ['complianceGuidance'], // heir of old CONSENT
+  QUESTIONNAIRE: ['questionnaireContext', 'complianceGuidance'],
+  QUOTE_GENERATION: ['productContext', 'coachingBriefing', 'complianceGuidance'], // old QUOTE (ready-to-generate)
+}
+export function getRequiredSectionsFor(phase: Phase, subphase: AppSubphase | null): string[] {
+  const extras = phase === 'APPLICATION' && subphase ? BY_SUBPHASE[subphase] : BY_PHASE[phase]
+  return [...new Set([...ALWAYS, ...extras])]
+}
+export function formatDerivedBriefing(state: DerivedStateV3, actions: ExposedActions): string {
   const lines: string[] = []
-  lines.push(`Phase: ${state.phase}`)
+  lines.push(`Phase: ${state.phase}${state.subphase ? '/' + state.subphase : ''}`)
   lines.push(`Next best action: ${state.nextBestAction}`)
   if (state.product) lines.push(`Product: ${state.product.code}`)
-  if (state.selection.tier) {
-    const parts = [`tier ${state.selection.tier}`]
-    if (state.selection.level) parts.push(`level ${state.selection.level}`)
-    if (state.selection.addon) parts.push('add-on included')
-    lines.push(`Selection: ${parts.join(', ')}`)
-  }
-  if (state.application.exists && state.application.missing.length > 0) {
-    const shown = state.application.missing.slice(0, 5).join(', ')
-    const more = state.application.missing.length > 5 ? ', …' : ''
-    lines.push(`Remaining questions: ${shown}${more}`)
-  }
+  if (state.selection.tier) lines.push(`Selection: tier ${state.selection.tier}${state.selection.level ? ', level ' + state.selection.level : ''}${state.selection.addon ? ', add-on included' : ''}`)
+  if (state.application && state.application.missingCodes.length > 0) lines.push(`Remaining questions: ${state.application.missingCodes.slice(0, 5).join(', ')}${state.application.missingCodes.length > 5 ? ', …' : ''}`)
+  lines.push(`Available actions: ${actions.available.join(', ')}`)
   return lines.join('\n')
 }

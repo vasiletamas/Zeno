@@ -13,7 +13,7 @@ import type { PromptSections } from './prompt-builder'
 import type { ToolNarrationResult } from './tool-narration-detector'
 import type { TurnContextCustomer } from './turn-context'
 import type { RawCustomerInsight } from './context-loaders'
-import type { DerivedState } from './derive-state'
+import type { DerivedStateV3, ExposedActions } from '@/lib/engines/domain-types'
 import { calculateAge } from './age'
 import { getConversationPhase } from './phase'
 import { writeDebugEvent } from './debug-persistence'
@@ -42,10 +42,25 @@ export interface DebugGatePayload {
    */
   derivedPhase?: string
   /**
-   * The full DerivedState snapshot for this turn, surfaced to the debug
-   * drawer's "State" panel. Null when derivation failed.
+   * True when state derivation failed this turn and the orchestrator fell
+   * back to the DISCOVERY section set.
    */
-  derivedState?: DerivedState | null
+  error?: boolean
+  /**
+   * The full DerivedStateV3 snapshot for this turn (deriveAndExpose output),
+   * surfaced to the debug drawer's "State" panel. Null when derivation failed.
+   */
+  derivedState?: DerivedStateV3 | null
+  /**
+   * The exposure computed this turn: available + blocked actions with reason
+   * codes. Part of the per-turn legality snapshot (T14.D2).
+   */
+  actions?: ExposedActions
+  /**
+   * Version stamp of the derive-and-expose rule set that produced this
+   * snapshot, for recompute-and-diff replay (T14.D2).
+   */
+  engineVersion?: string
 }
 
 export interface DebugPromptPayload {

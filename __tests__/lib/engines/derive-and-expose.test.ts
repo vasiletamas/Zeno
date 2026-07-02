@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { deriveAndExpose, ACTION_RULES } from '@/lib/engines/derive-and-expose'
+import { deriveAndExpose, ACTION_RULES, engineVersion } from '@/lib/engines/derive-and-expose'
 import { makeSnapshot } from './snapshot-fixtures'
 
 const validDnt = { signed: true, valid: true, validUntil: '2027-01-01T00:00:00.000Z', coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false }
@@ -46,5 +46,9 @@ describe('deriveAndExpose — exposure over the FULL snapshot (contradiction #12
     const names = ACTION_RULES.map((r) => r.action)
     expect(new Set(names).size).toBe(names.length)
     for (const r of ACTION_RULES) expect(['read', 'commit']).toContain(r.kind)
+  })
+  it('exports an engineVersion stamp for legality-snapshot replay (T14.D2)', () => {
+    expect(typeof engineVersion).toBe('string')
+    expect(engineVersion).toMatch(/^\d+\.\d+\.\d+$/)
   })
 })

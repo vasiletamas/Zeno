@@ -25,8 +25,10 @@ import { buildToolContext } from './context-builder'
 import { createSSEStream, pickStatusMessage, type SSEEvent } from './stream-handler'
 import type { ToolContext, PipelineResult, ToolResult } from '@/lib/tools/types'
 import { buildPrompt, type GateSelection, type PromptSections } from './prompt-builder'
-import { getRequiredSectionsForPhase, formatDerivedBriefing } from './phase-sections-map'
-import { deriveState, type DerivedState } from './derive-state'
+import { getRequiredSectionsFor, formatDerivedBriefing } from './phase-sections-map'
+import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
+import { deriveAndExpose, engineVersion } from '@/lib/engines/derive-and-expose'
+import type { DeriveAndExposeResult } from '@/lib/engines/domain-types'
 import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
 import { loadAllSections, loadStateGrounding, loadCustomerInsights, type WorkflowSessionData, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
 import { withDefaultDiscoveryTools } from './default-tools'
@@ -47,7 +49,7 @@ import { eventBus, initObservability, getTurnCost, getTurnAnomalies, getTurnTool
 import { validateSideEffectClaims } from './side-effect-validator'
 import { detectToolNarration, type ToolNarrationResult } from './tool-narration-detector'
 import { applyABTestVariant } from '@/lib/self-improvement/ab-test-assigner'
-import { debugYield, isDev, buildIdentityPayload, recordDebugEvent, type DebugEvent } from './debug'
+import { debugYield, isDev, buildIdentityPayload, recordDebugEvent, type DebugEvent, type DebugGatePayload } from './debug'
 import { serializeToolResultForModel } from './tool-result-serializer'
 import { persistTurnDebug } from './turn-debug-persistence'
 
@@ -419,34 +421,35 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   )
 
   // --- gatePromise: Step 3 — Deterministic state derivation (replaces the
-  // reasoning-gate LLM pre-pass). deriveState() is a cheap DB read (no LLM), so
-  // it always runs; the phase it returns drives section selection + the
-  // situational briefing. The event phase label stays 'reasoning_gate' so
-  // existing observability/perf tests keep their span name.
+  // reasoning-gate LLM pre-pass). loadDomainSnapshot() is a cheap DB read (no
+  // LLM) and deriveAndExpose() is pure, so this always runs; the (phase,
+  // subphase) it returns drives section selection + the situational briefing.
+  // The event phase label stays 'reasoning_gate' so existing observability/
+  // perf tests keep their span name.
   const gatePromise = (async (): Promise<{
-    derived: DerivedState | null
+    exposure: DeriveAndExposeResult | null
     gateSelection: GateSelection
-    gateDebug: { skipped: boolean; derivedPhase?: string; error?: boolean; durationMs: number; derivedState?: DerivedState | null }
+    gateDebug: Omit<DebugGatePayload, 'traceId'>
   }> => {
     eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'reasoning_gate', timestamp: Date.now() })
     const start = Date.now()
-    let derived: DerivedState | null = null
+    let exposure: DeriveAndExposeResult | null = null
     let gateSelection: GateSelection
-    let gateDebug: { skipped: boolean; derivedPhase?: string; error?: boolean; durationMs: number; derivedState?: DerivedState | null }
+    let gateDebug: Omit<DebugGatePayload, 'traceId'>
     try {
-      derived = await deriveState(state.conversationId)
-      gateSelection = { requiredSections: getRequiredSectionsForPhase(derived.phase), excludedSections: [], confidence: 1 }
-      state.phases['reasoningGate'] = { durationMs: Date.now() - start, derivedPhase: derived.phase }
-      gateDebug = { skipped: false, derivedPhase: derived.phase, derivedState: derived, durationMs: Date.now() - start }
+      exposure = deriveAndExpose(await loadDomainSnapshot(state.conversationId))
+      gateSelection = { requiredSections: getRequiredSectionsFor(exposure.state.phase, exposure.state.subphase), excludedSections: [], confidence: 1 }
+      state.phases['reasoningGate'] = { durationMs: Date.now() - start, derivedPhase: exposure.state.phase }
+      gateDebug = { skipped: false, derivedPhase: exposure.state.phase, derivedState: exposure.state, actions: exposure.actions, engineVersion, durationMs: Date.now() - start }
     } catch (err: unknown) {
-      logWarn({ layer: 'orchestrator', category: 'derive_state', message: 'deriveState failed, using DISCOVERY', context: { conversationId: state.conversationId }, error: err })
-      gateSelection = { requiredSections: getRequiredSectionsForPhase('DISCOVERY'), excludedSections: [], confidence: 1 }
+      logWarn({ layer: 'orchestrator', category: 'derive_state', message: 'deriveAndExpose failed, using DISCOVERY sections', context: { conversationId: state.conversationId }, error: err })
+      gateSelection = { requiredSections: getRequiredSectionsFor('DISCOVERY', null), excludedSections: [], confidence: 1 }
       state.phases['reasoningGate'] = { durationMs: Date.now() - start, error: true }
-      gateDebug = { skipped: false, error: true, derivedState: null, durationMs: Date.now() - start }
+      gateDebug = { skipped: false, error: true, derivedState: null, engineVersion, durationMs: Date.now() - start }
     }
     state.phases['step3_reasoning_gate'] = Date.now() - start
     eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'reasoning_gate', durationMs: Date.now() - start })
-    return { derived, gateSelection, gateDebug }
+    return { exposure, gateSelection, gateDebug }
   })()
 
   // --- contextPromise: Step 4 — Context assembly (without situationalBriefing, patched after gate) ---
@@ -580,7 +583,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // --- Await both in parallel ---
   const [gateResult, contextResult] = await Promise.all([gatePromise, contextPromise])
 
-  const { derived, gateSelection } = gateResult
+  const { exposure, gateSelection } = gateResult
   const { agentSlug, agentConfig, sections } = contextResult
 
   yield* recordAndYield({
@@ -588,8 +591,8 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     data: { ...gateResult.gateDebug, traceId: state.traceId },
   })
 
-  // Patch situationalBriefing from the derived state (phase + next best action)
-  sections.situationalBriefing = derived ? formatDerivedBriefing(derived) : null
+  // Patch situationalBriefing from the derived state (phase/subphase + next best action)
+  sections.situationalBriefing = exposure ? formatDerivedBriefing(exposure.state, exposure.actions) : null
 
   // --- Skill pack loading and merging ---
   // Gate-driven skill-pack recommendations are gone; workflow/pack-driven packs
@@ -634,8 +637,11 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // --- Conditional compliance check ---
   // Compliance is now triggered deterministically by the derived phase rather
   // than by the LLM gate's complianceRelevant flag.
-  const complianceRelevant = derived
-    ? ['CONSENT', 'QUESTIONNAIRE', 'QUOTE', 'CLOSING'].includes(derived.phase)
+  // Transitional trigger on the pinned Phase vocabulary (old CONSENT/
+  // QUESTIONNAIRE map to APPLICATION subphases, old CLOSING to PAYMENT/POLICY);
+  // A1.6 replaces this list with the typed COMPLIANCE_RELEVANT_BY_PHASE record.
+  const complianceRelevant = exposure
+    ? ['APPLICATION', 'QUOTE', 'PAYMENT', 'POLICY'].includes(exposure.state.phase)
     : false
   if (complianceRelevant) {
     // Use recent messages from turnCtx instead of querying DB again
@@ -1475,7 +1481,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   state.phases['promptAssembly'] = {
     sectionSizes: buildResult.sectionSizes,
     gateActive: buildResult.gateActive,
-    derivedPhase: derived?.phase ?? null,
+    derivedPhase: exposure?.state.phase ?? null,
     fastPath: false,
     includedSections: buildResult.includedSections,
     excludedSections: buildResult.excludedSections,
