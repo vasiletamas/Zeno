@@ -20,7 +20,7 @@ export interface DomainSnapshot {
   product: { id: string; code: string; insuranceType: string } | null // committed > candidate
   candidateProductId: string | null
   identity: { tier: IdentityTier; fields: Record<string, { provenance: Provenance } | undefined> }
-  consents: { gdprProcessing: boolean; aiDisclosure: boolean; marketing: boolean; gdprWithdrawn: boolean } // derived from the ConsentEvent ledger (B1); gdprWithdrawn = latest gdpr event is an explicit withdrawal
+  consents: { gdprProcessing: boolean; aiDisclosure: boolean; marketing: boolean; gdprWithdrawn: boolean; hasAnyEvents: boolean } // derived from the ConsentEvent ledger (B1); gdprWithdrawn = latest gdpr event is an explicit withdrawal
   dnt: { signed: boolean; valid: boolean; validUntil: string | null; coversProductTypes: string[]; answeredCount: number; totalCount: number; sessionActive: boolean }
   application: { id: string; status: 'OPEN' | 'PAUSED' | 'COMPLETED'; tier: string | null; level: string | null; addon: boolean | null; answeredCount: number; requiredCount: number; missingCodes: string[] } | null
   quote: { id: string; status: string; premiumAnnual: number; validUntil: string; expired: boolean } | null // issued, unaccepted

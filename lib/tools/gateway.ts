@@ -53,6 +53,7 @@ export function resolveTargetRef(tool: string, args: Record<string, unknown>, st
   if (tool === 'save_dnt_answer') return `dnt_answer:${String(args.questionId ?? 'auto')}`
   if (tool === 'save_application_answer') return `app_answer:${String(args.field ?? 'auto')}`
   if (tool === 'set_answer') return `question:${String(args.questionCode ?? 'unknown')}`
+  if (tool === 'withdraw_consent') return `consent:${String(args.kind ?? 'unknown')}`
   // one-shot / entity-scoped commits — stable natural key
   if (tool === 'accept_quote' || tool === 'modify_quote') return `quote:${state.quote?.id ?? 'none'}`
   if (tool === 'generate_quote') return `application:${state.application?.id ?? 'none'}`

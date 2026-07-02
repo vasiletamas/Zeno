@@ -27,6 +27,7 @@ import { getStateHandler } from './handlers/state-handlers'
 import { setCandidateProduct } from './handlers/candidate-handlers'
 import { switchProduct } from './handlers/product-switch-handler'
 import { getCustomerProfile } from './handlers/profile-handlers'
+import { withdrawConsent } from './handlers/consent-handlers'
 import { getObjectionStrategy } from './handlers/objection-handlers'
 import { checkBdEligibility } from './handlers/bd-handlers'
 import { collectCustomerField } from './handlers/data-handlers'
@@ -930,4 +931,27 @@ registerTool('escalate_to_human', {
   allowedRoles: ALL_ROLES,
   kind: 'commit',
 }, escalateToHuman)
+
+registerTool('withdraw_consent', {
+  description: 'Withdraw a previously granted consent (gdpr_processing, ai_disclosure, or marketing). Data is preserved; processing stops.',
+  parameters: {
+    type: 'object',
+    properties: {
+      kind: {
+        type: 'string',
+        enum: ['gdpr_processing', 'ai_disclosure', 'marketing'],
+        description: 'Which consent to withdraw.',
+      },
+      scope: { type: 'string', description: 'Optional scope note.' },
+    },
+    required: ['kind'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'consent',
+  kind: 'commit',
+}, withdrawConsent)
 

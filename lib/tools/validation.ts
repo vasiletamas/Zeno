@@ -145,6 +145,15 @@ const escalateToHumanSchema = z.object({
 }).strict()
 
 // ==============================================
+// CONSENT
+// ==============================================
+
+const withdrawConsentSchema = z.object({
+  kind: z.enum(['gdpr_processing', 'ai_disclosure', 'marketing']),
+  scope: z.string().optional(),
+}).strict()
+
+// ==============================================
 // SCHEMA REGISTRY
 // ==============================================
 
@@ -187,6 +196,9 @@ const toolSchemas: Record<string, ZodType> = {
 
   // Utility / Background
   escalate_to_human: escalateToHumanSchema,
+
+  // Consent
+  withdraw_consent: withdrawConsentSchema,
 }
 
 // ==============================================

@@ -8,5 +8,5 @@ it('appends events and derives current state; never mutates prior rows', async (
   await appendConsentEvents(c.id, [{ kind: 'gdpr_processing', action: 'granted' }, { kind: 'ai_disclosure', action: 'granted' }], 'commit-1')
   await appendConsentEvents(c.id, [{ kind: 'gdpr_processing', action: 'withdrawn' }], 'commit-2')
   expect(await prisma.consentEvent.count({ where: { customerId: c.id } })).toBe(3)
-  expect(await loadDerivedConsents(c.id)).toEqual({ gdprProcessing: false, aiDisclosure: true, marketing: false, gdprWithdrawn: true })
+  expect(await loadDerivedConsents(c.id)).toEqual({ gdprProcessing: false, aiDisclosure: true, marketing: false, gdprWithdrawn: true, hasAnyEvents: true })
 })

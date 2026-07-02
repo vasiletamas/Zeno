@@ -20,6 +20,8 @@ export interface DerivedConsents {
   marketing: boolean
   /** true only when the LATEST gdpr_processing event is an explicit withdrawal */
   gdprWithdrawn: boolean
+  /** any ledger history at all — gates withdraw_consent exposure (B1.4) */
+  hasAnyEvents: boolean
 }
 
 export function deriveConsents(events: ConsentEventLike[]): DerivedConsents {
@@ -31,5 +33,6 @@ export function deriveConsents(events: ConsentEventLike[]): DerivedConsents {
     aiDisclosure: on('ai_disclosure'),
     marketing: on('marketing'),
     gdprWithdrawn: latest.get('gdpr_processing')?.action === 'withdrawn',
+    hasAnyEvents: events.length > 0,
   }
 }

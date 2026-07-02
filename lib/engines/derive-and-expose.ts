@@ -9,7 +9,7 @@ import { consentBlocksCommit } from './consent-rules'
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.5.0' // 1.3.0: update_customer_profile retired (B0.1); 1.4.0: standalone consent tools retired — capture folds into sign_dnt (B1.1); 1.5.0: gdpr-withdrawn halt rule in exposure (B1.3)
+export const engineVersion = '1.6.0' // 1.4.0: standalone consent tools retired — capture folds into sign_dnt (B1.1); 1.5.0: gdpr-withdrawn halt rule in exposure (B1.3); 1.6.0: withdraw_consent exposed on any ledger history (B1.4)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -46,6 +46,7 @@ export const ACTION_RULES: ActionRule[] = [
   { action: 'set_candidate_product', kind: 'commit', exposedWhen: always },
   { action: 'switch_product', kind: 'commit', exposedWhen: (s) => s.product !== null },
   { action: 'collect_customer_field', kind: 'commit', exposedWhen: always },
+  { action: 'withdraw_consent', kind: 'commit', exposedWhen: (s) => s.consents.hasAnyEvents },
   { action: 'start_dnt_questionnaire', kind: 'commit', exposedWhen: (s) => s.product !== null && !s.dnt.valid && s.dnt.answeredCount < s.dnt.totalCount,
     blockedReason: (s) => (s.product === null ? { reason: 'no_product_in_focus' } : null) },
   { action: 'save_dnt_answer', kind: 'commit', exposedWhen: (s) => s.product !== null && !s.dnt.signed && s.dnt.totalCount > 0 && s.dnt.answeredCount < s.dnt.totalCount },

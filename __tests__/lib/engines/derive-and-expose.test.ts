@@ -21,7 +21,7 @@ describe('deriveAndExpose — exposure over the FULL snapshot (contradiction #12
     expect(r.actions.blocked).toContainEqual(expect.objectContaining({ action: 'generate_quote', reason: 'requires_consent' }))
   })
   it('generate_quote available in APPLICATION/QUOTE_GENERATION with consent', () => {
-    const r = deriveAndExpose(makeSnapshot({ application: doneApp, dnt: validDnt, consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false } }))
+    const r = deriveAndExpose(makeSnapshot({ application: doneApp, dnt: validDnt, consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true } }))
     expect(r.actions.available).toContain('generate_quote')
   })
   it('sign_dnt blocked with dnt_incomplete while DNT answers are missing', () => {
@@ -36,7 +36,7 @@ describe('deriveAndExpose — exposure over the FULL snapshot (contradiction #12
     expect(r.actions.blocked).toContainEqual(expect.objectContaining({ action: 'list_products', reason: 'temporarily_unavailable' }))
   })
   it('INVARIANT: nextBestAction only names an available action', () => {
-    for (const s of [makeSnapshot(), makeSnapshot({ application: doneApp, dnt: validDnt, consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false } })]) {
+    for (const s of [makeSnapshot(), makeSnapshot({ application: doneApp, dnt: validDnt, consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true } })]) {
       const r = deriveAndExpose(s)
       const m = r.state.nextBestAction.match(/call ([a-z_]+)/)
       if (m) expect(r.actions.available).toContain(m[1])
