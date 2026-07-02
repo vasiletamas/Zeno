@@ -9,9 +9,20 @@ and re-run after the rework (A4.5, criterion d).
 
 Command: `npx tsx scripts/verify-pathology1.ts 3 && npx tsx scripts/verify-pathology2.ts && npx tsx scripts/verify-pathology3.ts && npx tsx scripts/verify-pathology4.ts`
 
+Run 2026-07-02 (cloud, live OpenAI). Verbatim summary lines:
+
 ```
-(baseline results — filled in when the run completes; see section 6)
+P1: ==== 3/3 trials fully detector-clean ====
+P2: ==== stalls-after-"da" across 2 trials: 0 (lower = better; advances instead of interrogating) ====
+P3: ==== across 3 trials: BLIND choices=0 (want 0), INFORMED choices=3 ====
+P4: ==== 3/3 trials clean (pivots to Protect, no invented categories) ====
 ```
+
+ALL FOUR CLEAN — criterion a satisfied; the rework may proceed.
+(Sandbox note: the pathology scripts print their verdict and then linger on
+open handles instead of exiting — P2–P4's "EXIT 143" in the raw log is the
+supervisor reaping the already-finished process AFTER its verdict printed,
+not a failure. P1 exited 0 on its own.)
 
 ## 2. Section inventory (criterion c: every key, exactly once)
 
