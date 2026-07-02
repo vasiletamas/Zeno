@@ -146,7 +146,7 @@ Notes:
 
 ## 9. Progress checklist (KEEP UPDATED — edit + commit at every package boundary)
 
-- [x] 01 A1 — pinned vocabulary, DomainSnapshot loader, deriveAndExpose core (suite 756/756 green; **live sims pending — run as first cloud action**)
+- [x] 01 A1 — pinned vocabulary, DomainSnapshot loader, deriveAndExpose core (suite 756/756 green; cloud sims run 2026-07-02: pathology1 2/2 CLEAN; advance-flow 0/2 = the documented pre-A3 static-10-tool regression — see ruling in section 10)
 - [ ] 02 A2 — CommitResult envelope, gateway, CommitLedger, confirm tokens
 - [ ] 03 A3 — orchestrator exposure, executor hard-reject, GUI parity
 - [ ] 04 A4 — prompt sections rework (M13)
@@ -172,3 +172,8 @@ Notes:
 - [ ] 24 F3 — spec fold-back
 - [ ] 25 F4 — triage tooling
 - [ ] 26 F5 — final validation gauntlet
+
+## 10. Owner rulings recorded during cloud sessions (binding, errata-rank)
+
+1. **[2026-07-02 — A1.8/A2.10 advance-flow expectation vs Block A overview]** Plan-internal contradiction flagged and ruled by the owner. A1.8 step 3 and A2.10 step 4 expect `verify-advance-flow.ts 2` → 2/2 "reach signature + application", but the Block A overview + A3.7 step 2 state that sign_dnt/start_application are unreachable in the standard chat path until A3 replaces the static DEFAULT_DISCOVERY_TOOLS list (the "KNOWN LIVE REGRESSION FIXED BY CONSTRUCTION"). Observed at A1.8 (cloud, live LLM): 0/2 ADVANCED, 0 CEREMONY; agent behaved correctly within the exposed 10-tool set (candidate set, both consents recorded, no confirm-product ceremony, no raw-JSON narration); its only questionnaire-capable tool (set_answer) failed on guessed nonexistent codes. **Ruling: record the honest baseline at A1.8 and read A2.10's sim step the same way (no-regression baseline: CEREMONY must stay 0, no envelope-JSON narration); the 2/2 advance expectation is enforced from A3.7 onward, where the plan itself proves the fix by construction.**
+2. **[2026-07-02 — environment]** ANTHROPIC_API_KEY is not available in the cloud container (owner informed; running container cannot receive new session env vars). Owner ruled: run live sims with OpenAI only. Consequence: the Anthropic failover path is untested in live sims on this branch until a keyed session runs them.
