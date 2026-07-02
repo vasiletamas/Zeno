@@ -370,6 +370,27 @@ function fuzzyMatchOption(
       }
     }
   }
+
+  // Second pass (B2.7 live lesson): customers answer "da" to a label like
+  // "DA, pentru toate produsele" — accept a prefix that ends at a word
+  // boundary, but ONLY when it identifies exactly one option.
+  const labelStrings = (opt: ParsedOption): string[] => {
+    const out = [opt.value]
+    if (typeof opt.label === 'string') out.push(opt.label)
+    else if (opt.label) {
+      if (opt.label.en) out.push(opt.label.en)
+      if (opt.label.ro) out.push(opt.label.ro)
+    }
+    return out
+  }
+  const isWordBoundaryPrefix = (candidate: string): boolean =>
+    candidate.startsWith(normalized) &&
+    (candidate.length === normalized.length || !/[a-z0-9]/i.test(candidate[normalized.length]))
+  const prefixMatches = options.filter((opt) =>
+    labelStrings(opt).some((l) => isWordBoundaryPrefix(stripDiacritics(l.toLowerCase()))),
+  )
+  if (normalized.length > 0 && prefixMatches.length === 1) return prefixMatches[0]
+
   return null
 }
 

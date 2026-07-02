@@ -147,6 +147,33 @@ describe('validateAnswer', () => {
       expect(result.error).toContain('Invalid option')
     })
 
+    it('matches an unambiguous label prefix at a word boundary ("da" → "DA, pentru toate produsele", B2.7 live lesson)', () => {
+      const consentQuestion = {
+        type: 'DROPDOWN',
+        options: [
+          { value: 'yes_all', label: { en: 'Yes, for all products', ro: 'DA, pentru toate produsele' } },
+          { value: 'no', label: { en: 'No', ro: 'NU' } },
+        ],
+        validationRules: null,
+      }
+      expect(validateAnswer(consentQuestion, 'da')).toEqual({ valid: true, normalizedValue: 'yes_all' })
+      expect(validateAnswer(consentQuestion, 'nu')).toEqual({ valid: true, normalizedValue: 'no' })
+      // no mid-word matches: 'dac' is not a word-boundary prefix of 'DA, ...'
+      expect(validateAnswer(consentQuestion, 'dac').valid).toBe(false)
+    })
+
+    it('an ambiguous prefix stays rejected', () => {
+      const ambiguous = {
+        type: 'DROPDOWN',
+        options: [
+          { value: 'a1', label: { en: 'Yes today', ro: 'DA, azi' } },
+          { value: 'a2', label: { en: 'Yes tomorrow', ro: 'DA, mâine' } },
+        ],
+        validationRules: null,
+      }
+      expect(validateAnswer(ambiguous, 'da').valid).toBe(false)
+    })
+
     it('matches case-insensitively', () => {
       const result = validateAnswer(dropdownQuestion, 'STANDARD')
       expect(result).toEqual({ valid: true, normalizedValue: 'standard' })

@@ -153,7 +153,7 @@ export const getDntNextQuestion: ToolHandler = async (_args, context) => {
         },
         progress: next.progress,
       },
-      message: `Next DNT question (${next.progress.answered}/${next.progress.total} answered).`,
+      message: `Next DNT question code: ${q.code} (${next.progress.answered}/${next.progress.total} answered).`,
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -224,9 +224,9 @@ export const openDntSession: ToolHandler = async (_args, context) => {
           : null,
         progress,
       },
-      message: type === 'NEW'
-        ? 'DNT session opened — first analysis for this customer. Answer questions with write_dnt_answer using the exact question code.'
-        : `DNT session opened as an update; ${prefilled} prior answers pre-filled for review.`,
+      message: next
+        ? `DNT session opened (${type}${type === 'UPDATE' ? `, ${prefilled} answers pre-filled` : ''}). First question code: ${next.code}. Ask it, then call write_dnt_answer with questionCode "${next.code}".`
+        : `DNT session opened (${type}); all questions already answered — ready for sign_dnt.`,
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -319,7 +319,7 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
       },
       message: next === null
         ? 'All DNT questions answered. Ready for signature (sign_dnt).'
-        : `Answer saved. ${progress.total - progress.answered} questions remaining.`,
+        : `Answer saved. Next question code: ${next.code}. ${progress.total - progress.answered} remaining.`,
     }
   } catch (error) {
     return { success: false, error: String(error) }
