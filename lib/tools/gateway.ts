@@ -1,0 +1,214 @@
+/**
+ * Commit Gateway (A2.5)
+ *
+ * Every state-changing tool call flows through executeCommit, which implements
+ * the pinned #8 order: actor → replay detection FIRST → legality
+ * (deriveAndExpose) → confirm token (re-issue on stale, never hard-reject) →
+ * validation → transactional apply under a per-conversation advisory lock with
+ * the CommitLedger row written in the same transaction → post-derive whose
+ * pre/post delta IS the advance_phase effect (contradiction #6).
+ *
+ * Retry policy pin: reads may be retried by the executor; commits are NEVER
+ * auto-retried — customer-driven resubmission replays via the ledger (#8).
+ */
+
+import { prisma } from '@/lib/db'
+import type { Prisma, CommitLedger } from '@/lib/generated/prisma/client'
+import { getToolDefinition, getToolHandler } from './registry'
+import { validateToolArgs } from './validation'
+import { materialArgsHash, stripConfirmArgs } from './args-hash'
+import { issueConfirmToken, verifyConfirmToken, confirmSecret } from './confirm-token'
+import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
+import { deriveAndExpose } from '@/lib/engines/derive-and-expose'
+import type { CommitActor, CommitEffect, CommitResult, DerivedStateV3, ReasonCode } from '@/lib/engines/domain-types'
+import type { ToolContext, ToolResult } from './types'
+
+type Db = typeof prisma | Prisma.TransactionClient
+
+export interface CommitRequest {
+  tool: string
+  args: Record<string, unknown>
+  actor: CommitActor
+  conversationId: string
+  customerId: string
+  confirmToken?: string
+  toolContext: ToolContext
+}
+
+/**
+ * Replay scope per tool (A2 erratum 4). One-shot commits key on a stable
+ * (entity, from-state) targetRef and enforce the strict already_applied
+ * conflict rule (same target, different material args after success → reject).
+ * Repeatable commits key targetRef on the entity addressed in ARGS (field
+ * name, question id/code — never positional state), with the value in the
+ * material hash: a same-value resubmit replays, a new value is a fresh commit.
+ * Every other commit replays only on identical material args.
+ */
+const ONE_SHOT = new Set(['sign_dnt', 'accept_quote', 'generate_quote', 'start_application'])
+
+export function resolveTargetRef(tool: string, args: Record<string, unknown>, state: DerivedStateV3, conversationId: string): string {
+  // repeatable commits — addressed entity from ARGS (erratum 4)
+  if (tool === 'collect_customer_field') return `field:${String(args.field ?? 'unknown')}`
+  if (tool === 'save_dnt_answer') return `dnt_answer:${String(args.questionId ?? 'auto')}`
+  if (tool === 'save_application_answer') return `app_answer:${String(args.field ?? 'auto')}`
+  if (tool === 'set_answer') return `question:${String(args.questionCode ?? 'unknown')}`
+  // one-shot / entity-scoped commits — stable natural key
+  if (tool === 'accept_quote' || tool === 'modify_quote') return `quote:${state.quote?.id ?? 'none'}`
+  if (tool === 'generate_quote') return `application:${state.application?.id ?? 'none'}`
+  if (tool === 'initiate_payment') return `policy:${state.policy?.id ?? 'none'}`
+  return `conversation:${conversationId}`
+}
+
+/**
+ * Interim handler contract for confirmed commits: the legacy handlers gate on
+ * literal-true flags that callers no longer send (the gateway owns the
+ * two-step, erratum 1). sign_dnt also receives gdprConsent — consent capture
+ * stays on the legacy surface until B1 folds it into sign_dnt and flips
+ * storage to the ConsentEvent ledger (contradiction #2, ruling 7).
+ */
+const CONFIRM_ARG_INJECTION: Record<string, Record<string, unknown>> = {
+  sign_dnt: { confirmSignature: true, gdprConsent: true },
+  accept_quote: { confirmAcceptance: true },
+}
+
+function outcomeForBlocked(reason: ReasonCode): CommitResult['outcome'] {
+  if (reason === 'requires_consent') return 'requires_consent'
+  if (reason === 'requires_identity') return 'requires_identity'
+  if (reason === 'requires_disclosures') return 'requires_disclosures'
+  if (reason === 'temporarily_unavailable') return 'unavailable'
+  return 'rejected'
+}
+
+function stateFingerprint(state: DerivedStateV3): string {
+  return [state.phase, state.subphase ?? '-', state.quote?.id ?? '-', state.quote?.validUntil ?? '-', state.application?.id ?? '-', state.dnt.answeredCount].join('|')
+}
+
+async function findFreshApplied(db: Db, conversationId: string, tool: string, key: { argsHash?: string; targetRef?: string }): Promise<CommitLedger | null> {
+  // indexed lookups keyed directly on argsHash / targetRef (erratum 3) —
+  // never latest-row comparison, which interleaved commits defeat.
+  return db.commitLedger.findFirst({
+    where: { conversationId, tool, outcome: 'applied', idempotencyDisposition: 'fresh', ...key },
+    orderBy: { createdAt: 'desc' },
+  })
+}
+
+async function writeLedger(db: Db, req: CommitRequest, targetRef: string, argsHash: string, envelope: CommitResult, phaseFrom: string, phaseTo: string): Promise<void> {
+  await db.commitLedger.create({
+    data: {
+      conversationId: req.conversationId, customerId: req.customerId, actor: req.actor, tool: req.tool,
+      targetRef, argsHash, outcome: envelope.outcome, effects: envelope.effects,
+      reasonCode: envelope.reason ?? null, phaseFrom, phaseTo,
+      idempotencyDisposition: 'fresh', envelope: envelope as unknown as Prisma.InputJsonValue,
+    },
+  })
+}
+
+async function writeReplayRow(db: Db, req: CommitRequest, prior: CommitLedger): Promise<CommitResult> {
+  await db.commitLedger.create({
+    data: {
+      conversationId: req.conversationId, customerId: req.customerId, actor: req.actor, tool: req.tool,
+      targetRef: prior.targetRef, argsHash: prior.argsHash, outcome: prior.outcome, effects: prior.effects,
+      reasonCode: prior.reasonCode, phaseFrom: prior.phaseFrom, phaseTo: prior.phaseTo,
+      idempotencyDisposition: 'replay', envelope: prior.envelope as Prisma.InputJsonValue,
+    },
+  })
+  // The ORIGINAL envelope, verbatim — a replay never recomputes.
+  return prior.envelope as unknown as CommitResult
+}
+
+async function ledgeredReject(db: Db, req: CommitRequest, targetRef: string, argsHash: string, reason: ReasonCode, phase: string): Promise<CommitResult> {
+  const envelope: CommitResult = { outcome: 'rejected', reason, effects: [] }
+  await writeLedger(db, req, targetRef, argsHash, envelope, phase, phase)
+  return envelope
+}
+
+export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
+  const def = getToolDefinition(req.tool)
+  const handler = getToolHandler(req.tool)
+  if (!def || !handler || def.kind !== 'commit') return { outcome: 'rejected', reason: 'not_exposed', effects: [] }
+
+  // (1) actor: server-resolved by the caller, recorded on every ledger row.
+  const pre = deriveAndExpose(await loadDomainSnapshot(req.conversationId))
+  const targetRef = resolveTargetRef(req.tool, req.args, pre.state, req.conversationId)
+  const argsHash = materialArgsHash(req.tool, targetRef, req.args)
+
+  // (2) idempotency replay detection FIRST — a replay answers even if the
+  // action is now blocked (#8). Fast path outside the lock; re-checked inside
+  // (erratum 2).
+  const prior = await findFreshApplied(prisma, req.conversationId, req.tool, { argsHash })
+  if (prior) return writeReplayRow(prisma, req, prior)
+  if (ONE_SHOT.has(req.tool)) {
+    const conflict = await findFreshApplied(prisma, req.conversationId, req.tool, { targetRef })
+    if (conflict) return ledgeredReject(prisma, req, targetRef, argsHash, 'already_applied', pre.state.phase)
+  }
+
+  // (3) legality
+  if (!pre.actions.available.includes(req.tool)) {
+    const blocked = pre.actions.blocked.find((b) => b.action === req.tool)
+    const reason = blocked?.reason ?? 'not_exposed'
+    const envelope: CommitResult = { outcome: outcomeForBlocked(reason), reason, effects: [], needs: blocked?.params?.needs as string[] | undefined }
+    await writeLedger(prisma, req, targetRef, argsHash, envelope, pre.state.phase, pre.state.phase)
+    return envelope
+  }
+
+  // (4) confirm token — stale/missing → (re-)issue against a fresh state
+  // fingerprint, never a hard reject. Issuance is a ledgered attempt
+  // (erratum 6). The token may arrive as a dedicated field or inside args.
+  const confirmToken = req.confirmToken ?? (typeof req.args.confirmToken === 'string' ? req.args.confirmToken : undefined)
+  if (def.requiresConfirmation) {
+    const fp = stateFingerprint(pre.state)
+    if (!confirmToken || !verifyConfirmToken(confirmSecret(), confirmToken, req.conversationId, req.tool, argsHash, fp)) {
+      const envelope: CommitResult = {
+        outcome: 'requires_confirmation',
+        reason: 'requires_confirmation',
+        effects: [],
+        confirmToken: issueConfirmToken(confirmSecret(), req.conversationId, req.tool, argsHash, fp),
+        data: { preview: { phase: pre.state.phase, quote: pre.state.quote } },
+      }
+      await writeLedger(prisma, req, targetRef, argsHash, envelope, pre.state.phase, pre.state.phase)
+      return envelope
+    }
+  }
+
+  // (5) domain validation on MATERIAL args only (erratum 1)
+  const validation = validateToolArgs(req.tool, stripConfirmArgs(req.args))
+  if (!validation.valid) return ledgeredReject(prisma, req, targetRef, argsHash, 'invalid_args', pre.state.phase)
+
+  // (6+7) transactional apply under the per-conversation advisory lock,
+  // ledger row in the same transaction, post-derive delta = advance_phase.
+  return prisma.$transaction(async (tx) => {
+    // ::text cast because pg_advisory_xact_lock returns void, which the
+    // client cannot deserialize.
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${req.conversationId}))::text`
+    // Replay re-check INSIDE the lock (erratum 2): two genuinely concurrent
+    // identical commits both pass the pre-lock check; the loser replays here.
+    const lockedPrior = await findFreshApplied(tx, req.conversationId, req.tool, { argsHash })
+    if (lockedPrior) return writeReplayRow(tx, req, lockedPrior)
+    if (ONE_SHOT.has(req.tool)) {
+      const lockedConflict = await findFreshApplied(tx, req.conversationId, req.tool, { targetRef })
+      if (lockedConflict) return ledgeredReject(tx, req, targetRef, argsHash, 'already_applied', pre.state.phase)
+    }
+    const lockedPre = deriveAndExpose(await loadDomainSnapshot(req.conversationId, tx))
+    if (!lockedPre.actions.available.includes(req.tool)) {
+      const blocked = lockedPre.actions.blocked.find((b) => b.action === req.tool)
+      const reason = blocked?.reason ?? 'not_exposed'
+      const envelope: CommitResult = { outcome: outcomeForBlocked(reason), reason, effects: [] }
+      await writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, lockedPre.state.phase)
+      return envelope
+    }
+    const effectiveArgs = { ...(validation.data ?? {}), ...(def.requiresConfirmation ? CONFIRM_ARG_INJECTION[req.tool] ?? {} : {}) }
+    const handlerResult: ToolResult = await handler(effectiveArgs, { ...req.toolContext, db: tx })
+    const post = deriveAndExpose(await loadDomainSnapshot(req.conversationId, tx))
+    const effects: CommitEffect[] = []
+    let phaseDelta: CommitResult['phaseDelta']
+    if (lockedPre.state.phase !== post.state.phase || lockedPre.state.subphase !== post.state.subphase) {
+      effects.push('advance_phase')
+      phaseDelta = { from: lockedPre.state.phase, to: post.state.phase }
+    }
+    const envelope: CommitResult = handlerResult.success
+      ? { outcome: 'applied', effects, phaseDelta, data: { ...handlerResult.data, _uiAction: handlerResult.uiAction, _confirmation: handlerResult.confirmation, _message: handlerResult.message } }
+      : { outcome: 'rejected', reason: 'handler_rejected', effects: [], data: { error: handlerResult.error } }
+    await writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, post.state.phase)
+    return envelope
+  })
+}

@@ -64,13 +64,18 @@ const saveDntAnswerSchema = z.object({
   answer: z.string().min(1, 'Answer is required'),
 }).strict()
 
+// The gateway owns two-step confirmation (A2 erratum 1): the literal-true
+// confirm flags are no longer required — a confirmed resubmit carries only
+// {confirmToken}. Legacy confirm-class keys stay tolerated (optional) so the
+// pre-A3 LLM surface, which still advertises them, keeps validating; the
+// gateway strips them before validation and injects the handler contract
+// server-side. sign_dnt's gdprConsent requirement moved with them — consent
+// capture stays on record_gdpr_consent until B1 folds it into sign_dnt per
+// contradiction #2.
 const signDntSchema = z.object({
-  confirmSignature: z.literal(true, {
-    message: 'Signature confirmation is required',
-  }),
-  gdprConsent: z.literal(true, {
-    message: 'GDPR consent is required',
-  }),
+  confirmSignature: z.boolean().optional(),
+  gdprConsent: z.boolean().optional(),
+  confirmToken: z.string().optional(),
 }).strict()
 
 // ==============================================
@@ -106,9 +111,8 @@ const generateQuoteSchema = z.object({
 
 const acceptQuoteSchema = z.object({
   quoteId: z.string().optional(),
-  confirmAcceptance: z.literal(true, {
-    message: 'Confirmation is required to accept the quote',
-  }),
+  confirmAcceptance: z.boolean().optional(),
+  confirmToken: z.string().optional(),
 }).strict()
 
 const getQuoteDetailsSchema = z.object({

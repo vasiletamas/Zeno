@@ -1,8 +1,11 @@
 import { prisma } from '@/lib/db'
+import type { Prisma } from '@/lib/generated/prisma/client'
 import { resolveGroupCodes } from '@/lib/engines/question-groups'
 import type { DomainSnapshot } from './domain-types'
 
-type Db = typeof prisma
+// Widened for the A2 gateway: the interactive-transaction handle lacks
+// $transaction/$executeRawUnsafe, so `typeof prisma` alone would reject it.
+type Db = typeof prisma | Prisma.TransactionClient
 
 export async function loadDomainSnapshot(conversationId: string, db: Db = prisma): Promise<DomainSnapshot> {
   const conversation = await db.conversation.findUniqueOrThrow({ where: { id: conversationId } })

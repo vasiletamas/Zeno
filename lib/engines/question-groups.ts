@@ -1,8 +1,9 @@
 import { prisma } from '@/lib/db'
+import type { Prisma } from '@/lib/generated/prisma/client'
 
 export type QuestionPhase = 'dnt' | 'application'
 
-type Db = typeof prisma
+type Db = typeof prisma | Prisma.TransactionClient
 
 /**
  * Group codes for a product + phase: the product's own groups plus any
