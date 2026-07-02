@@ -30,4 +30,11 @@ describe('formatDerivedBriefing (new vocabulary)', () => {
     expect(text).toContain('Phase: APPLICATION/DNT')
     expect(text).toContain('Next best action:')
   })
+  it('renders blocked actions with machine reason codes so the agent can explain a block', () => {
+    const r = deriveAndExpose(makeSnapshot({ application: { id: 'a', status: 'COMPLETED', tier: 't', level: 'l', addon: false, answeredCount: 6, requiredCount: 6, missingCodes: [] }, dnt: { signed: true, valid: true, validUntil: '2027-01-01T00:00:00.000Z', coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false } }))
+    const text = formatDerivedBriefing(r.state, r.actions)
+    expect(text).toContain('Blocked actions:')
+    expect(text).toContain('generate_quote (requires_consent')
+    expect(text).toContain('NEVER work around a blocked action')
+  })
 })

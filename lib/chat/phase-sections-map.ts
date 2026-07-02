@@ -25,5 +25,10 @@ export function formatDerivedBriefing(state: DerivedStateV3, actions: ExposedAct
   if (state.selection.tier) lines.push(`Selection: tier ${state.selection.tier}${state.selection.level ? ', level ' + state.selection.level : ''}${state.selection.addon ? ', add-on included' : ''}`)
   if (state.application && state.application.missingCodes.length > 0) lines.push(`Remaining questions: ${state.application.missingCodes.slice(0, 5).join(', ')}${state.application.missingCodes.length > 5 ? ', …' : ''}`)
   lines.push(`Available actions: ${actions.available.join(', ')}`)
+  if (actions.blocked.length > 0) {
+    lines.push('Blocked actions:')
+    for (const b of actions.blocked) lines.push(`- ${b.action} (${b.reason}${b.params ? ' ' + JSON.stringify(b.params) : ''})`)
+    lines.push('If the customer asks for a blocked action, explain WHY using the reason above. NEVER work around a blocked action or invent an alternative path.')
+  }
   return lines.join('\n')
 }
