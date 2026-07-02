@@ -582,6 +582,32 @@ model Payment {
 }
 
 // ==========================================
+// DOMAIN: COMMIT LEDGER (A2)
+// ==========================================
+
+model CommitLedger {
+  id                     String   @id @default(cuid())
+  conversationId         String
+  customerId             String
+  actor                  String
+  tool                   String
+  targetRef              String?
+  argsHash               String
+  outcome                String
+  effects                String[]
+  reasonCode             String?
+  phaseFrom              String?
+  phaseTo                String?
+  idempotencyDisposition String   @default("fresh")
+  contentVersions        Json?
+  envelope               Json
+  createdAt              DateTime @default(now())
+
+  @@index([conversationId, tool, argsHash])
+  @@index([customerId, createdAt])
+}
+
+// ==========================================
 // DOMAIN: AGENT AND OBSERVABILITY
 // ==========================================
 
