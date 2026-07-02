@@ -1,7 +1,47 @@
 export type Language = 'ro' | 'en'
 
-export const translations: Record<Language, Record<string, string>> = {
+/**
+ * Flat UI strings plus the nested per-ReasonCode map (A3.ADD-3/M6 GUI leg):
+ * the engine emits snake_case reason codes, never prose — these are the
+ * customer-safe bilingual renderings the GUI shows for blocked/rejected
+ * commits. Every member of REASON_CODES must have an entry (pinned by test).
+ */
+interface TranslationTable {
+  reasonCodes: Record<string, string>
+  [key: string]: string | Record<string, string>
+}
+
+export const translations: Record<Language, TranslationTable> = {
   ro: {
+    reasonCodes: {
+      no_product_in_focus: 'Mai întâi alegem produsul potrivit pentru tine.',
+      no_open_application: 'Nu există încă o aplicație deschisă.',
+      application_already_open: 'Există deja o aplicație în curs.',
+      application_paused: 'Aplicația este în pauză — o putem relua oricând.',
+      requires_consent: 'Avem nevoie mai întâi de acordul tău.',
+      dnt_not_signed: 'Analiza de nevoi trebuie semnată mai întâi.',
+      dnt_incomplete: 'Mai sunt întrebări de completat în analiza de nevoi.',
+      dnt_expired: 'Analiza de nevoi a expirat — o refacem rapid.',
+      questionnaire_incomplete: 'Mai sunt întrebări de completat înainte de ofertă.',
+      selection_incomplete: 'Mai întâi alegem pachetul și nivelul.',
+      quote_already_issued: 'Există deja o ofertă activă.',
+      no_issued_quote: 'Nu există încă o ofertă generată.',
+      quote_expired: 'Oferta a expirat — generăm una nouă.',
+      quote_already_accepted: 'Oferta a fost deja acceptată.',
+      requires_confirmation: 'Este nevoie de confirmarea ta pentru acest pas.',
+      requires_identity: 'Avem nevoie de câteva date de identificare mai întâi.',
+      requires_disclosures: 'Mai întâi trebuie parcurse informările obligatorii.',
+      already_applied: 'Acest pas a fost deja finalizat.',
+      stale_confirm_token: 'Confirmarea a expirat — te rugăm să reiei pasul.',
+      invalid_args: 'Datele trimise nu sunt valide.',
+      handler_rejected: 'Operațiunea nu a putut fi finalizată.',
+      temporarily_unavailable: 'Serviciul este momentan indisponibil. Încearcă din nou în scurt timp.',
+      degraded_mode: 'Funcționăm momentan în mod limitat.',
+      no_policy: 'Nu există încă o poliță emisă.',
+      payment_not_pending: 'Nu există o plată în așteptare.',
+      permission_denied: 'Nu ai permisiunea pentru această acțiune.',
+      not_exposed: 'Această acțiune nu este disponibilă în acest moment.',
+    },
     // Hero section
     hero_headline: 'Dacă mâine primești un diagnostic grav, ai fi pregătit?',
     hero_subtitle:
@@ -97,6 +137,35 @@ export const translations: Record<Language, Record<string, string>> = {
     magic_link_error: 'Nu am putut trimite link-ul. Incearca din nou.',
   },
   en: {
+    reasonCodes: {
+      no_product_in_focus: 'Let’s pick the right product for you first.',
+      no_open_application: 'There is no open application yet.',
+      application_already_open: 'An application is already in progress.',
+      application_paused: 'The application is paused — we can resume anytime.',
+      requires_consent: 'We need your consent first.',
+      dnt_not_signed: 'The needs analysis must be signed first.',
+      dnt_incomplete: 'A few needs-analysis questions are still unanswered.',
+      dnt_expired: 'The needs analysis has expired — we can redo it quickly.',
+      questionnaire_incomplete: 'A few questions remain before the quote.',
+      selection_incomplete: 'Let’s choose the package and level first.',
+      quote_already_issued: 'There is already an active quote.',
+      no_issued_quote: 'No quote has been generated yet.',
+      quote_expired: 'The quote has expired — we’ll generate a new one.',
+      quote_already_accepted: 'The quote has already been accepted.',
+      requires_confirmation: 'Your confirmation is needed for this step.',
+      requires_identity: 'We need a few identification details first.',
+      requires_disclosures: 'The mandatory disclosures come first.',
+      already_applied: 'This step has already been completed.',
+      stale_confirm_token: 'The confirmation expired — please redo this step.',
+      invalid_args: 'The submitted data is not valid.',
+      handler_rejected: 'The operation could not be completed.',
+      temporarily_unavailable: 'The service is temporarily unavailable. Please try again shortly.',
+      degraded_mode: 'We are temporarily running in limited mode.',
+      no_policy: 'There is no issued policy yet.',
+      payment_not_pending: 'There is no pending payment.',
+      permission_denied: 'You do not have permission for this action.',
+      not_exposed: 'This action is not available right now.',
+    },
     // Hero section
     hero_headline:
       'If you received a serious diagnosis tomorrow, would you be prepared?',
@@ -195,5 +264,6 @@ export const translations: Record<Language, Record<string, string>> = {
 }
 
 export function t(key: string, lang: Language): string {
-  return translations[lang]?.[key] ?? key
+  const value = translations[lang]?.[key]
+  return typeof value === 'string' ? value : key
 }
