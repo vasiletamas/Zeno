@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --project integration",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "simulate": "npx tsx scripts/simulate.ts"
   },
