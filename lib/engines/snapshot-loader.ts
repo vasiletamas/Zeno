@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db'
 import type { Prisma } from '@/lib/generated/prisma/client'
 import { resolveGroupCodes } from '@/lib/engines/question-groups'
 import { getOpenCircuitTools } from '@/lib/tools/circuit-state'
+import { deriveConsents, type ConsentEventLike } from '@/lib/customer/consent'
 import type { DomainSnapshot } from './domain-types'
 
 // Widened for the A2 gateway: the interactive-transaction handle lacks
@@ -11,11 +12,10 @@ type Db = typeof prisma | Prisma.TransactionClient
 export async function loadDomainSnapshot(conversationId: string, db: Db = prisma): Promise<DomainSnapshot> {
   const conversation = await db.conversation.findUniqueOrThrow({ where: { id: conversationId } })
   const customer = await db.customer.findUniqueOrThrow({ where: { id: conversation.customerId } })
-  // consent truth is the append-only ConsentEvent ledger (B1) — latest event
-  // per kind wins; B1.3 routes this through the pure deriveConsents reducer.
+  // consent truth is the append-only ConsentEvent ledger (B1), reduced by
+  // the pure deriveConsents (latest event per kind wins).
   const consentEvents = await db.consentEvent.findMany({ where: { customerId: conversation.customerId }, orderBy: { createdAt: 'asc' } })
-  const latestConsent = new Map<string, string>()
-  for (const e of consentEvents) latestConsent.set(e.kind, e.action)
+  const consents = deriveConsents(consentEvents as unknown as ConsentEventLike[])
   const activeProductId = conversation.productId ?? conversation.candidateProductId ?? null
   const prod = activeProductId ? await db.product.findUnique({ where: { id: activeProductId } }) : null
   const application = await db.application.findUnique({ where: { conversationId } })
@@ -49,7 +49,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     product: prod ? { id: prod.id, code: prod.code, insuranceType: prod.insuranceType } : null,
     candidateProductId: conversation.candidateProductId,
     identity: { tier: customer.isAnonymous ? 'anonymous' : 'declared', fields: {} }, // B0 provenance store replaces fields
-    consents: { gdprProcessing: latestConsent.get('gdpr_processing') === 'granted', aiDisclosure: latestConsent.get('ai_disclosure') === 'granted', marketing: latestConsent.get('marketing') === 'granted' },
+    consents,
     dnt: { signed: conversation.dntSignedAt != null, valid: dntValid, validUntil: conversation.dntValidUntil?.toISOString() ?? null, coversProductTypes: dntValid && prod ? [prod.insuranceType] : [], answeredCount: dntAnswered.length, totalCount: dntQuestions.length, sessionActive: conversation.dntSignedAt == null && dntAnswered.length > 0 && dntAnswered.length < dntQuestions.length },
     application: appState,
     quote: issued ? { id: issued.id, status: issued.status, premiumAnnual: issued.premiumAnnual, validUntil: issued.validUntil.toISOString(), expired: issued.validUntil.getTime() <= Date.now() } : null,

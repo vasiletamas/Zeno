@@ -1,6 +1,7 @@
 import type { DomainSnapshot, Phase, AppSubphase } from './domain-types'
 import type { BlockedAction, DeriveAndExposeResult, DerivedStateV3, ReasonCode } from './domain-types'
 import { checkIdentityRequirement, IDENTITY_REQUIREMENTS, type IdentityRequirementsTable } from './identity-requirements'
+import { consentBlocksCommit } from './consent-rules'
 
 /**
  * Engine version stamp carried in every per-turn legality snapshot
@@ -8,7 +9,7 @@ import { checkIdentityRequirement, IDENTITY_REQUIREMENTS, type IdentityRequireme
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.4.0' // 1.2.0: get_application_status retired + flagsForReview (A3.ADD-1); 1.3.0: update_customer_profile retired (B0.1); 1.4.0: standalone consent tools retired — capture folds into sign_dnt (B1)
+export const engineVersion = '1.5.0' // 1.3.0: update_customer_profile retired (B0.1); 1.4.0: standalone consent tools retired — capture folds into sign_dnt (B1.1); 1.5.0: gdpr-withdrawn halt rule in exposure (B1.3)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -78,9 +79,16 @@ export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequiremen
       blocked.push({ action: rule.action, reason: 'temporarily_unavailable' }); continue
     }
     if (rule.exposedWhen(s, d)) {
-      // identity gate (A3.6, contradiction #1): an otherwise-exposed commit
-      // with an unmet identity requirement is blocked with a needs payload.
       if (rule.kind === 'commit') {
+        // consent halt (B1): an explicit gdpr_processing withdrawal blocks
+        // every writing commit outside the re-grant/withdraw/escalate floor.
+        const consentCheck = consentBlocksCommit(s.consents, rule.action)
+        if (consentCheck.blocked) {
+          blocked.push({ action: rule.action, reason: consentCheck.reason! })
+          continue
+        }
+        // identity gate (A3.6, contradiction #1): an otherwise-exposed commit
+        // with an unmet identity requirement is blocked with a needs payload.
         const idCheck = checkIdentityRequirement(identityTable, rule.action, s.identity)
         if (!idCheck.ok) {
           blocked.push({ action: rule.action, reason: 'requires_identity', params: { needs: idCheck.needs } })
