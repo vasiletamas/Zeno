@@ -22,7 +22,6 @@ vi.mock('@/lib/tools/resolve-product', () => ({ resolveProductRef: vi.fn(), list
 
 const { changeSelection } = await import('@/lib/tools/handlers/change-selection-handlers')
 const { switchProduct } = await import('@/lib/tools/handlers/product-switch-handler')
-const { deriveState } = await import('@/lib/chat/derive-state')
 const { resolveProductRef } = await import('@/lib/tools/resolve-product')
 const { resolveGroupCodes } = await import('@/lib/engines/question-groups')
 const { calculateProgress } = await import('@/lib/engines/questionnaire-engine')
@@ -63,42 +62,7 @@ describe('navigation integration', () => {
     expect(prismaMock.answer.deleteMany).not.toHaveBeenCalled()
   })
 
-  it('deriveState: COMPLETED application with no quote yields QUOTE phase', async () => {
-    prismaMock.conversation.findUnique.mockResolvedValue({ id: 'conv-1', customerId: 'cust-1', productId: 'p-1', candidateProductId: null, dntSignedAt: new Date('2024-01-01'), dntValidUntil: new Date('2025-01-01') })
-    prismaMock.product.findUnique.mockResolvedValue({ id: 'p-1', code: 'protect', name: { ro: 'Protect', en: 'Protect' } })
-    prismaMock.customer.findUnique.mockResolvedValue({ id: 'cust-1', gdprConsentAt: new Date('2024-01-01'), aiDisclosureAcknowledgedAt: new Date('2024-01-01') })
-    prismaMock.application.findUnique.mockResolvedValue({ id: 'app-1', status: 'COMPLETED', tierId: 'tier-std', levelId: 'lvl-1', includesAddon: false, productId: 'p-1' })
-    prismaMock.pricingTier.findUnique.mockResolvedValue({ id: 'tier-std', code: 'STANDARD' })
-    prismaMock.pricingLevel.findUnique.mockResolvedValue({ id: 'lvl-1', code: 'LEVEL_1' })
-    vi.mocked(resolveGroupCodes).mockResolvedValue(['application'])
-    prismaMock.question.findMany.mockResolvedValue([])
-    prismaMock.answer.findMany.mockResolvedValue([])
-    prismaMock.quote.findFirst.mockResolvedValue(null)
-
-    const s = await deriveState('conv-1')
-
-    expect(s.phase).toBe('QUOTE')
-    expect(s.nextBestAction).toContain('generate_quote')
-  })
-
-  it('deriveState: an ACCEPTED quote yields CLOSING phase', async () => {
-    prismaMock.conversation.findUnique.mockResolvedValue({ id: 'conv-1', customerId: 'cust-1', productId: 'p-1', candidateProductId: null, dntSignedAt: new Date('2024-01-01'), dntValidUntil: new Date('2025-01-01') })
-    prismaMock.product.findUnique.mockResolvedValue({ id: 'p-1', code: 'protect', name: { ro: 'Protect', en: 'Protect' } })
-    prismaMock.customer.findUnique.mockResolvedValue({ id: 'cust-1', gdprConsentAt: new Date('2024-01-01'), aiDisclosureAcknowledgedAt: new Date('2024-01-01') })
-    prismaMock.application.findUnique.mockResolvedValue({ id: 'app-1', status: 'COMPLETED', tierId: 'tier-std', levelId: 'lvl-1', includesAddon: false, productId: 'p-1' })
-    prismaMock.pricingTier.findUnique.mockResolvedValue({ id: 'tier-std', code: 'STANDARD' })
-    prismaMock.pricingLevel.findUnique.mockResolvedValue({ id: 'lvl-1', code: 'LEVEL_1' })
-    vi.mocked(resolveGroupCodes).mockResolvedValue(['application'])
-    prismaMock.question.findMany.mockResolvedValue([])
-    prismaMock.answer.findMany.mockResolvedValue([])
-    prismaMock.quote.findFirst.mockImplementation((arg: { where: { status: string } }) =>
-      Promise.resolve(arg.where.status === 'ACCEPTED' ? { status: 'ACCEPTED', premiumAnnual: 500 } : null) as never,
-    )
-
-    const s = await deriveState('conv-1')
-
-    expect(s.phase).toBe('CLOSING')
-    expect(s.quote?.premiumAnnual).toBe(500)
-    expect(s.nextBestAction).toContain('present the quote')
-  })
+  // The two mocked-prisma deriveState phase cases that lived here were retired
+  // with lib/chat/derive-state.ts (A1.7); phase derivation is covered by the
+  // pure predicate tests in __tests__/lib/engines/derive-and-expose.test.ts.
 })

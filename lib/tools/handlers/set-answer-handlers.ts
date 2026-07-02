@@ -5,14 +5,15 @@
  * within the active DNT + application group codes, validates, upserts the
  * Answer, applies tier/level/addon side-effects for the three selection
  * questions, bumps insight when the question has an insightKey, and returns
- * the fresh DerivedState plus a `save` confirmation.
+ * fresh deriveAndExpose output ({ state, actions }) plus a `save` confirmation.
  */
 
 import { prisma } from '@/lib/db'
 import type { ToolHandler } from '@/lib/tools/types'
 import { validateAnswer } from '@/lib/engines/questionnaire-engine'
 import { resolveGroupCodes, resolveActiveProductId } from '@/lib/engines/question-groups'
-import { deriveState } from '@/lib/chat/derive-state'
+import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
+import { deriveAndExpose } from '@/lib/engines/derive-and-expose'
 import { bumpInsightOnAnswer } from './insight-bump'
 
 export const setAnswer: ToolHandler = async (args, context) => {
@@ -100,11 +101,11 @@ export const setAnswer: ToolHandler = async (args, context) => {
       })
     }
 
-    const state = await deriveState(context.conversationId)
+    const { state, actions } = deriveAndExpose(await loadDomainSnapshot(context.conversationId))
 
     return {
       success: true,
-      data: { state },
+      data: { state, actions },
       message: `Answer saved for question "${questionCode}".`,
       confirmation: {
         category: 'save',

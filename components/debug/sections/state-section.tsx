@@ -2,10 +2,10 @@ import type { DebugTurn } from '@/lib/debug/reducer'
 import { deriveStateDebugRows } from '@/lib/debug/state-rows'
 
 /**
- * Renders the DerivedState snapshot for the turn (phase, next best action,
- * selection, consents, DNT, application progress + missing, quote). The data
- * is carried on the `debug:gate` event's `derivedState` field — the gate phase
- * is where deriveState() runs.
+ * Renders the DerivedStateV3 snapshot for the turn (phase/subphase, next best
+ * action, selection, consents, DNT, application progress + missing, quote).
+ * The data is carried on the `debug:gate` event's `derivedState` field — the
+ * gate phase is where deriveAndExpose() runs.
  */
 export function StateSection({ gate }: { gate: DebugTurn['gate'] }) {
   if (!gate) return <p className="text-xs text-gray-500">No state data yet.</p>

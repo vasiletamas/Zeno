@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { makeSnapshot } from '../../engines/snapshot-fixtures'
 
 const qFindFirstSpy = vi.fn()
 const answerUpsertSpy = vi.fn()
@@ -7,7 +8,7 @@ const appUpdateSpy = vi.fn()
 const tierFindFirstSpy = vi.fn()
 const levelFindFirstSpy = vi.fn()
 const insightFindUniqueSpy = vi.fn()
-const deriveStateSpy = vi.fn()
+const loadSnapshotSpy = vi.fn()
 const resolveCodesSpy = vi.fn()
 const resolveActiveSpy = vi.fn()
 const validateAnswerSpy = vi.fn()
@@ -36,8 +37,8 @@ vi.mock('@/lib/engines/questionnaire-engine', () => ({
   validateAnswer: (...a: unknown[]) => validateAnswerSpy(...a),
 }))
 
-vi.mock('@/lib/chat/derive-state', () => ({
-  deriveState: (...a: unknown[]) => deriveStateSpy(...a),
+vi.mock('@/lib/engines/snapshot-loader', () => ({
+  loadDomainSnapshot: (...a: unknown[]) => loadSnapshotSpy(...a),
 }))
 
 vi.mock('@/lib/tools/handlers/insight-bump', () => ({
@@ -61,7 +62,7 @@ describe('setAnswer', () => {
     tierFindFirstSpy.mockReset()
     levelFindFirstSpy.mockReset()
     insightFindUniqueSpy.mockReset()
-    deriveStateSpy.mockReset()
+    loadSnapshotSpy.mockReset()
     resolveCodesSpy.mockReset()
     resolveActiveSpy.mockReset()
     validateAnswerSpy.mockReset()
@@ -70,17 +71,13 @@ describe('setAnswer', () => {
     resolveActiveSpy.mockResolvedValue('p-protect')
     resolveCodesSpy.mockResolvedValue(['dnt_consent', 'application'])
     insightFindUniqueSpy.mockResolvedValue(null)
-    deriveStateSpy.mockResolvedValue({
-      phase: 'QUESTIONNAIRE',
-      product: { id: 'p-protect', code: 'protect', name: 'Protect' },
-      selection: { tier: null, level: null, addon: null },
-      consents: { gdpr: false, aiDisclosure: false },
-      dnt: { signed: false, validUntil: null },
-      application: { exists: true, status: 'OPEN', answered: 1, required: 5, missing: ['Q2', 'Q3'] },
-      quote: null,
-      answers: { HAS_DEPENDENTS: 'true' },
-      nextBestAction: 'ask the next missing question',
-    })
+    loadSnapshotSpy.mockResolvedValue(
+      makeSnapshot({
+        product: { id: 'p-protect', code: 'protect', insuranceType: 'LIFE' },
+        application: { id: 'app-1', status: 'OPEN', tier: null, level: null, addon: null, answeredCount: 1, requiredCount: 5, missingCodes: ['Q2', 'Q3'] },
+        answers: { HAS_DEPENDENTS: 'true' },
+      }),
+    )
   })
 
   it('saves answer to normal question and returns fresh state', async () => {
@@ -99,8 +96,9 @@ describe('setAnswer', () => {
       create: expect.objectContaining({ value: 'true' }),
       update: expect.objectContaining({ value: 'true' }),
     }))
-    expect(deriveStateSpy).toHaveBeenCalledWith('conv-1')
+    expect(loadSnapshotSpy).toHaveBeenCalledWith('conv-1')
     expect(result.data?.state).toBeDefined()
+    expect(result.data?.actions).toBeDefined()
     expect(result.confirmation).toEqual(expect.objectContaining({
       category: 'save', value: 'true', timestamp: expect.any(String),
     }))
