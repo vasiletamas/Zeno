@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db'
 import type { Prisma } from '@/lib/generated/prisma/client'
 import { resolveGroupCodes } from '@/lib/engines/question-groups'
+import { shouldShowQuestion } from '@/lib/engines/questionnaire-engine'
 import { getOpenCircuitTools } from '@/lib/tools/circuit-state'
 import { deriveConsents, type ConsentEventLike } from '@/lib/customer/consent'
 import type { DomainSnapshot } from './domain-types'
@@ -36,9 +37,20 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     }
   }
   // DNT facts (interim source: Conversation.dntSignedAt/dntValidUntil; Block B re-points to the Dnt aggregate behind this seam)
+  // Counting is VISIBILITY-AWARE (B1.6 fix): conditional questions hidden by
+  // the customer's answers must not keep sign_dnt blocked at n-1/n — the
+  // exposure gate has to agree with the handler's calculateProgress.
   const dntGroupCodes = prod ? ((await resolveGroupCodes(prod.id, 'dnt', db)) ?? []) : []
-  const dntQuestions = dntGroupCodes.length > 0 ? await db.question.findMany({ where: { group: { code: { in: dntGroupCodes } } }, select: { id: true } }) : []
-  const dntAnswered = dntQuestions.length > 0 ? await db.answer.findMany({ where: { conversationId, questionId: { in: dntQuestions.map((q) => q.id) } }, select: { questionId: true } }) : []
+  const dntQuestions = dntGroupCodes.length > 0 ? await db.question.findMany({ where: { group: { code: { in: dntGroupCodes } } }, select: { id: true, parentQuestionId: true, showWhenValue: true } }) : []
+  const dntAnswerRows = dntQuestions.length > 0 ? await db.answer.findMany({ where: { conversationId, questionId: { in: dntQuestions.map((q) => q.id) } }, select: { questionId: true, value: true } }) : []
+  const dntAnswersMap = new Map(dntAnswerRows.map((a) => [a.questionId, a.value]))
+  let dntVisibleTotal = 0
+  let dntVisibleAnswered = 0
+  for (const q of dntQuestions) {
+    if (!shouldShowQuestion({ parentQuestionId: q.parentQuestionId, showWhenValue: q.showWhenValue }, dntAnswersMap)) continue
+    dntVisibleTotal++
+    if (dntAnswersMap.has(q.id)) dntVisibleAnswered++
+  }
   const dntValid = conversation.dntSignedAt != null && conversation.dntValidUntil != null && conversation.dntValidUntil.getTime() > Date.now()
   // quotes: issued (today: DRAFT, non-expired) and accepted
   const issued = application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'DRAFT' }, orderBy: { createdAt: 'desc' } }) : null
@@ -50,7 +62,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     candidateProductId: conversation.candidateProductId,
     identity: { tier: customer.isAnonymous ? 'anonymous' : 'declared', fields: {} }, // B0 provenance store replaces fields
     consents,
-    dnt: { signed: conversation.dntSignedAt != null, valid: dntValid, validUntil: conversation.dntValidUntil?.toISOString() ?? null, coversProductTypes: dntValid && prod ? [prod.insuranceType] : [], answeredCount: dntAnswered.length, totalCount: dntQuestions.length, sessionActive: conversation.dntSignedAt == null && dntAnswered.length > 0 && dntAnswered.length < dntQuestions.length },
+    dnt: { signed: conversation.dntSignedAt != null, valid: dntValid, validUntil: conversation.dntValidUntil?.toISOString() ?? null, coversProductTypes: dntValid && prod ? [prod.insuranceType] : [], answeredCount: dntVisibleAnswered, totalCount: dntVisibleTotal, sessionActive: conversation.dntSignedAt == null && dntVisibleAnswered > 0 && dntVisibleAnswered < dntVisibleTotal },
     application: appState,
     quote: issued ? { id: issued.id, status: issued.status, premiumAnnual: issued.premiumAnnual, validUntil: issued.validUntil.toISOString(), expired: issued.validUntil.getTime() <= Date.now() } : null,
     acceptedQuote: accepted ? { id: accepted.id, acceptedAt: accepted.updatedAt.toISOString() } : null,

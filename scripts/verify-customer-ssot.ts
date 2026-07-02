@@ -11,6 +11,12 @@ import 'dotenv/config'
 import { prisma } from '@/lib/db'
 import { setDeclaredField, setVerifiedField, getProfile, getAge } from '@/lib/customer/profile-service'
 import { claimAndMerge } from '@/lib/customer/claim-merge'
+import { loadDerivedConsents } from '@/lib/customer/consent-service'
+import { executeCommit } from '@/lib/tools/gateway'
+import { resolveGroupCodes } from '@/lib/engines/question-groups'
+import { getNextQuestion } from '@/lib/engines/questionnaire-engine'
+import { saveDntAnswer } from '@/lib/tools/handlers/dnt-handlers'
+import type { ToolContext } from '@/lib/tools/types'
 
 let failures = 0
 function check(name: string, ok: boolean, detail?: string) {
@@ -60,6 +66,54 @@ async function main() {
   check('merge keeps verified name on canonical', canonAfter.fields.name?.value === 'Ștefan Popa' && canonAfter.fields.name?.provenance === 'verified')
   check('merge moves the unique email to canonical', canonAfter.fields.email?.value === email && (await prisma.customer.findUnique({ where: { id: canon.id } }))?.email === email)
   check('duplicate tombstoned with mirrors cleared', tomb?.mergedIntoId === canon.id && tomb?.mergedAt !== null && tomb?.email === null)
+
+  // ---- consent leg (B1.6): grant via sign → withdraw → halt → re-grant ----
+  const product = await prisma.product.findFirstOrThrow({ where: { code: 'protect' } })
+  const codes = (await resolveGroupCodes(product.id, 'dnt', prisma)) ?? []
+  const answerAll = async (conversationId: string, ctx: ToolContext) => {
+    for (let i = 0; i < 100; i++) {
+      const next = await getNextQuestion(codes, conversationId)
+      if (!next) break
+      const q = next.question as { id: string; type: string; options: unknown; validationRules?: unknown; code?: string | null }
+      let answer = 'da'
+      if (q.code === 'DNT_CNP') answer = '1980418089861'
+      else if (q.type === 'NUMBER') answer = '0'
+      else if (Array.isArray(q.options) && q.options[0]) {
+        const first = q.options[0] as { value?: unknown; label?: unknown } | string
+        answer = typeof first === 'string' ? first : String(first.value ?? first.label ?? 'da')
+      } else if (q.type === 'OPEN_ENDED') {
+        const rules = (q.validationRules ?? {}) as { minLength?: number }
+        if (rules.minLength) answer = 'x'.repeat(rules.minLength)
+      }
+      const r = await saveDntAnswer({ questionId: q.id, answer }, ctx)
+      if (!r.success) throw new Error(`consent leg could not answer ${q.code ?? q.id}: ${r.error}`)
+    }
+  }
+  const signViaGateway = async (customerId: string, conversationId: string, ctx: ToolContext) => {
+    const consent = { gdpr: true, aiDisclosure: true }
+    const first = await executeCommit({ tool: 'sign_dnt', args: { consent }, actor: 'gui', customerId, conversationId, toolContext: ctx })
+    if (first.outcome !== 'requires_confirmation' || !first.confirmToken) return first
+    return executeCommit({ tool: 'sign_dnt', args: { consent, confirmToken: first.confirmToken }, actor: 'gui', customerId, conversationId, toolContext: ctx })
+  }
+
+  const cc = await prisma.customer.create({ data: { language: 'ro' } })
+  const conv1 = await prisma.conversation.create({ data: { customerId: cc.id, productId: product.id } })
+  const ctx1 = { customerId: cc.id, conversationId: conv1.id, language: 'ro', db: prisma } as unknown as ToolContext
+  await answerAll(conv1.id, ctx1)
+  const signed1 = await signViaGateway(cc.id, conv1.id, ctx1)
+  const consentsAfterSign = await loadDerivedConsents(cc.id)
+  check('consent granted at signing (sign_dnt via gateway)', signed1.outcome === 'applied' && consentsAfterSign.gdprProcessing && consentsAfterSign.aiDisclosure, JSON.stringify({ signed1: signed1.outcome, consentsAfterSign }))
+
+  const withdrawn = await executeCommit({ tool: 'withdraw_consent', args: { kind: 'gdpr_processing' }, actor: 'gui', customerId: cc.id, conversationId: conv1.id, toolContext: ctx1 })
+  const halted = await executeCommit({ tool: 'set_candidate_product', args: { productId: product.id }, actor: 'gui', customerId: cc.id, conversationId: conv1.id, toolContext: ctx1 })
+  check('withdrawal applies and halts writing commits', withdrawn.outcome === 'applied' && halted.outcome === 'rejected' && halted.reason === 'gdpr_processing_withdrawn', JSON.stringify({ withdrawn: withdrawn.outcome, halted }))
+
+  const conv2 = await prisma.conversation.create({ data: { customerId: cc.id, productId: product.id } })
+  const ctx2 = { customerId: cc.id, conversationId: conv2.id, language: 'ro', db: prisma } as unknown as ToolContext
+  await answerAll(conv2.id, ctx2)
+  const signed2 = await signViaGateway(cc.id, conv2.id, ctx2)
+  const consentsAfterRegrant = await loadDerivedConsents(cc.id)
+  check('re-grant path reachable while withdrawn (exempt DNT commits) and clears the halt', signed2.outcome === 'applied' && consentsAfterRegrant.gdprProcessing && !consentsAfterRegrant.gdprWithdrawn, JSON.stringify({ signed2: signed2.outcome, consentsAfterRegrant }))
 
   console.log(failures === 0 ? '\n==== customer-SSOT: all invariants PASS ====' : `\n==== customer-SSOT: ${failures} FAIL ====`)
   await prisma.$disconnect()
