@@ -16,6 +16,14 @@ export const withdrawConsent: ToolHandler = async (args, context) => {
   const scope = typeof args.scope === 'string' ? args.scope : undefined
   try {
     await appendConsentEvents(context.customerId, [{ kind, action: 'withdrawn', scope }], undefined, context.db)
+    // B2.ADD-1 (closes G16): the signed Dnt rests on gdpr consent — a
+    // gdpr_processing withdrawal flips it WITHDRAWN in the same transaction.
+    if (kind === 'gdpr_processing') {
+      await context.db.dnt.updateMany({
+        where: { customerId: context.customerId, status: 'ACTIVE' },
+        data: { status: 'WITHDRAWN' },
+      })
+    }
     return {
       success: true,
       data: { kind, action: 'withdrawn' },
