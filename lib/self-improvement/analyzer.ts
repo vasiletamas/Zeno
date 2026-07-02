@@ -106,43 +106,12 @@ export async function analyzeScores(): Promise<AnalysisResult> {
     }
   }
 
-  // 5. A/B test results
-  const abTestResults: Record<
-    string,
-    { avgScoreA: number; avgScoreB: number; countA: number; countB: number }
-  > = {}
-  const activeTests = await prisma.aBTestVariant.findMany({
-    where: { isActive: true },
-  })
-
-  for (const test of activeTests) {
-    const variantAScores = sorted.filter(
-      (s) =>
-        s.skillPackSlugs.includes(test.skillPackSlugA) &&
-        !s.skillPackSlugs.includes(test.skillPackSlugB),
-    )
-    const variantBScores = sorted.filter((s) =>
-      s.skillPackSlugs.includes(test.skillPackSlugB),
-    )
-
-    abTestResults[test.id] = {
-      avgScoreA:
-        variantAScores.length > 0
-          ? variantAScores.reduce((sum, s) => sum + s.score, 0) / variantAScores.length
-          : 0,
-      avgScoreB:
-        variantBScores.length > 0
-          ? variantBScores.reduce((sum, s) => sum + s.score, 0) / variantBScores.length
-          : 0,
-      countA: variantAScores.length,
-      countB: variantBScores.length,
-    }
-  }
+  // A/B test results died with the pack A/B machinery (A5.2).
 
   return {
     skillPackPerformance,
     patterns,
-    abTestResults,
+    abTestResults: {}, // pack A/B machinery deleted (A5.2)
     topConversationIds,
     bottomConversationIds,
   }

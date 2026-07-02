@@ -36,7 +36,6 @@ import { shouldRefreshExposure, formatRoundRefreshMessage } from './round-refres
 import { loadTurnContext, type TurnContext } from './turn-context'
 import { inferCandidate, hasAnyCategoryKeyword } from './candidate-inference'
 import { resolveAgent } from './agent-resolver'
-import { getActiveSkillPacks, mergeSkillPackSections } from '@/lib/skills/skill-pack-loader'
 import { executeComplianceCheck, COMPLIANCE_RELEVANT_BY_PHASE, type ComplianceCheckResult } from './compliance-checker'
 import { trackChatStarted } from '@/lib/analytics/events'
 import { estimateTokens, calculateMessageBudget } from '@/lib/chat/token-budget'
@@ -48,7 +47,6 @@ import { CircuitOpenError, TimeoutError } from '@/lib/errors/types'
 import { eventBus, initObservability, getTurnCost, getTurnAnomalies, getTurnToolHistory } from '@/lib/events'
 import { validateSideEffectClaims } from './side-effect-validator'
 import { detectToolNarration, type ToolNarrationResult } from './tool-narration-detector'
-import { applyABTestVariant } from '@/lib/self-improvement/ab-test-assigner'
 import { debugYield, isDev, buildIdentityPayload, recordDebugEvent, type DebugEvent, type DebugGatePayload } from './debug'
 import { serializeToolResultForModel } from './tool-result-serializer'
 import { persistTurnDebug } from './turn-debug-persistence'
@@ -141,7 +139,6 @@ interface TurnState {
   traceId: string
   phases: Record<string, unknown>
   conversationMode: string
-  activeSkillPacks: string[]
   complianceResult: ComplianceCheckResult | null
   debugEvents: DebugEvent[]
 }
@@ -184,7 +181,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     traceId: crypto.randomUUID(),
     phases: {},
     conversationMode: 'SALES',
-    activeSkillPacks: [],
     complianceResult: null,
     debugEvents: [],
   }
@@ -362,7 +358,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   state.workflowSessionId = turnCtx.conversation.workflowSession?.id ?? null
   state.workflowStepCode = turnCtx.conversation.workflowSession?.currentStep.code ?? null
   state.conversationMode = turnCtx.conversation.mode ?? 'SALES'
-  state.activeSkillPacks = turnCtx.conversation.activeSkillPacks ?? []
   state.phases['step1_resolve'] = Date.now() - step1Start
   eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'resolve', durationMs: Date.now() - step1Start })
 
@@ -599,45 +594,9 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   sections.paymentContext = exposure ? loadPaymentContext(exposure.state) : null
   sections.policyContext = exposure ? loadPolicyContext(exposure.state) : null
 
-  // --- Skill pack loading and merging ---
-  // Gate-driven skill-pack recommendations are gone; workflow/pack-driven packs
-  // still flow through the existing activation path below.
-  const recommendedSlugs: string[] = []
-  const activePacks = recommendedSlugs.length > 0
-    ? await getActiveSkillPacks(recommendedSlugs)
-    : []
-
-  state.activeSkillPacks = activePacks.map((p) => p.slug)
-
-  if (state.activeSkillPacks.length > 0) {
-    eventBus.emit({
-      type: 'skillpack:activated',
-      traceId: state.traceId,
-      slugs: state.activeSkillPacks,
-      conversationId: state.conversationId,
-    })
-  }
-
-  // A/B test variant assignment — may swap skill pack slugs
-  let effectivePacks = activePacks
-  if (state.activeSkillPacks.length > 0) {
-    const originalSlugs = state.activeSkillPacks
-    state.activeSkillPacks = await applyABTestVariant(
-      state.activeSkillPacks,
-      state.conversationId,
-    )
-    // Reload packs if A/B test swapped any slugs
-    const slugsChanged = originalSlugs.length !== state.activeSkillPacks.length ||
-      originalSlugs.some((s, i) => s !== state.activeSkillPacks[i])
-    if (slugsChanged) {
-      effectivePacks = await getActiveSkillPacks(state.activeSkillPacks)
-    }
-  }
-
-  // Merge skill pack sections into base sections
-  const mergedSections: PromptSections = effectivePacks.length > 0
-    ? mergeSkillPackSections(sections as unknown as Record<string, string | null>, effectivePacks) as unknown as PromptSections
-    : sections
+  // Pack subsystem deleted (A5.2, M12): gating is owned by the legality
+  // engine, prompt content by the sections map.
+  const mergedSections: PromptSections = sections
 
   // --- Conditional compliance check ---
   // Compliance is triggered deterministically by the pinned derived Phase via
@@ -796,7 +755,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const step7Start = Date.now()
 
   let toolContext = await buildToolContext(state.customerId, state.conversationId, state.language)
-  toolContext.activeSkillPacks = state.activeSkillPacks
   // Server-resolved commit actor (A2.9): every LLM tool-loop call is the
   // agent's; the synthetic branch below overrides per-call with 'gui'.
   toolContext.actor = 'agent'
@@ -1333,7 +1291,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           const refreshed = deriveAndExpose(await loadDomainSnapshot(state.conversationId))
           tools = buildTurnTools(refreshed.actions)
           toolContext = await buildToolContext(state.customerId, state.conversationId, state.language)
-          toolContext.activeSkillPacks = state.activeSkillPacks
           toolContext.actor = 'agent'
           toolContext.exposedTools = refreshed.actions.available
           messages.push({ role: 'system', content: formatRoundRefreshMessage(refreshed.state, refreshed.actions) })
@@ -1501,12 +1458,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   state.phases['step9_background'] = Date.now() - step9Start
   eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'background', durationMs: Date.now() - step9Start })
 
-  // Persist active skill packs on conversation
-  await prisma.conversation.update({
-    where: { id: state.conversationId },
-    data: { activeSkillPacks: state.activeSkillPacks },
-  })
-
   // =============================================
   // STEP 10 — Turn trace (fire-and-forget)
   // =============================================
@@ -1524,7 +1475,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
   // Agent extensibility trace metadata
   state.phases['agentExtensibility'] = {
-    activeSkillPacks: state.activeSkillPacks,
     conversationMode: state.conversationMode,
     complianceResult: state.complianceResult,
   }

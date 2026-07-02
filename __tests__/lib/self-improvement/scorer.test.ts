@@ -24,7 +24,6 @@ describe('scoreConversations', () => {
         id: 'conv-1',
         messageCount: 12,
         mode: 'SALES',
-        activeSkillPacks: ['life-insurance-discovery'],
         application: {
           id: 'app-1',
           quote: {
@@ -58,7 +57,7 @@ describe('scoreConversations', () => {
         totalLatencyMs: 3500,
         anomalyCount: 1,
         mode: 'SALES',
-        skillPackSlugs: ['life-insurance-discovery'],
+        skillPackSlugs: [], // pack subsystem deleted (A5.2)
       }),
     })
   })
@@ -69,7 +68,6 @@ describe('scoreConversations', () => {
         id: 'conv-2',
         messageCount: 8,
         mode: 'SALES',
-        activeSkillPacks: [],
         application: {
           id: 'app-2',
           quote: { id: 'quote-2', policy: null },
@@ -99,7 +97,6 @@ describe('scoreConversations', () => {
         id: 'conv-3',
         messageCount: 3,
         mode: 'SALES',
-        activeSkillPacks: [],
         application: null,
         turnTraces: [{ cost: 0.01, latencyMs: 500, anomalies: [] }],
       },

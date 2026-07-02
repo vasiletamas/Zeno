@@ -8,7 +8,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken, COOKIE_NAME } from '@/lib/auth/jwt'
 import { prisma } from '@/lib/db'
-import { flushSkillPackCache } from '@/lib/skills/skill-pack-loader'
 import type { ProposalDiff } from '@/lib/self-improvement/types'
 
 export async function POST(
@@ -90,37 +89,7 @@ export async function POST(
         break
       }
 
-      case 'SKILLPACK_UPDATE': {
-        if (!diff.skillPackUpdate) {
-          return NextResponse.json({ error: 'Invalid diff for SKILLPACK_UPDATE' }, { status: 400 })
-        }
-        const pack = await prisma.skillPack.findUnique({
-          where: { slug: diff.skillPackUpdate.skillPackSlug },
-        })
-        if (!pack) {
-          return NextResponse.json({ error: 'Skill pack not found' }, { status: 404 })
-        }
-
-        const packScores = await prisma.conversationScore.aggregate({
-          where: { skillPackSlugs: { has: pack.slug } },
-          _avg: { score: true },
-          _count: { score: true },
-        })
-        baselineMetrics = {
-          avgScore: packScores._avg.score ?? 0,
-          sampleSize: packScores._count.score,
-        }
-
-        const sections = pack.promptSections as Record<string, string>
-        sections[diff.skillPackUpdate.sectionKey] = diff.skillPackUpdate.after
-
-        await prisma.skillPack.update({
-          where: { slug: diff.skillPackUpdate.skillPackSlug },
-          data: { promptSections: sections },
-        })
-        flushSkillPackCache()
-        break
-      }
+      // SKILLPACK_UPDATE proposals died with the SkillPack subsystem (A5.2).
 
       case 'INSIGHT':
         break

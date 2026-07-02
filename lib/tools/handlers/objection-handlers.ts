@@ -8,14 +8,6 @@ import { prisma } from '@/lib/db'
 import type { ToolHandler } from '@/lib/tools/types'
 
 // ─────────────────────────────────────────────
-// Pack → insuranceType mapping for the fallback chain
-// ─────────────────────────────────────────────
-const PACK_TO_INSURANCE_TYPE: Record<string, string> = {
-  'life-insurance-discovery': 'LIFE',
-  'life-insurance-closing': 'LIFE',
-}
-
-// ─────────────────────────────────────────────
 // get_objection_strategy
 // ─────────────────────────────────────────────
 
@@ -28,25 +20,10 @@ export const getObjectionStrategy: ToolHandler = async (args, context) => {
       select: { productId: true, candidateProductId: true },
     })
 
-    // Lookup order: productId → candidateProductId → pack-inferred unique catalog match
+    // Lookup order: productId → candidateProductId (the pack-inferred
+    // fallback died with the pack subsystem, A5.2)
     let productId: string | null = conversation?.productId ?? null
     if (!productId) productId = conversation?.candidateProductId ?? null
-
-    if (!productId) {
-      const activePacks = (context as { activeSkillPacks?: string[] }).activeSkillPacks ?? []
-      const insuranceTypes = new Set<string>()
-      for (const slug of activePacks) {
-        const t = PACK_TO_INSURANCE_TYPE[slug]
-        if (t) insuranceTypes.add(t)
-      }
-      if (insuranceTypes.size > 0) {
-        const candidates = await prisma.product.findMany({
-          where: { isActive: true, insuranceType: { in: Array.from(insuranceTypes) } },
-          select: { id: true, insuranceType: true },
-        })
-        if (candidates.length === 1) productId = candidates[0].id
-      }
-    }
 
     if (!productId) {
       return {

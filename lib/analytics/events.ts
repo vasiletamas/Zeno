@@ -45,13 +45,12 @@ export function enrichEventProps(
 
 export function trackChatStarted(
   customerId: string,
-  enrichment?: { conversationMode?: string; activeSkillPacks?: string[]; traceId?: string },
+  enrichment?: { conversationMode?: string; traceId?: string },
 ): void {
   trackEvent('chat_started', customerId, enrichEventProps(
     enrichment?.traceId ?? null,
     {
       ...(enrichment?.conversationMode ? { conversationMode: enrichment.conversationMode } : {}),
-      ...(enrichment?.activeSkillPacks ? { activeSkillPacks: enrichment.activeSkillPacks } : {}),
     },
   ))
 }

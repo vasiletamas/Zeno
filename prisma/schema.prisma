@@ -315,7 +315,6 @@ model Conversation {
   lastActivityAt      DateTime           @default(now())
   metadata            Json?
   mode                String             @default("SALES")
-  activeSkillPacks    String[]           @default([])
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 
@@ -625,26 +624,8 @@ model Agent {
   systemPrompt     String?     @db.Text
   constraints      String?     @db.Text
   isActive         Boolean     @default(true)
-  skillPacks       SkillPack[]
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
-}
-
-model SkillPack {
-  id             String   @id @default(cuid())
-  slug           String   @unique
-  name           String
-  category       String   // PRODUCT, WORKFLOW_PHASE, POST_SALE
-  description    String
-  promptSections Json     // { sectionKey: content }
-  allowedTools   String[]
-  constraints    String?  @db.Text
-  flags          Json?    // { persuasive: boolean, ... }
-  isActive       Boolean  @default(true)
-  priority       Int      @default(0)
-  agents         Agent[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
 }
 
 model ModelCatalog {

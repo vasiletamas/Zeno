@@ -63,7 +63,6 @@ describe('Pipeline Observability Integration', () => {
     bus.emit({ type: 'phase:end', traceId, phase: 'reasoning_gate', durationMs: 250 })
 
     // Skill pack activation
-    bus.emit({ type: 'skillpack:activated', traceId, slugs: ['life-insurance-closing'], conversationId: 'conv-1' })
 
     // Step 4: compliance check
     bus.emit({ type: 'phase:start', traceId, phase: 'context', timestamp: Date.now() })
@@ -109,7 +108,6 @@ describe('Pipeline Observability Integration', () => {
     expect(mockStartSpan).toHaveBeenCalledWith('zeno.tool.get_product_info', expect.any(Object))
 
     // Verify business span events
-    expect(mockAddEvent).toHaveBeenCalledWith('skillpack.activated', expect.objectContaining({ slugs: 'life-insurance-closing' }))
     expect(mockAddEvent).toHaveBeenCalledWith('compliance.result', expect.objectContaining({ passed: true }))
 
     // Verify root span ended with cost
@@ -117,7 +115,7 @@ describe('Pipeline Observability Integration', () => {
     expect(mockSetAttribute).toHaveBeenCalledWith('zeno.latencyMs', 2500)
 
     // Verify total events emitted
-    expect(allEvents.length).toBe(16)
+    expect(allEvents.length).toBe(15)
   })
 
   it('detects anomalies on expensive slow turn', async () => {

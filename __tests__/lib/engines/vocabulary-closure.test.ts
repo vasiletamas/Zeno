@@ -28,4 +28,9 @@ describe('vocabulary closure (taxonomy-closure seed; full gherkin meta-test is B
     const offenders = tsFiles(LIB).filter((p) => /'(SELECTION|CONSENT|CLOSING)'/.test(readFileSync(p, 'utf8')))
     expect(offenders).toEqual([])
   })
+  it('the SkillPack subsystem is gone (M12)', () => {
+    expect(existsSync(path.join(LIB, 'skills/skill-pack-loader.ts'))).toBe(false)
+    const offenders = tsFiles(LIB).filter((p) => /SkillPack|activeSkillPacks/.test(readFileSync(p, 'utf8')))
+    expect(offenders).toEqual([])
+  })
 })

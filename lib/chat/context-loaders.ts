@@ -1025,7 +1025,7 @@ export async function loadAllSections(params: {
     agentKnowledge,
     customerContext,
     coachingBriefing,
-    domainGuidance: null, // populated by mergeSkillPackSections from active packs
+    domainGuidance: null, // former pack-injection slot; the pack subsystem died in A5.2
     workflowInstructions,
     questionnaireContext,
     productContext,

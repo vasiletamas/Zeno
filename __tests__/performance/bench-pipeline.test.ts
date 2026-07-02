@@ -47,7 +47,6 @@ const mockConversation = {
   status: 'ACTIVE',
   messageCount: 2,
   mode: 'SALES',
-  activeSkillPacks: [],
   productId: null,
   customerId: 'cust-bench-1',
   language: 'ro',
@@ -251,21 +250,6 @@ vi.mock('@/lib/tools/pipeline', () => ({
 }))
 
 // ============================================================
-// MOCK: @/lib/skills/skill-pack-loader
-// ============================================================
-
-vi.mock('@/lib/skills/skill-pack-loader', () => ({
-  getActiveSkillPacks: vi.fn(async () => []),
-  mergeSkillPackSections: vi.fn(
-    (sections: Record<string, unknown>) => sections,
-  ),
-  computeAllowedTools: vi.fn(
-    (stepTools: string[]) => stepTools,
-  ),
-  flushSkillPackCache: vi.fn(),
-}))
-
-// ============================================================
 // MOCK: @/lib/chat/compliance-checker
 // ============================================================
 
@@ -343,7 +327,6 @@ function setupDefaultPrismaMocks(overrides?: {
   vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(conversation as never)
   vi.mocked(prisma.customer.findUnique).mockResolvedValue(mockCustomer as never)
   vi.mocked(prisma.message.findMany).mockResolvedValue(messages as never)
-  vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
 
   // Save user message
   vi.mocked(prisma.message.create).mockResolvedValue({ ...mockMessage, id: `msg-new-${Date.now()}` } as never)

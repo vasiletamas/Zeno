@@ -69,7 +69,6 @@ async function main() {
     } : null,
     status: convo.status,
     mode: convo.mode,
-    activeSkillPacks: convo.activeSkillPacks,
     language: convo.language,
     messageCount: convo.messageCount,
     startedAt: convo.startedAt,

@@ -5,7 +5,6 @@ vi.mock('@/lib/db', () => ({
     conversation: { findUniqueOrThrow: vi.fn() },
     customer: { findUnique: vi.fn() },
     message: { findMany: vi.fn() },
-    skillPack: { findMany: vi.fn() },
   },
 }))
 
@@ -21,7 +20,6 @@ const baseConversation = {
   status: 'ACTIVE',
   messageCount: 5,
   mode: 'SALES',
-  activeSkillPacks: ['pack-a'],
   productId: 'prod-1',
   product: { id: 'prod-1', code: 'PROD-1', name: { ro: 'Produs 1', en: 'Product 1' } },
   workflowSession: {
@@ -66,11 +64,6 @@ const rawMessages = [
   { role: 'user', content: 'Hi there', createdAt: new Date('2024-01-01T10:00:01Z') },
 ]
 
-const baseSkillPacks = [
-  { slug: 'life-insurance', description: 'Life insurance skill pack' },
-  { slug: 'upsell', description: 'Upsell tactics' },
-]
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -85,21 +78,18 @@ describe('loadTurnContext', () => {
       vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
       vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
       vi.mocked(prisma.message.findMany).mockResolvedValue(rawMessages as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue(baseSkillPacks as never)
 
       await loadTurnContext('conv-1', 'cust-1')
 
       expect(prisma.conversation.findUniqueOrThrow).toHaveBeenCalledTimes(1)
       expect(prisma.customer.findUnique).toHaveBeenCalledTimes(1)
       expect(prisma.message.findMany).toHaveBeenCalledTimes(1)
-      expect(prisma.skillPack.findMany).toHaveBeenCalledTimes(1)
     })
 
     it('queries conversation by conversationId', async () => {
       vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
       vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
       vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
 
       await loadTurnContext('conv-1', 'cust-1')
 
@@ -112,7 +102,6 @@ describe('loadTurnContext', () => {
       vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
       vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
       vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
 
       await loadTurnContext('conv-1', 'cust-1')
 
@@ -125,7 +114,6 @@ describe('loadTurnContext', () => {
       vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
       vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
       vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
 
       await loadTurnContext('conv-1', 'cust-1')
 
@@ -138,45 +126,10 @@ describe('loadTurnContext', () => {
       )
     })
 
-    it('queries only active skillPacks', async () => {
-      vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
-      vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
-      vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
-
-      await loadTurnContext('conv-1', 'cust-1')
-
-      expect(prisma.skillPack.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { isActive: true },
-        }),
-      )
-    })
-  })
-
-  describe('data flows through correctly', () => {
-    it('returns conversation data with correct shape', async () => {
-      vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
-      vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
-      vi.mocked(prisma.message.findMany).mockResolvedValue(rawMessages as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue(baseSkillPacks as never)
-
-      const ctx = await loadTurnContext('conv-1', 'cust-1')
-
-      expect(ctx.conversation.id).toBe('conv-1')
-      expect(ctx.conversation.status).toBe('ACTIVE')
-      expect(ctx.conversation.messageCount).toBe(5)
-      expect(ctx.conversation.mode).toBe('SALES')
-      expect(ctx.conversation.activeSkillPacks).toEqual(['pack-a'])
-      expect(ctx.conversation.productId).toBe('prod-1')
-      expect(ctx.conversation.product).toEqual({ id: 'prod-1', code: 'PROD-1', name: { ro: 'Produs 1', en: 'Product 1' } })
-    })
-
     it('returns workflowSession with currentStep', async () => {
       vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
       vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
       vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
 
       const ctx = await loadTurnContext('conv-1', 'cust-1')
 
@@ -189,7 +142,6 @@ describe('loadTurnContext', () => {
       vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
       vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
       vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
 
       const ctx = await loadTurnContext('conv-1', 'cust-1')
 
@@ -202,7 +154,6 @@ describe('loadTurnContext', () => {
       vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
       vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
       vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
 
       const ctx = await loadTurnContext('conv-1', 'cust-1')
 
@@ -213,17 +164,6 @@ describe('loadTurnContext', () => {
       expect(ctx.customer.isAnonymous).toBe(false)
     })
 
-    it('returns skillPacks array', async () => {
-      vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
-      vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
-      vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue(baseSkillPacks as never)
-
-      const ctx = await loadTurnContext('conv-1', 'cust-1')
-
-      expect(ctx.activeSkillPacks).toHaveLength(2)
-      expect(ctx.activeSkillPacks[0]).toEqual({ slug: 'life-insurance', description: 'Life insurance skill pack' })
-    })
   })
 
   describe('messages returned in chronological order', () => {
@@ -237,7 +177,6 @@ describe('loadTurnContext', () => {
       vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
       vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
       vi.mocked(prisma.message.findMany).mockResolvedValue(descMessages as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
 
       const ctx = await loadTurnContext('conv-1', 'cust-1')
 
@@ -250,7 +189,6 @@ describe('loadTurnContext', () => {
       vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
       vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
       vi.mocked(prisma.message.findMany).mockResolvedValue(rawMessages as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
 
       const ctx = await loadTurnContext('conv-1', 'cust-1')
 
@@ -266,30 +204,18 @@ describe('loadTurnContext', () => {
       vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
       vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
       vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
 
       const ctx = await loadTurnContext('conv-1', 'cust-1')
 
       expect(ctx.recentMessages).toEqual([])
     })
 
-    it('returns empty activeSkillPacks array when none exist', async () => {
-      vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
-      vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
-      vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
-
-      const ctx = await loadTurnContext('conv-1', 'cust-1')
-
-      expect(ctx.activeSkillPacks).toEqual([])
-    })
 
     it('handles null customer gracefully with anonymous defaults', async () => {
-      const convWithNullMode = { ...baseConversation, mode: null, activeSkillPacks: null }
+      const convWithNullMode = { ...baseConversation, mode: null }
       vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(convWithNullMode as never)
       vi.mocked(prisma.customer.findUnique).mockResolvedValue(null)
       vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
 
       const ctx = await loadTurnContext('conv-1', 'cust-1')
 
@@ -313,7 +239,6 @@ describe('loadTurnContext', () => {
       vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
       vi.mocked(prisma.customer.findUnique).mockResolvedValue(customerWithConsent as never)
       vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
 
       const ctx = await loadTurnContext('conv-1', 'cust-1')
 
@@ -326,7 +251,6 @@ describe('loadTurnContext', () => {
       vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
       vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
       vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
 
       const ctx = await loadTurnContext('conv-1', 'cust-1')
 
@@ -335,27 +259,15 @@ describe('loadTurnContext', () => {
     })
 
     it('defaults mode to SALES when null', async () => {
-      const convWithNullMode = { ...baseConversation, mode: null, activeSkillPacks: null }
+      const convWithNullMode = { ...baseConversation, mode: null }
       vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(convWithNullMode as never)
       vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
       vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
 
       const ctx = await loadTurnContext('conv-1', 'cust-1')
 
       expect(ctx.conversation.mode).toBe('SALES')
     })
 
-    it('defaults activeSkillPacks to [] when null', async () => {
-      const convWithNullPacks = { ...baseConversation, activeSkillPacks: null }
-      vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(convWithNullPacks as never)
-      vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
-      vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
-      vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
-
-      const ctx = await loadTurnContext('conv-1', 'cust-1')
-
-      expect(ctx.conversation.activeSkillPacks).toEqual([])
-    })
   })
 })

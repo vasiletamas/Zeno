@@ -2,7 +2,7 @@
  * Turn Context Loader
  *
  * Consolidates ~10 sequential DB queries across orchestrator Steps 1, 3, and 4
- * into 4 parallel queries executed via Promise.all.
+ * into 3 parallel queries executed via Promise.all.
  */
 
 import { prisma } from '@/lib/db'
@@ -16,7 +16,6 @@ export interface TurnContextConversation {
   status: string
   messageCount: number
   mode: string
-  activeSkillPacks: string[]
   productId: string | null
   product: { id: string; code: string; name: unknown } | null
   candidateProductId: string | null
@@ -69,7 +68,6 @@ export interface TurnContext {
   conversation: TurnContextConversation
   customer: TurnContextCustomer
   recentMessages: TurnContextMessage[]
-  activeSkillPacks: { slug: string; description: string }[]
 }
 
 // =============================================================================
@@ -86,7 +84,7 @@ export async function loadTurnContext(
   conversationId: string,
   customerId: string,
 ): Promise<TurnContext> {
-  const [rawConversation, rawCustomer, rawMessages, rawSkillPacks] = await Promise.all([
+  const [rawConversation, rawCustomer, rawMessages] = await Promise.all([
     // Query 1 — conversation with product, workflowSession (+ currentStep), application (+ quote + policy)
     prisma.conversation.findUniqueOrThrow({
       where: { id: conversationId },
@@ -149,15 +147,6 @@ export async function loadTurnContext(
         createdAt: true,
       },
     }),
-
-    // Query 4 — active skill packs
-    prisma.skillPack.findMany({
-      where: { isActive: true },
-      select: {
-        slug: true,
-        description: true,
-      },
-    }),
   ])
 
   // -------------------------------------------------------------------------
@@ -168,7 +157,6 @@ export async function loadTurnContext(
     status: rawConversation.status,
     messageCount: rawConversation.messageCount,
     mode: (rawConversation.mode as string) ?? 'SALES',
-    activeSkillPacks: (rawConversation.activeSkillPacks as string[]) ?? [],
     productId: rawConversation.productId,
     product: rawConversation.product,
     candidateProductId: rawConversation.candidateProductId,
@@ -212,6 +200,5 @@ export async function loadTurnContext(
     conversation,
     customer,
     recentMessages,
-    activeSkillPacks: rawSkillPacks,
   }
 }

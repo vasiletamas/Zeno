@@ -22,7 +22,7 @@ interface LLMProposalResponse {
   proposals: LLMProposal[]
 }
 
-const VALID_TYPES = new Set(['KNOWLEDGE_CREATE', 'KNOWLEDGE_UPDATE', 'SKILLPACK_UPDATE', 'INSIGHT'])
+const VALID_TYPES = new Set(['KNOWLEDGE_CREATE', 'KNOWLEDGE_UPDATE', 'INSIGHT']) // SKILLPACK_UPDATE retired with the pack subsystem (A5.2)
 
 function isValidProposal(p: unknown): p is LLMProposal {
   if (typeof p !== 'object' || p === null) return false
@@ -56,15 +56,10 @@ export async function generateProposals(analysis: AnalysisResult): Promise<numbe
     ;(transcripts[m.conversationId] ??= []).push({ role: m.role, content: m.content })
   }
 
-  // Load current knowledge and skill packs for context
+  // Load current knowledge for context
   const currentKnowledge = await prisma.agentKnowledge.findMany({
     where: { isActive: true },
     select: { category: true, trigger: true, content: true, successRate: true, sampleSize: true },
-  })
-
-  const currentSkillPacks = await prisma.skillPack.findMany({
-    where: { isActive: true },
-    select: { slug: true, name: true, promptSections: true, constraints: true },
   })
 
   // Build prompt
@@ -79,7 +74,6 @@ export async function generateProposals(analysis: AnalysisResult): Promise<numbe
   const prompt = `You are an AI sales coach analyzing conversation performance for a life insurance sales agent (Zeno).
 
 ## Analysis Summary
-- Skill pack performance: ${JSON.stringify(analysis.skillPackPerformance)}
 - Patterns detected: ${analysis.patterns.join('; ') || 'None'}
 
 ## Top Performing Conversations
@@ -91,9 +85,6 @@ ${bottomTranscripts}
 ## Current Agent Knowledge (${currentKnowledge.length} entries)
 ${JSON.stringify(currentKnowledge.slice(0, 20), null, 2)}
 
-## Current Skill Packs (${currentSkillPacks.length} active)
-${currentSkillPacks.map((sp) => `- ${sp.slug}: ${sp.name}`).join('\n')}
-
 ## Your Task
 Analyze the differences between high and low performing conversations. Generate specific, actionable improvement proposals.
 
@@ -101,7 +92,7 @@ Respond with ONLY valid JSON in this exact format:
 {
   "proposals": [
     {
-      "type": "KNOWLEDGE_CREATE | KNOWLEDGE_UPDATE | SKILLPACK_UPDATE | INSIGHT",
+      "type": "KNOWLEDGE_CREATE | KNOWLEDGE_UPDATE | INSIGHT",
       "title": "Short description",
       "description": "Detailed explanation with evidence from the conversations",
       "diff": {
@@ -114,7 +105,6 @@ Respond with ONLY valid JSON in this exact format:
 
 For KNOWLEDGE_CREATE: diff.create = { category, trigger, content, productId?, workflowStepCode? }
 For KNOWLEDGE_UPDATE: diff.update = { knowledgeId, before: {}, after: {} }
-For SKILLPACK_UPDATE: diff.skillPackUpdate = { skillPackSlug, sectionKey, before, after }
 For INSIGHT: diff.insight = { observation }
 
 Generate 1-5 proposals. Only propose changes you are confident about (>0.6).`

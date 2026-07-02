@@ -8,7 +8,6 @@
  */
 
 import type { SSEEvent } from './stream-handler'
-import type { ReasoningGateInput, ReasoningGateOutput } from './reasoning-gate'
 import type { PromptSections } from './prompt-builder'
 import type { ToolNarrationResult } from './tool-narration-detector'
 import type { TurnContextCustomer } from './turn-context'
@@ -33,8 +32,6 @@ export interface DebugGatePayload {
   traceId: string
   skipped: boolean
   reason?: 'fast_path' | 'synthetic'
-  input?: ReasoningGateInput
-  output?: ReasoningGateOutput
   durationMs: number
   /**
    * The phase derived this turn (replaces the old reasoning-gate output).

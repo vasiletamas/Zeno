@@ -43,13 +43,6 @@ export interface ProposalDiff {
     before: Record<string, unknown>
     after: Record<string, unknown>
   }
-  /** For SKILLPACK_UPDATE */
-  skillPackUpdate?: {
-    skillPackSlug: string
-    sectionKey: string
-    before: string
-    after: string
-  }
   /** For INSIGHT */
   insight?: {
     observation: string

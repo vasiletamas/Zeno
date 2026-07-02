@@ -16,7 +16,6 @@ interface ConversationWithRelations {
   id: string
   messageCount: number
   mode: string
-  activeSkillPacks: string[]
   application: {
     id: string
     quote: {
@@ -102,7 +101,7 @@ export async function scoreConversations(): Promise<number> {
         totalLatencyMs,
         anomalyCount,
         mode: conv.mode,
-        skillPackSlugs: conv.activeSkillPacks,
+        skillPackSlugs: [], // pack subsystem deleted (A5.2); column kept for history
       },
     })
 

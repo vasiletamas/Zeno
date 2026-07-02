@@ -149,7 +149,6 @@ export interface ToolContext {
     currentStepCode: string
     data: unknown
   }
-  activeSkillPacks?: string[]
 }
 
 // ==============================================

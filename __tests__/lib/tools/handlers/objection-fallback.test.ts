@@ -20,11 +20,10 @@ const STRATEGY = {
   isActive: true,
 }
 
-const CONTEXT = (overrides: Partial<{ activeSkillPacks: string[] }> = {}) => ({
+const CONTEXT = () => ({
   conversationId: 'conv-1',
   customerId: 'cust-1',
   language: 'ro' as const,
-  activeSkillPacks: overrides.activeSkillPacks ?? [],
 }) as unknown as Parameters<typeof getObjectionStrategy>[1]
 
 describe('getObjectionStrategy — fallback order', () => {
@@ -56,19 +55,14 @@ describe('getObjectionStrategy — fallback order', () => {
     }))
   })
 
-  it('falls back to pack-inferred catalog match when both productId and candidate are null', async () => {
+  it('no product and no candidate → generic message (the pack-inferred fallback died in A5.2)', async () => {
     convFindUnique.mockResolvedValueOnce({ productId: null, candidateProductId: null })
-    productFindMany.mockResolvedValueOnce([{ id: 'p-protect', insuranceType: 'LIFE' }])
-    strategyFindUnique.mockResolvedValueOnce(STRATEGY)
 
-    const r = await getObjectionStrategy(
-      { objectionType: 'price_base' },
-      CONTEXT({ activeSkillPacks: ['life-insurance-discovery'] }),
-    )
+    const r = await getObjectionStrategy({ objectionType: 'price_base' }, CONTEXT())
 
     expect(r.success).toBe(true)
-    expect(r.data).toMatchObject({ hasStrategy: true })
-    expect(productFindMany).toHaveBeenCalled()
+    expect(r.data).toMatchObject({ hasStrategy: false })
+    expect(productFindMany).not.toHaveBeenCalled()
   })
 
   it('returns generic message when no productId, no candidate, and no pack-inferred match', async () => {
