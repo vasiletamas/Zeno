@@ -148,7 +148,7 @@ Notes:
 
 - [x] 01 A1 — pinned vocabulary, DomainSnapshot loader, deriveAndExpose core (suite 756/756 green; cloud sims run 2026-07-02: pathology1 2/2 CLEAN; advance-flow 0/2 = the documented pre-A3 static-10-tool regression — see ruling in section 10)
 - [x] 02 A2 — CommitResult envelope, gateway, CommitLedger, confirm tokens (2026-07-02 cloud: A2.8 VOID per erratum 0; suite 126 files/780 green, tsc clean; concurrency probe 1-fresh-row OK; advance-flow sim read per §10 ruling — 0 ceremony, 0 envelope-JSON narration, gateway live in chat path with fresh+replay ledger rows)
-- [ ] 03 A3 — orchestrator exposure, executor hard-reject, GUI parity
+- [x] 03 A3 — orchestrator exposure, executor hard-reject, GUI parity (2026-07-02 cloud: **advance-flow 2/2 PASS — the static-10-tool live regression is dead**; suite 133 files/798 green, tsc clean; concurrency probe OK; GUI sign_dnt confirm round-trip verified end-to-end [gui:requires_confirmation → gui:applied]; 0 ceremony, 0 envelope narration; addenda ADD-1/2/3 landed; engineVersion 1.2.0)
 - [ ] 04 A4 — prompt sections rework (M13)
 - [ ] 05 A5 — dead-config cleanup (Workflow machine, SkillPacks)
 - [ ] 06 B0 — CustomerProfile SSOT
