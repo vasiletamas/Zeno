@@ -88,6 +88,17 @@ them).
 
 ## 6. Pathology verification — AFTER the rework (criterion d, A4.5)
 
+Run 2026-07-02 (cloud, live OpenAI), same commands plus advance-flow.
+Verbatim summary lines:
+
 ```
-(appended at A4.5)
+P1: ==== 3/3 trials fully detector-clean ====
+P2: ==== stalls-after-"da" across 2 trials: 0 (lower = better; advances instead of interrogating) ====
+P3: ==== across 3 trials: BLIND choices=0 (want 0), INFORMED choices=3 ====
+P4: ==== 3/3 trials clean (pivots to Protect, no invented categories) ====
+AF: ==== advance-flow: 2/2 trials PASS (advanced into DNT, no confirm-product ceremony) ====
 ```
+
+ALL CLEAN after the rework — identical verdicts to the baseline, and the
+sections rework did not re-introduce advance-flow stalls (2/2). M13 criteria
+a–d all satisfied.
