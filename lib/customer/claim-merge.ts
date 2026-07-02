@@ -27,7 +27,8 @@ export const REPOINTERS: Repointer[] = [
   { table: 'Policy', run: async (tx, d, c) => (await tx.policy.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
   { table: 'Payment', run: async (tx, d, c) => (await tx.payment.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
   { table: 'CustomerInsight', run: async (tx, d, c) => (await tx.customerInsight.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
-  // B1 appends ConsentEvent; B2 appends Dnt + DntSession; B3 appends VerificationChallenge + CustomerDocument
+  { table: 'ConsentEvent', run: async (tx, d, c) => (await tx.consentEvent.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
+  // B2 appends Dnt + DntSession; B3 appends VerificationChallenge + CustomerDocument
 ]
 
 const MIRROR_FIELDS = ['email', 'phone', 'name', 'dateOfBirth'] as const

@@ -22,9 +22,10 @@ async function main() {
           id: true,
           name: true,
           language: true,
-          gdprConsentAt: true,
-          gdprConsentScope: true,
-          aiDisclosureAcknowledgedAt: true,
+          consentEvents: {
+            select: { kind: true, action: true, scope: true, createdAt: true },
+            orderBy: { createdAt: "asc" },
+          },
         },
       },
       application: { select: { id: true, status: true, tierId: true, levelId: true } },

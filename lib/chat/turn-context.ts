@@ -69,7 +69,7 @@ export async function loadTurnContext(
   conversationId: string,
   customerId: string,
 ): Promise<TurnContext> {
-  const [rawConversation, rawCustomer, rawMessages] = await Promise.all([
+  const [rawConversation, rawCustomer, rawConsentEvents, rawMessages] = await Promise.all([
     // Query 1 — conversation with product and application (+ quote + policy)
     prisma.conversation.findUniqueOrThrow({
       where: { id: conversationId },
@@ -100,10 +100,15 @@ export async function loadTurnContext(
         dateOfBirth: true,
         language: true,
         isAnonymous: true,
-        gdprConsentAt: true,
-        gdprConsentScope: true,
-        aiDisclosureAcknowledgedAt: true,
       },
+    }),
+
+    // Query 2b — consent ledger (B1): consent facts are DERIVED from the
+    // append-only ConsentEvent rows, latest event per kind wins
+    prisma.consentEvent.findMany({
+      where: { customerId },
+      orderBy: { createdAt: 'asc' },
+      select: { kind: true, action: true, scope: true, createdAt: true },
     }),
 
     // Query 3 — last 10 messages, newest-first, to be reversed to chronological
@@ -136,17 +141,27 @@ export async function loadTurnContext(
   }
 
   // -------------------------------------------------------------------------
-  // Shape customer — handle null (anonymous) gracefully
+  // Shape customer — handle null (anonymous) gracefully. Consent facts are
+  // derived from the ledger: latest event per kind, granted → its timestamp.
   // -------------------------------------------------------------------------
+  const latestConsent = new Map<string, { action: string; scope: string | null; createdAt: Date }>()
+  for (const e of rawConsentEvents) latestConsent.set(e.kind, e)
+  const granted = (kind: string) => {
+    const e = latestConsent.get(kind)
+    return e?.action === 'granted' ? e : null
+  }
+  const gdprGrant = granted('gdpr_processing')
+  const aiGrant = granted('ai_disclosure')
+
   const customer: TurnContextCustomer = rawCustomer
     ? {
         name: rawCustomer.name ?? null,
         dateOfBirth: rawCustomer.dateOfBirth ?? null,
         language: rawCustomer.language,
         isAnonymous: rawCustomer.isAnonymous,
-        gdprConsentAt: rawCustomer.gdprConsentAt ?? null,
-        gdprConsentScope: rawCustomer.gdprConsentScope ?? null,
-        aiDisclosureAcknowledgedAt: rawCustomer.aiDisclosureAcknowledgedAt ?? null,
+        gdprConsentAt: gdprGrant?.createdAt ?? null,
+        gdprConsentScope: gdprGrant?.scope ?? null,
+        aiDisclosureAcknowledgedAt: aiGrant?.createdAt ?? null,
       }
     : {
         name: null,

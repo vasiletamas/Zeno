@@ -110,6 +110,7 @@ vi.mock('@/lib/db', () => {
   const productFindUnique = vi.fn()
   const questionFindMany = vi.fn()
   const answerFindMany = vi.fn()
+  const consentEventFindMany = vi.fn().mockResolvedValue([])
 
   return {
     prisma: {
@@ -156,6 +157,9 @@ vi.mock('@/lib/db', () => {
       },
       answer: {
         findMany: answerFindMany,
+      },
+      consentEvent: {
+        findMany: consentEventFindMany,
       },
     },
   }

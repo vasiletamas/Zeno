@@ -8,7 +8,7 @@ import { checkIdentityRequirement, IDENTITY_REQUIREMENTS, type IdentityRequireme
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.3.0' // 1.1.0: identity gate (A3.6); 1.2.0: get_application_status retired + flagsForReview (A3.ADD-1); 1.3.0: update_customer_profile retired (B0.1)
+export const engineVersion = '1.4.0' // 1.2.0: get_application_status retired + flagsForReview (A3.ADD-1); 1.3.0: update_customer_profile retired (B0.1); 1.4.0: standalone consent tools retired — capture folds into sign_dnt (B1)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -45,8 +45,6 @@ export const ACTION_RULES: ActionRule[] = [
   { action: 'set_candidate_product', kind: 'commit', exposedWhen: always },
   { action: 'switch_product', kind: 'commit', exposedWhen: (s) => s.product !== null },
   { action: 'collect_customer_field', kind: 'commit', exposedWhen: always },
-  { action: 'record_gdpr_consent', kind: 'commit', exposedWhen: (s) => !s.consents.gdprProcessing },
-  { action: 'acknowledge_ai_disclosure', kind: 'commit', exposedWhen: (s) => !s.consents.aiDisclosure },
   { action: 'start_dnt_questionnaire', kind: 'commit', exposedWhen: (s) => s.product !== null && !s.dnt.valid && s.dnt.answeredCount < s.dnt.totalCount,
     blockedReason: (s) => (s.product === null ? { reason: 'no_product_in_focus' } : null) },
   { action: 'save_dnt_answer', kind: 'commit', exposedWhen: (s) => s.product !== null && !s.dnt.signed && s.dnt.totalCount > 0 && s.dnt.answeredCount < s.dnt.totalCount },

@@ -4,6 +4,7 @@ vi.mock('@/lib/db', () => ({
   prisma: {
     conversation: { findUniqueOrThrow: vi.fn() },
     customer: { findUnique: vi.fn() },
+    consentEvent: { findMany: vi.fn() },
     message: { findMany: vi.fn() },
   },
 }))
@@ -39,9 +40,6 @@ const baseCustomer = {
   dateOfBirth: new Date('1985-06-15'),
   language: 'ro',
   isAnonymous: false,
-  gdprConsentAt: null,
-  gdprConsentScope: null,
-  aiDisclosureAcknowledgedAt: null,
 }
 
 const rawMessages = [
@@ -56,6 +54,8 @@ const rawMessages = [
 describe('loadTurnContext', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Consent ledger defaults to empty; tests that need consent facts mock rows.
+    vi.mocked(prisma.consentEvent.findMany).mockResolvedValue([] as never)
   })
 
   describe('all 4 queries are issued', () => {
@@ -68,6 +68,7 @@ describe('loadTurnContext', () => {
 
       expect(prisma.conversation.findUniqueOrThrow).toHaveBeenCalledTimes(1)
       expect(prisma.customer.findUnique).toHaveBeenCalledTimes(1)
+      expect(prisma.consentEvent.findMany).toHaveBeenCalledTimes(1)
       expect(prisma.message.findMany).toHaveBeenCalledTimes(1)
     })
 
@@ -209,15 +210,13 @@ describe('loadTurnContext', () => {
       expect(ctx.customer.aiDisclosureAcknowledgedAt).toBeNull()
     })
 
-    it('threads customer consent fields through when populated', async () => {
-      const customerWithConsent = {
-        ...baseCustomer,
-        gdprConsentAt: new Date('2026-05-20T12:48:00Z'),
-        gdprConsentScope: 'data_processing_for_quote',
-        aiDisclosureAcknowledgedAt: new Date('2026-05-20T12:45:00Z'),
-      }
+    it('derives consent facts from the ConsentEvent ledger (latest event per kind wins)', async () => {
       vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
-      vi.mocked(prisma.customer.findUnique).mockResolvedValue(customerWithConsent as never)
+      vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
+      vi.mocked(prisma.consentEvent.findMany).mockResolvedValue([
+        { kind: 'gdpr_processing', action: 'granted', scope: 'data_processing_for_quote', createdAt: new Date('2026-05-20T12:48:00Z') },
+        { kind: 'ai_disclosure', action: 'granted', scope: null, createdAt: new Date('2026-05-20T12:45:00Z') },
+      ] as never)
       vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
 
       const ctx = await loadTurnContext('conv-1', 'cust-1')
@@ -225,6 +224,21 @@ describe('loadTurnContext', () => {
       expect(ctx.customer.gdprConsentAt).toEqual(new Date('2026-05-20T12:48:00Z'))
       expect(ctx.customer.gdprConsentScope).toBe('data_processing_for_quote')
       expect(ctx.customer.aiDisclosureAcknowledgedAt).toEqual(new Date('2026-05-20T12:45:00Z'))
+    })
+
+    it('a later withdrawal wins over an earlier grant', async () => {
+      vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(baseConversation as never)
+      vi.mocked(prisma.customer.findUnique).mockResolvedValue(baseCustomer as never)
+      vi.mocked(prisma.consentEvent.findMany).mockResolvedValue([
+        { kind: 'gdpr_processing', action: 'granted', scope: 'sales', createdAt: new Date('2026-05-20T12:48:00Z') },
+        { kind: 'gdpr_processing', action: 'withdrawn', scope: null, createdAt: new Date('2026-05-21T09:00:00Z') },
+      ] as never)
+      vi.mocked(prisma.message.findMany).mockResolvedValue([] as never)
+
+      const ctx = await loadTurnContext('conv-1', 'cust-1')
+
+      expect(ctx.customer.gdprConsentAt).toBeNull()
+      expect(ctx.customer.gdprConsentScope).toBeNull()
     })
 
     it('threads product code and name through', async () => {
