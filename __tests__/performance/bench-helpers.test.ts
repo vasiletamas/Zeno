@@ -191,7 +191,9 @@ describe('createMockProvider', () => {
     const elapsed = Date.now() - start
 
     expect(response.content).toBe('hello world')
-    expect(elapsed).toBeGreaterThanOrEqual(10)
+    // 1ms tolerance: setTimeout can fire up to ~1ms before Date.now() ticks
+    // over, which made this assertion flaky (observed elapsed=9).
+    expect(elapsed).toBeGreaterThanOrEqual(9)
   })
 
   it('chat returns the configured token usage', async () => {
