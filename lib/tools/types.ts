@@ -47,7 +47,6 @@ export interface ToolDefinition {
   requiresConfirmation?: boolean
   customerVisible: boolean
   statusMessage: { ro: string[]; en: string[] } | null
-  alwaysAllowed: boolean
   allowedRoles: UserRole[]
   sideEffects?: boolean     // default true — tools with no side effects can run in parallel
   cacheable?: boolean       // default false — opt-in to result caching

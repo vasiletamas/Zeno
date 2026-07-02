@@ -235,7 +235,6 @@ vi.mock('@/lib/errors/logger', () => ({
 vi.mock('@/lib/tools/registry', () => ({
   getToolDefinition: vi.fn(() => null),
   getToolsForLLM: vi.fn(() => []),
-  isAlwaysAllowed: vi.fn(() => false),
   registerTool: vi.fn(),
 }))
 

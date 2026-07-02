@@ -69,10 +69,6 @@ export function getRegisteredToolNames(): string[] {
   return Array.from(definitions.keys()).sort()
 }
 
-export function isAlwaysAllowed(name: string): boolean {
-  return definitions.get(name)?.alwaysAllowed ?? false
-}
-
 const toolsCache = new LRUCache<string, LLMToolDefinition[]>(5, 5 * 60 * 1000) // 5 min TTL
 
 /**
@@ -374,24 +370,6 @@ const getProductInfoHandler: ToolHandler = async (
 }
 
 // ==============================================
-// ALWAYS-ALLOWED SET
-// ==============================================
-
-const ALWAYS_ALLOWED_SET = new Set([
-  'list_products',
-  'get_product_info',
-  'compare_products',
-  'preview_product_requirements',
-  'get_customer_profile',
-  'update_customer_profile',
-  'get_objection_strategy',
-  'set_candidate_product',
-  'switch_product',
-  'check_dnt_status',
-  'get_current_state',
-])
-
-// ==============================================
 // DEFAULT ROLES
 // ==============================================
 
@@ -399,7 +377,7 @@ const ALL_ROLES: ToolDefinition['allowedRoles'] = ['CUSTOMER', 'OPERATOR', 'ADMI
 const ADMIN_OPERATOR: ToolDefinition['allowedRoles'] = ['OPERATOR', 'ADMIN']
 
 // ==============================================
-// REGISTER ALL 25 TOOLS
+// TOOL REGISTRATIONS — exposure is owned by lib/engines/derive-and-expose.ts
 // ==============================================
 
 // --- Product / Discovery ---
@@ -419,7 +397,6 @@ registerTool('list_products', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: STATUS_PRODUCT_LOOKUP,
-  alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffects: false,
   cacheable: true,
@@ -452,7 +429,6 @@ registerTool('get_product_info', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: STATUS_GET_PRODUCT_INFO,
-  alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffects: false,
   // Not cacheable: output is shaped per customer age, and the tool cache keys
@@ -480,7 +456,6 @@ registerTool('compare_products', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: STATUS_PRODUCT_LOOKUP,
-  alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffects: false,
   cacheable: true,
@@ -503,7 +478,6 @@ registerTool('preview_product_requirements', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffects: false,
   cacheable: false,
@@ -520,7 +494,6 @@ registerTool('get_current_state', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffects: false,
   cacheable: false,
@@ -554,7 +527,6 @@ registerTool('set_candidate_product', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: STATUS_SET_CANDIDATE_PRODUCT,
-  alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
   kind: 'commit',
@@ -576,7 +548,6 @@ registerTool('switch_product', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: STATUS_SWITCH_PRODUCT,
-  alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
   kind: 'commit',
@@ -603,7 +574,6 @@ registerTool('get_objection_strategy', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: STATUS_OBJECTION_STRATEGY,
-  alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffects: false,
   cacheable: true,
@@ -623,7 +593,6 @@ registerTool('get_customer_profile', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffects: false,
   kind: 'read',
@@ -648,7 +617,6 @@ registerTool('update_customer_profile', {
   executionMode: 'background',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   kind: 'commit',
 }, updateCustomerProfile)
@@ -667,7 +635,6 @@ registerTool('check_dnt_status', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffects: false,
   kind: 'read',
@@ -686,7 +653,6 @@ registerTool('start_dnt_questionnaire', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
   kind: 'commit',
@@ -706,7 +672,6 @@ registerTool('save_dnt_answer', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'save',
   kind: 'commit',
@@ -726,7 +691,6 @@ registerTool('sign_dnt', {
   executionMode: 'blocking',
   customerVisible: true,
   statusMessage: STATUS_SIGN_DNT,
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
   kind: 'commit',
@@ -750,7 +714,6 @@ registerTool('start_application', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
   kind: 'commit',
@@ -770,7 +733,6 @@ registerTool('save_application_answer', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'save',
   kind: 'commit',
@@ -793,7 +755,6 @@ registerTool('set_answer', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'save',
   kind: 'commit',
@@ -811,7 +772,6 @@ registerTool('resume_application', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   kind: 'commit',
 }, resumeApplication)
@@ -828,7 +788,6 @@ registerTool('cancel_application', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   kind: 'commit',
 }, cancelApplication)
@@ -850,7 +809,6 @@ registerTool('change_selection', {
     ro: ['Actualizez selecția ta...', 'Salvez noile alegeri', 'Modific pachetul'],
     en: ['Updating your selection...', 'Saving your new choices', 'Modifying your package'],
   },
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
   kind: 'commit',
@@ -870,7 +828,6 @@ registerTool('generate_quote', {
   executionMode: 'blocking',
   customerVisible: true,
   statusMessage: STATUS_GENERATE_QUOTE,
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'quote',
   kind: 'commit',
@@ -890,7 +847,6 @@ registerTool('accept_quote', {
   executionMode: 'blocking',
   customerVisible: true,
   statusMessage: STATUS_ACCEPT_QUOTE,
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
   kind: 'commit',
@@ -909,7 +865,6 @@ registerTool('get_quote_details', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   kind: 'read',
 }, getQuoteDetails)
@@ -924,7 +879,6 @@ registerTool('modify_quote', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   kind: 'commit',
 }, modifyQuote)
@@ -943,7 +897,6 @@ registerTool('check_bd_eligibility', {
   executionMode: 'blocking',
   customerVisible: true,
   statusMessage: STATUS_CHECK_BD_ELIGIBILITY,
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   kind: 'commit',
 }, checkBdEligibility)
@@ -960,7 +913,6 @@ registerTool('initiate_payment', {
   executionMode: 'blocking',
   customerVisible: true,
   statusMessage: STATUS_INITIATE_PAYMENT,
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   kind: 'commit',
 }, initiatePayment)
@@ -981,7 +933,6 @@ registerTool('collect_customer_field', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   kind: 'commit',
 }, collectCustomerField)
@@ -1011,7 +962,6 @@ registerTool('escalate_to_human', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   kind: 'commit',
 }, escalateToHuman)
@@ -1029,7 +979,6 @@ registerTool('profile_extractor', {
   executionMode: 'background',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: false,
   allowedRoles: ADMIN_OPERATOR,
   kind: 'internal',
 }, stubHandler)
@@ -1048,7 +997,6 @@ registerTool('summarizer', {
   executionMode: 'background',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: false,
   allowedRoles: ADMIN_OPERATOR,
   kind: 'internal',
 }, stubHandler)
@@ -1119,7 +1067,6 @@ registerTool('record_gdpr_consent', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffect: 'consent',
   kind: 'commit',
@@ -1135,7 +1082,6 @@ registerTool('acknowledge_ai_disclosure', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffect: 'consent',
   kind: 'commit',

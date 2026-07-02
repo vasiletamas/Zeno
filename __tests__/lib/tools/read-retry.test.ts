@@ -15,7 +15,6 @@ registerTool('__test_flaky_read', {
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
-  alwaysAllowed: false,
   allowedRoles: ['CUSTOMER', 'OPERATOR', 'ADMIN'],
   kind: 'read',
 }, async () => {
