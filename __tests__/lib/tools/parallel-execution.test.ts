@@ -21,14 +21,14 @@ describe('partitionToolCalls', () => {
   it('separates background tools', () => {
     const toolCalls = [
       { id: '1', name: 'get_product_info', arguments: { productCode: 'protect' } },
-      { id: '2', name: 'profile_extractor', arguments: { messageContent: 'test' } },
+      { id: '2', name: 'update_customer_profile', arguments: { occupation: 'test' } },
     ]
 
     const { readOnly, writing, background } = partitionToolCalls(toolCalls)
 
     expect(readOnly).toHaveLength(1)
     expect(background).toHaveLength(1)
-    expect(background[0].name).toBe('profile_extractor')
+    expect(background[0].name).toBe('update_customer_profile')
     expect(writing).toHaveLength(0)
   })
 

@@ -231,15 +231,6 @@ const STATUS_SWITCH_PRODUCT = {
 }
 
 // ==============================================
-// STUB HANDLER (for background-only tools)
-// ==============================================
-
-const stubHandler: ToolHandler = async (): Promise<ToolResult> => ({
-  success: false,
-  error: 'Not yet implemented',
-})
-
-// ==============================================
 // REAL HANDLERS (list_products, get_product_info kept from A2)
 // ==============================================
 
@@ -965,41 +956,6 @@ registerTool('escalate_to_human', {
   allowedRoles: ALL_ROLES,
   kind: 'commit',
 }, escalateToHuman)
-
-registerTool('profile_extractor', {
-  description: 'Extract customer profile information from conversation messages (background).',
-  parameters: {
-    type: 'object',
-    properties: {
-      messageContent: { type: 'string', description: 'Message content to extract profile from.' },
-    },
-    required: ['messageContent'],
-    additionalProperties: false,
-  },
-  executionMode: 'background',
-  customerVisible: false,
-  statusMessage: null,
-  allowedRoles: ADMIN_OPERATOR,
-  kind: 'internal',
-}, stubHandler)
-
-registerTool('summarizer', {
-  description: 'Summarize the conversation when it exceeds the message threshold (background).',
-  parameters: {
-    type: 'object',
-    properties: {
-      conversationId: { type: 'string', description: 'Conversation ID to summarize.' },
-      maxLength: { type: 'number', description: 'Maximum summary length in characters.' },
-    },
-    required: ['conversationId'],
-    additionalProperties: false,
-  },
-  executionMode: 'background',
-  customerVisible: false,
-  statusMessage: null,
-  allowedRoles: ADMIN_OPERATOR,
-  kind: 'internal',
-}, stubHandler)
 
 // ============================================================
 // CONSENT / DISCLOSURE TOOLS (subsystem C)

@@ -146,15 +146,6 @@ const escalateToHumanSchema = z.object({
   priority: z.string().optional(),
 }).strict()
 
-const profileExtractorSchema = z.object({
-  messageContent: z.string().min(1),
-}).strict()
-
-const summarizerSchema = z.object({
-  conversationId: z.string().min(1),
-  maxLength: z.number().min(50).max(2000).optional(),
-}).strict()
-
 // ==============================================
 // SCHEMA REGISTRY
 // ==============================================
@@ -199,8 +190,6 @@ const toolSchemas: Record<string, ZodType> = {
 
   // Utility / Background
   escalate_to_human: escalateToHumanSchema,
-  profile_extractor: profileExtractorSchema,
-  summarizer: summarizerSchema,
 }
 
 // ==============================================
