@@ -77,7 +77,7 @@ export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequiremen
   const available: string[] = []
   const blocked: BlockedAction[] = []
   for (const rule of ACTION_RULES) {
-    if (rule.action !== 'escalate_to_human' && s.circuit.openTools.includes(rule.action)) {
+    if (rule.action !== 'escalate_to_human' && (s.circuit.openTools.includes(rule.action) || s.degraded.includes(`${rule.action}_backend`))) {
       blocked.push({ action: rule.action, reason: 'temporarily_unavailable' }); continue
     }
     if (rule.exposedWhen(s, d)) {

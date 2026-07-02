@@ -183,10 +183,23 @@ export async function executeTool(
   }
 
   try {
-    const result = await withTimeout(
-      () => handler(validation.data ?? {}, context),
-      `tool:${name}`,
-    )
+    const runOnce = () => withTimeout(() => handler(validation.data ?? {}, context), `tool:${name}`)
+    let result: ToolResult
+    try {
+      result = await runOnce()
+    } catch (err: unknown) {
+      // M10 retry policy (A3.ADD-2): READS may retry exactly once on a
+      // transient infra failure; commits never auto-retry (gateway-owned —
+      // resubmission replays via the ledger).
+      if (!(err instanceof TimeoutError)) throw err
+      logWarn({
+        layer: 'tool',
+        category: 'transient_retry',
+        message: `Read tool "${name}" timed out — retrying once`,
+        context: { toolName: name },
+      })
+      result = await runOnce()
+    }
     const durationMs = Date.now() - execStart
 
     circuit.recordSuccess()

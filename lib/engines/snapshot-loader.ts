@@ -54,6 +54,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     eligibility: { verdict: 'unknown' }, suitability: { verdict: 'unknown' },
     openItems: [], // M2 (Block B) wires openItems
     circuit: { openTools: getOpenCircuitTools() }, // M10 degraded-mode input (A2.7)
+    degraded: [], // backend circuits land with their blocks (payment provider in D3)
     answers: {},
   }
 }

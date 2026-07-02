@@ -30,7 +30,13 @@ export interface DomainSnapshot {
   eligibility: { verdict: 'eligible' | 'ineligible' | 'unknown' } // engine lands per contradiction #9 (other block)
   suitability: { verdict: 'suitable' | 'conditionally_suitable' | 'unsuitable' | 'unknown' } // M7 (other block)
   openItems: Array<{ kind: string; refId: string }>
-  circuit: { openTools: string[] } // M10 input to exposure
+  circuit: { openTools: string[] } // M10 input to exposure (per-tool circuits)
+  /**
+   * Degraded BACKENDS (A3.ADD-2, M10.3): '<tool>_backend' entries block the
+   * matching tool with temporarily_unavailable. Backend circuits land with
+   * their blocks (e.g. the payment provider in D3); the loader stubs [].
+   */
+  degraded: string[]
   answers: Record<string, string>
 }
 
