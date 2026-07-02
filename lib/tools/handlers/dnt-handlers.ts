@@ -4,7 +4,6 @@
  * check_dnt_status, start_dnt_questionnaire, save_dnt_answer, sign_dnt
  */
 
-import { prisma } from '@/lib/db'
 import {
   getNextQuestion,
   validateAnswer,
@@ -33,7 +32,7 @@ export const checkDntStatus: ToolHandler = async (_args, context) => {
     const progress = await calculateProgress(codes, conversationId)
 
     // Read signing state from Conversation
-    const conv = await prisma.conversation.findUnique({
+    const conv = await context.db.conversation.findUnique({
       where: { id: conversationId },
       select: { dntSignedAt: true, dntValidUntil: true },
     })
@@ -136,7 +135,7 @@ export const saveDntAnswer: ToolHandler = async (args, context) => {
     let questionMeta: { type: string; options: unknown; validationRules: unknown } | null = null
 
     if (questionId) {
-      const q = await prisma.question.findUnique({ where: { id: questionId } })
+      const q = await context.db.question.findUnique({ where: { id: questionId } })
       if (!q) return { success: false, error: 'Question not found.' }
       questionMeta = { type: q.type, options: q.options, validationRules: q.validationRules }
     } else {
@@ -159,14 +158,14 @@ export const saveDntAnswer: ToolHandler = async (args, context) => {
     }
 
     // Refetch question with group + insightKey (needed for insight bump)
-    const questionWithGroup = await prisma.question.findUnique({
+    const questionWithGroup = await context.db.question.findUnique({
       where: { id: questionId! },
       include: { group: true },
     })
 
     // Capture pre-existing insight (if any)
     const priorInsight = questionWithGroup?.insightKey
-      ? await prisma.customerInsight.findUnique({
+      ? await context.db.customerInsight.findUnique({
           where: {
             customerId_key: { customerId: context.customerId, key: questionWithGroup.insightKey },
           },
@@ -174,7 +173,7 @@ export const saveDntAnswer: ToolHandler = async (args, context) => {
       : null
 
     // Upsert answer
-    await prisma.answer.upsert({
+    await context.db.answer.upsert({
       where: {
         questionId_conversationId: {
           questionId: questionId!,
@@ -295,7 +294,7 @@ export const signDnt: ToolHandler = async (args, context) => {
     const now = new Date()
     const validUntil = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000)
 
-    await prisma.conversation.update({
+    await context.db.conversation.update({
       where: { id: context.conversationId },
       data: { dntSignedAt: now, dntValidUntil: validUntil },
     })

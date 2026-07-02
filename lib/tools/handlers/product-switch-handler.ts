@@ -5,7 +5,6 @@
  * carry over automatically (Answer rows are keyed by Question).
  */
 
-import { prisma } from '@/lib/db'
 import type { ToolHandler } from '@/lib/tools/types'
 import { resolveProductRef, listAvailableProductRefs } from '@/lib/tools/resolve-product'
 import { resolveGroupCodes } from '@/lib/engines/question-groups'
@@ -32,12 +31,12 @@ export const switchProduct: ToolHandler = async (args, context) => {
     }
 
     // Point the conversation at the new product.
-    await prisma.conversation.update({
+    await context.db.conversation.update({
       where: { id: context.conversationId },
       data: { productId: ref.id },
     })
 
-    const application = await prisma.application.findUnique({
+    const application = await context.db.application.findUnique({
       where: { conversationId: context.conversationId },
       select: {
         id: true,
@@ -56,7 +55,7 @@ export const switchProduct: ToolHandler = async (args, context) => {
       const codes = await resolveGroupCodes(ref.id, 'application')
       const progress = await calculateProgress(codes, context.conversationId)
 
-      await prisma.application.update({
+      await context.db.application.update({
         where: { conversationId: context.conversationId },
         data: {
           tierId: null,
@@ -71,12 +70,12 @@ export const switchProduct: ToolHandler = async (args, context) => {
     // and expire it. Scoping through the application relation means this returns
     // null when no application exists. Only DRAFT is expired — ACCEPTED (already
     // in the CLOSING phase) is left intact. Status is re-checked explicitly.
-    const draftQuote = await prisma.quote.findFirst({
+    const draftQuote = await context.db.quote.findFirst({
       where: { application: { conversationId: context.conversationId }, status: 'DRAFT' },
       select: { id: true, status: true },
     })
     if (draftQuote && draftQuote.status === 'DRAFT') {
-      await prisma.quote.update({
+      await context.db.quote.update({
         where: { id: draftQuote.id },
         data: { status: 'EXPIRED' },
       })

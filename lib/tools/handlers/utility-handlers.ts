@@ -4,7 +4,6 @@
  * escalate_to_human
  */
 
-import { prisma } from '@/lib/db'
 import type { ToolHandler } from '@/lib/tools/types'
 
 // ─────────────────────────────────────────────
@@ -17,7 +16,7 @@ export const escalateToHuman: ToolHandler = async (args, context) => {
 
   try {
     // Update Conversation status -> IDLE
-    await prisma.conversation.update({
+    await context.db.conversation.update({
       where: { id: context.conversationId },
       data: { status: 'IDLE' },
     })

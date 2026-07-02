@@ -5,7 +5,6 @@
  * resume_application, cancel_application
  */
 
-import { prisma } from '@/lib/db'
 import {
   getNextQuestion,
   validateAnswer,
@@ -32,14 +31,14 @@ export const startApplication: ToolHandler = async (args, context) => {
     const levelCode = args.levelCode as string | undefined
     const includesAddon = args.includesAddon as boolean | undefined
 
-    const conv = await prisma.conversation.findUnique({
+    const conv = await context.db.conversation.findUnique({
       where: { id: context.conversationId },
       select: { dntSignedAt: true, dntValidUntil: true, productId: true, candidateProductId: true },
     })
     const dntValid = !!conv?.dntSignedAt && (!conv.dntValidUntil || conv.dntValidUntil > new Date())
     if (!dntValid) return { success: false, error: 'DNT must be signed before starting an application.' }
 
-    const existing = await prisma.application.findUnique({ where: { conversationId: context.conversationId } })
+    const existing = await context.db.application.findUnique({ where: { conversationId: context.conversationId } })
     if (existing && existing.status === 'OPEN') {
       return { success: true, data: { alreadyExists: true, applicationId: existing.id }, message: 'An open application already exists for this conversation.' }
     }
@@ -49,7 +48,7 @@ export const startApplication: ToolHandler = async (args, context) => {
 
     let tierId: string | null = null
     if (tierCode) {
-      const tier = await prisma.pricingTier.findFirst({ where: { productId, code: tierCode } })
+      const tier = await context.db.pricingTier.findFirst({ where: { productId, code: tierCode } })
       if (!tier) return { success: false, error: `Pricing tier "${tierCode}" not found for this product. Provide a valid tier code.` }
       tierId = tier.id
     }
@@ -57,7 +56,7 @@ export const startApplication: ToolHandler = async (args, context) => {
     let levelId: string | null = null
     if (levelCode) {
       if (!tierId) return { success: false, error: 'levelCode requires tierCode to be provided first.' }
-      const level = await prisma.pricingLevel.findFirst({ where: { tierId, code: levelCode } })
+      const level = await context.db.pricingLevel.findFirst({ where: { tierId, code: levelCode } })
       if (!level) return { success: false, error: `Pricing level "${levelCode}" not found for the selected tier. Provide a valid level code.` }
       levelId = level.id
     }
@@ -65,7 +64,7 @@ export const startApplication: ToolHandler = async (args, context) => {
     const codes = await resolveGroupCodes(productId, 'application')
     const progress = await calculateProgress(codes, context.conversationId)
 
-    const application = await prisma.application.create({
+    const application = await context.db.application.create({
       data: {
         conversationId: context.conversationId,
         customerId: context.customerId,
@@ -81,9 +80,9 @@ export const startApplication: ToolHandler = async (args, context) => {
 
     // Record the conversational selections as Answers so getNextQuestion skips them.
     const recordSelection = async (questionCode: string, value: string) => {
-      const q = await prisma.question.findFirst({ where: { code: questionCode, group: { code: { in: codes } } } })
+      const q = await context.db.question.findFirst({ where: { code: questionCode, group: { code: { in: codes } } } })
       if (!q) return
-      await prisma.answer.upsert({
+      await context.db.answer.upsert({
         where: { questionId_conversationId: { questionId: q.id, conversationId: context.conversationId } },
         create: { questionId: q.id, conversationId: context.conversationId, value },
         update: { value, answeredAt: new Date() },
@@ -95,7 +94,7 @@ export const startApplication: ToolHandler = async (args, context) => {
     if (includesAddon !== undefined) await recordSelection('BD_ADDON_INTEREST', String(includesAddon))
 
     if (context.product?.id !== productId) {
-      await prisma.conversation.update({ where: { id: context.conversationId }, data: { productId } })
+      await context.db.conversation.update({ where: { id: context.conversationId }, data: { productId } })
     }
 
     const result = await getNextQuestion(codes, context.conversationId)
@@ -130,7 +129,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
 
   try {
     // Find the active application
-    const application = await prisma.application.findUnique({
+    const application = await context.db.application.findUnique({
       where: { conversationId: context.conversationId },
     })
     if (!application || application.status !== 'OPEN') {
@@ -157,14 +156,14 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
     const currentQuestion = currentResult.question
 
     // Refetch question with group + insightKey (needed for insight bump)
-    const questionMeta = await prisma.question.findUnique({
+    const questionMeta = await context.db.question.findUnique({
       where: { id: currentQuestion.id },
       include: { group: true },
     })
 
     // Capture pre-existing insight (if any) to detect confirmed/denied for bd_medical
     const priorInsight = questionMeta?.insightKey
-      ? await prisma.customerInsight.findUnique({
+      ? await context.db.customerInsight.findUnique({
           where: {
             customerId_key: { customerId: context.customerId, key: questionMeta.insightKey },
           },
@@ -186,7 +185,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
     // If escalate: pause application
     if (flagResult.flagged && flagResult.action === 'escalate') {
       // Save answer first
-      await prisma.answer.upsert({
+      await context.db.answer.upsert({
         where: {
           questionId_conversationId: {
             questionId: currentQuestion.id,
@@ -213,7 +212,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
         action: flagResult.action,
       }
 
-      await prisma.application.update({
+      await context.db.application.update({
         where: { id: application.id },
         data: {
           status: 'PAUSED',
@@ -242,7 +241,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
         reason: flagResult.reason,
         action: 'flag',
       }
-      await prisma.application.update({
+      await context.db.application.update({
         where: { id: application.id },
         data: {
           flagsForReview: JSON.parse(JSON.stringify([...existingFlags, newFlag])),
@@ -251,7 +250,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
     }
 
     // Save answer
-    await prisma.answer.upsert({
+    await context.db.answer.upsert({
       where: {
         questionId_conversationId: {
           questionId: currentQuestion.id,
@@ -278,7 +277,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
 
     if (effectiveCode === 'PACKAGE_CHOICE') {
       // Resolve PricingTier by answer value (e.g., "standard" or "optim")
-      const tier = await prisma.pricingTier.findFirst({
+      const tier = await context.db.pricingTier.findFirst({
         where: { productId: application.productId, code: validation.normalizedValue },
       })
       if (tier) updateData.tierId = tier.id
@@ -288,7 +287,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
     if (effectiveCode === 'PREMIUM_LEVEL') {
       // Resolve PricingLevel by answer value (e.g., "level_1")
       if (application.tierId) {
-        const level = await prisma.pricingLevel.findFirst({
+        const level = await context.db.pricingLevel.findFirst({
           where: { tierId: application.tierId, code: validation.normalizedValue },
         })
         if (level) updateData.levelId = level.id
@@ -300,7 +299,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
       updateData.includesAddon = validation.normalizedValue === 'true'
     }
 
-    await prisma.application.update({
+    await context.db.application.update({
       where: { id: application.id },
       data: updateData,
     })
@@ -327,7 +326,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
 
     if (!nextResult) {
       // Mark application as COMPLETED
-      await prisma.application.update({
+      await context.db.application.update({
         where: { id: application.id },
         data: { status: 'COMPLETED', completedAt: new Date() },
       })
@@ -391,7 +390,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
 
 export const getApplicationStatus: ToolHandler = async (_args, context) => {
   try {
-    const application = await prisma.application.findUnique({
+    const application = await context.db.application.findUnique({
       where: { conversationId: context.conversationId },
     })
 
@@ -431,7 +430,7 @@ export const getApplicationStatus: ToolHandler = async (_args, context) => {
 
 export const resumeApplication: ToolHandler = async (_args, context) => {
   try {
-    const application = await prisma.application.findUnique({
+    const application = await context.db.application.findUnique({
       where: { conversationId: context.conversationId },
     })
 
@@ -443,7 +442,7 @@ export const resumeApplication: ToolHandler = async (_args, context) => {
     }
 
     // Set to OPEN
-    await prisma.application.update({
+    await context.db.application.update({
       where: { id: application.id },
       data: { status: 'OPEN' },
     })
@@ -497,7 +496,7 @@ export const cancelApplication: ToolHandler = async (args, context) => {
   const reason = (args.reason as string | undefined) ?? 'cancelled'
 
   try {
-    const application = await prisma.application.findUnique({
+    const application = await context.db.application.findUnique({
       where: { conversationId: context.conversationId },
     })
 
@@ -508,7 +507,7 @@ export const cancelApplication: ToolHandler = async (args, context) => {
       }
     }
 
-    await prisma.application.update({
+    await context.db.application.update({
       where: { id: application.id },
       data: { status: 'COMPLETED', completedAt: new Date() },
     })

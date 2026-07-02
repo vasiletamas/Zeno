@@ -34,6 +34,7 @@ vi.mock('@/lib/engines/question-groups', () => ({
 const { startApplication } = await import('@/lib/tools/handlers/application-handlers')
 
 const CONTEXT = {
+  db: (await import('@/lib/db')).prisma,
   conversationId: 'conv-1', customerId: 'cust-1', language: 'ro' as const,
 } as unknown as Parameters<typeof startApplication>[1]
 

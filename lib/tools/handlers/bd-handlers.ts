@@ -4,7 +4,6 @@
  * check_bd_eligibility
  */
 
-import { prisma } from '@/lib/db'
 import type { ToolHandler } from '@/lib/tools/types'
 
 const BD_GROUP_CODES = ['bd_medical']
@@ -16,7 +15,7 @@ const BD_GROUP_CODES = ['bd_medical']
 export const checkBdEligibility: ToolHandler = async (_args, context) => {
   try {
     // Load all BD medical questions
-    const groups = await prisma.questionGroup.findMany({
+    const groups = await context.db.questionGroup.findMany({
       where: { code: { in: BD_GROUP_CODES } },
     })
     if (groups.length === 0) {
@@ -25,14 +24,14 @@ export const checkBdEligibility: ToolHandler = async (_args, context) => {
 
     const groupIds = groups.map(g => g.id)
 
-    const questions = await prisma.question.findMany({
+    const questions = await context.db.question.findMany({
       where: { groupId: { in: groupIds } },
       orderBy: { orderIndex: 'asc' },
     })
 
     // Load answers for this conversation
     const questionIds = questions.map(q => q.id)
-    const answers = await prisma.answer.findMany({
+    const answers = await context.db.answer.findMany({
       where: {
         conversationId: context.conversationId,
         questionId: { in: questionIds },
@@ -51,14 +50,14 @@ export const checkBdEligibility: ToolHandler = async (_args, context) => {
     const hasPositiveAnswer = answers.some(a => a.value === 'true')
 
     // Load application for this conversation
-    const application = await prisma.application.findUnique({
+    const application = await context.db.application.findUnique({
       where: { conversationId: context.conversationId },
     })
 
     if (hasPositiveAnswer) {
       // Reject BD addon
       if (application) {
-        await prisma.application.update({
+        await context.db.application.update({
           where: { id: application.id },
           data: { includesAddon: false },
         })

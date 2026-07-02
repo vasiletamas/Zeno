@@ -1075,7 +1075,7 @@ registerTool('summarizer', {
 const recordGdprConsentHandler: ToolHandler = async (args, context) => {
   const scope = typeof args.scope === 'string' ? args.scope : 'data_processing'
   try {
-    const updated = await prisma.customer.update({
+    const updated = await context.db.customer.update({
       where: { id: context.customerId },
       data: { gdprConsentAt: new Date(), gdprConsentScope: scope },
       select: { gdprConsentAt: true, gdprConsentScope: true },
@@ -1099,7 +1099,7 @@ const recordGdprConsentHandler: ToolHandler = async (args, context) => {
 
 const acknowledgeAiDisclosureHandler: ToolHandler = async (_args, context) => {
   try {
-    const updated = await prisma.customer.update({
+    const updated = await context.db.customer.update({
       where: { id: context.customerId },
       data: { aiDisclosureAcknowledgedAt: new Date() },
       select: { aiDisclosureAcknowledgedAt: true },

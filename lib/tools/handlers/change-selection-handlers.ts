@@ -3,7 +3,6 @@
  * (same product). Expires any DRAFT quote so a fresh one is generated.
  */
 
-import { prisma } from '@/lib/db'
 import type { ToolHandler } from '@/lib/tools/types'
 
 export const changeSelection: ToolHandler = async (args, context) => {
@@ -17,7 +16,7 @@ export const changeSelection: ToolHandler = async (args, context) => {
       return { success: false, error: 'No changes requested. Specify at least one of tier, level, or addon.' }
     }
 
-    const application = await prisma.application.findUnique({
+    const application = await context.db.application.findUnique({
       where: { conversationId: context.conversationId },
     })
     if (!application) {
@@ -35,7 +34,7 @@ export const changeSelection: ToolHandler = async (args, context) => {
     let newLevelCode: string | null = null
 
     if (tierArg) {
-      const tier = await prisma.pricingTier.findFirst({
+      const tier = await context.db.pricingTier.findFirst({
         where: { productId: application.productId, code: tierArg },
       })
       if (!tier) {
@@ -53,7 +52,7 @@ export const changeSelection: ToolHandler = async (args, context) => {
     if (levelArg) {
       // Level codes are only unique within a tier; scope by the effective tier.
       const effectiveTierId = newTierId ?? application.tierId
-      const level = await prisma.pricingLevel.findFirst({
+      const level = await context.db.pricingLevel.findFirst({
         where: { tierId: effectiveTierId ?? undefined, code: levelArg },
       })
       if (!level) {
@@ -83,21 +82,21 @@ export const changeSelection: ToolHandler = async (args, context) => {
     }
 
     // Expire any existing DRAFT quote (exactly once).
-    const existingQuote = await prisma.quote.findUnique({ where: { applicationId: application.id } })
+    const existingQuote = await context.db.quote.findUnique({ where: { applicationId: application.id } })
     const quoteExpired = !!existingQuote && existingQuote.status === 'DRAFT'
     if (quoteExpired && existingQuote) {
-      await prisma.quote.update({ where: { id: existingQuote.id }, data: { status: 'EXPIRED' } })
+      await context.db.quote.update({ where: { id: existingQuote.id }, data: { status: 'EXPIRED' } })
     }
 
     // Upsert the selection answers for the changed fields.
     if (answerUpserts.length > 0) {
       const questionCodes = answerUpserts.map((a) => a.code)
-      const questions = await prisma.question.findMany({ where: { code: { in: questionCodes } } })
+      const questions = await context.db.question.findMany({ where: { code: { in: questionCodes } } })
       const questionByCode = new Map(questions.map((q) => [q.code, q]))
       for (const a of answerUpserts) {
         const q = questionByCode.get(a.code)
         if (q) {
-          await prisma.answer.upsert({
+          await context.db.answer.upsert({
             where: { questionId_conversationId: { questionId: q.id, conversationId: context.conversationId } },
             create: { questionId: q.id, conversationId: context.conversationId, value: a.value },
             update: { value: a.value, answeredAt: new Date() },
@@ -106,7 +105,7 @@ export const changeSelection: ToolHandler = async (args, context) => {
       }
     }
 
-    await prisma.application.update({ where: { id: application.id }, data: updateData })
+    await context.db.application.update({ where: { id: application.id }, data: updateData })
 
     const changes: string[] = []
     if (tierChanged) changes.push(`tier: ${newTierCode}`)

@@ -14,6 +14,7 @@ const baseContext: ToolContext = {
   customerId: 'cust-1',
   conversationId: 'conv-1',
   language: 'ro',
+  db: prisma,
 }
 
 describe('record_gdpr_consent tool', () => {

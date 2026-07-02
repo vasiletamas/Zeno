@@ -29,6 +29,7 @@ vi.mock('@/lib/db', () => ({
 const { changeSelection } = await import('@/lib/tools/handlers/change-selection-handlers')
 
 const CONTEXT = {
+  db: (await import('@/lib/db')).prisma,
   conversationId: 'conv-1',
   customerId: 'cust-1',
   language: 'ro' as const,

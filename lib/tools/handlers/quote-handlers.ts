@@ -4,7 +4,6 @@
  * generate_quote, get_quote_details, accept_quote, modify_quote
  */
 
-import { prisma } from '@/lib/db'
 import { calculateQuote } from '@/lib/engines/quote-engine'
 import type { QuoteInput } from '@/lib/engines/quote-engine'
 import { getNextQuestion } from '@/lib/engines/questionnaire-engine'
@@ -28,7 +27,7 @@ export const generateQuote: ToolHandler = async (_args, context) => {
     }
 
     // Load application (must be COMPLETED)
-    const application = await prisma.application.findUnique({
+    const application = await context.db.application.findUnique({
       where: { conversationId: context.conversationId },
     })
 
@@ -51,7 +50,7 @@ export const generateQuote: ToolHandler = async (_args, context) => {
     }
 
     // Load PricingLevel with PricingTier
-    const pricingLevel = await prisma.pricingLevel.findUnique({
+    const pricingLevel = await context.db.pricingLevel.findUnique({
       where: { id: application.levelId },
       include: { tier: true },
     })
@@ -61,7 +60,7 @@ export const generateQuote: ToolHandler = async (_args, context) => {
 
     // Calculate customer age from Customer.dateOfBirth
     let customerAge = 30 // fallback
-    const customer = await prisma.customer.findUnique({
+    const customer = await context.db.customer.findUnique({
       where: { id: application.customerId },
     })
     if (customer?.dateOfBirth) {
@@ -75,7 +74,7 @@ export const generateQuote: ToolHandler = async (_args, context) => {
     }
 
     // Load base CoverageAmounts for this pricing level
-    const baseCoverageAmounts = await prisma.coverageAmount.findMany({
+    const baseCoverageAmounts = await context.db.coverageAmount.findMany({
       where: { pricingLevelId: pricingLevel.id },
       include: { coverageType: true },
     })
@@ -109,7 +108,7 @@ export const generateQuote: ToolHandler = async (_args, context) => {
 
     if (application.includesAddon) {
       // Find addon for this product
-      const addon = await prisma.addon.findFirst({
+      const addon = await context.db.addon.findFirst({
         where: { productId: application.productId, isActive: true },
         include: {
           pricingRules: true,
@@ -138,11 +137,11 @@ export const generateQuote: ToolHandler = async (_args, context) => {
 
     // Detect payment frequency from application answers
     let paymentFrequency: 'annual' | 'semi_annual' | 'quarterly' = 'annual'
-    const paymentQuestion = await prisma.question.findFirst({
+    const paymentQuestion = await context.db.question.findFirst({
       where: { code: 'PAYMENT_FREQUENCY' },
     })
     if (paymentQuestion) {
-      const paymentAnswer = await prisma.answer.findUnique({
+      const paymentAnswer = await context.db.answer.findUnique({
         where: {
           questionId_conversationId: {
             questionId: paymentQuestion.id,
@@ -159,7 +158,7 @@ export const generateQuote: ToolHandler = async (_args, context) => {
     }
 
     // Load product for quoteValidityDays
-    const product = await prisma.product.findUnique({
+    const product = await context.db.product.findUnique({
       where: { id: application.productId },
     })
 
@@ -186,7 +185,7 @@ export const generateQuote: ToolHandler = async (_args, context) => {
     const result = calculateQuote(quoteInput)
 
     // Create Quote record
-    const quote = await prisma.quote.create({
+    const quote = await context.db.quote.create({
       data: {
         applicationId: application.id,
         productId: application.productId,
@@ -265,16 +264,16 @@ export const getQuoteDetails: ToolHandler = async (args, context) => {
     let quote
 
     if (quoteId) {
-      quote = await prisma.quote.findUnique({
+      quote = await context.db.quote.findUnique({
         where: { id: quoteId },
       })
     } else {
       // Find quote via application for this conversation
-      const application = await prisma.application.findUnique({
+      const application = await context.db.application.findUnique({
         where: { conversationId: context.conversationId },
       })
       if (application) {
-        quote = await prisma.quote.findUnique({
+        quote = await context.db.quote.findUnique({
           where: { applicationId: application.id },
         })
       }
@@ -322,14 +321,14 @@ export const acceptQuote: ToolHandler = async (args, context) => {
     }
 
     // Find quote via application for this conversation
-    const application = await prisma.application.findUnique({
+    const application = await context.db.application.findUnique({
       where: { conversationId: context.conversationId },
     })
     if (!application) {
       return { success: false, error: 'No application found.' }
     }
 
-    const quote = await prisma.quote.findUnique({
+    const quote = await context.db.quote.findUnique({
       where: { applicationId: application.id },
     })
     if (!quote) {
@@ -342,7 +341,7 @@ export const acceptQuote: ToolHandler = async (args, context) => {
 
     // Check expiry
     if (new Date() > quote.validUntil) {
-      await prisma.quote.update({
+      await context.db.quote.update({
         where: { id: quote.id },
         data: { status: 'EXPIRED' },
       })
@@ -350,13 +349,13 @@ export const acceptQuote: ToolHandler = async (args, context) => {
     }
 
     // Update Quote status -> ACCEPTED
-    await prisma.quote.update({
+    await context.db.quote.update({
       where: { id: quote.id },
       data: { status: 'ACCEPTED' },
     })
 
     // Create Policy (PENDING_SUBMISSION)
-    const policy = await prisma.policy.create({
+    const policy = await context.db.policy.create({
       data: {
         quoteId: quote.id,
         customerId: quote.customerId,
@@ -373,7 +372,7 @@ export const acceptQuote: ToolHandler = async (args, context) => {
     trackQuoteAccepted(quote.customerId, quote.premiumAnnual)
 
     // Update Conversation status -> COMPLETED
-    await prisma.conversation.update({
+    await context.db.conversation.update({
       where: { id: context.conversationId },
       data: {
         status: 'COMPLETED',
@@ -382,7 +381,7 @@ export const acceptQuote: ToolHandler = async (args, context) => {
     })
 
     // Load tier/level names for uiAction payload
-    const appWithPricing = await prisma.application.findUnique({
+    const appWithPricing = await context.db.application.findUnique({
       where: { id: application.id },
       include: {
         tier: { select: { name: true } },
@@ -449,14 +448,14 @@ export const acceptQuote: ToolHandler = async (args, context) => {
 export const modifyQuote: ToolHandler = async (_args, context) => {
   try {
     // Find application and current quote
-    const application = await prisma.application.findUnique({
+    const application = await context.db.application.findUnique({
       where: { conversationId: context.conversationId },
     })
     if (!application) {
       return { success: false, error: 'No application found.' }
     }
 
-    const quote = await prisma.quote.findUnique({
+    const quote = await context.db.quote.findUnique({
       where: { applicationId: application.id },
     })
     if (!quote) {
@@ -464,13 +463,13 @@ export const modifyQuote: ToolHandler = async (_args, context) => {
     }
 
     // Expire current quote
-    await prisma.quote.update({
+    await context.db.quote.update({
       where: { id: quote.id },
       data: { status: 'EXPIRED' },
     })
 
     // Reset Application for re-selection
-    await prisma.application.update({
+    await context.db.application.update({
       where: { id: application.id },
       data: {
         tierId: null,
@@ -484,11 +483,11 @@ export const modifyQuote: ToolHandler = async (_args, context) => {
     // Delete the selection answers (PACKAGE_CHOICE, PREMIUM_LEVEL, BD_ADDON_INTEREST, PAYMENT_FREQUENCY)
     // so the customer can re-answer them
     const specialCodes = ['PACKAGE_CHOICE', 'PREMIUM_LEVEL', 'BD_ADDON_INTEREST', 'PAYMENT_FREQUENCY']
-    const specialQuestions = await prisma.question.findMany({
+    const specialQuestions = await context.db.question.findMany({
       where: { code: { in: specialCodes } },
     })
     if (specialQuestions.length > 0) {
-      await prisma.answer.deleteMany({
+      await context.db.answer.deleteMany({
         where: {
           conversationId: context.conversationId,
           questionId: { in: specialQuestions.map(q => q.id) },

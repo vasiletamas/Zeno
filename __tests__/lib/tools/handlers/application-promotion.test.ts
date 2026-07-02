@@ -37,6 +37,7 @@ vi.mock('./insight-bump', () => ({ bumpInsightOnAnswer: vi.fn() }))
 const { startApplication } = await import('@/lib/tools/handlers/application-handlers')
 
 const baseCtx = {
+  db: (await import('@/lib/db')).prisma,
   conversationId: 'conv-1',
   customerId: 'cust-1',
   language: 'ro' as const,

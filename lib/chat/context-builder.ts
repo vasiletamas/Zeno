@@ -70,6 +70,7 @@ export async function buildToolContext(
     customerId,
     conversationId,
     language,
+    db: prisma,
   }
 
   // Map product if present

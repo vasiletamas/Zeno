@@ -41,6 +41,7 @@ vi.mock('@/lib/tools/resolve-product', () => ({
 const { switchProduct } = await import('@/lib/tools/handlers/product-switch-handler')
 
 const baseCtx = {
+  db: (await import('@/lib/db')).prisma,
   conversationId: 'conv-1',
   customerId: 'cust-1',
   language: 'ro' as const,

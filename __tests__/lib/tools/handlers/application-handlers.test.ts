@@ -28,7 +28,8 @@ const { startApplication } = await import('@/lib/tools/handlers/application-hand
 const { resolveGroupCodes } = await import('@/lib/engines/question-groups')
 const { getNextQuestion, calculateProgress } = await import('@/lib/engines/questionnaire-engine')
 
-const CONTEXT = { conversationId: 'conv-1', customerId: 'cust-1', language: 'ro' as const } as unknown as Parameters<typeof startApplication>[1]
+const CONTEXT = {
+  db: (await import('@/lib/db')).prisma, conversationId: 'conv-1', customerId: 'cust-1', language: 'ro' as const } as unknown as Parameters<typeof startApplication>[1]
 
 function mockHappyPathPreamble() {
   prismaConversationFindUniqueSpy.mockResolvedValueOnce({ id: 'conv-1', dntSignedAt: new Date('2026-01-01'), dntValidUntil: null, productId: 'prod-1', candidateProductId: null })

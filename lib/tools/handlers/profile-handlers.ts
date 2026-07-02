@@ -4,7 +4,6 @@
  * get_customer_profile, update_customer_profile
  */
 
-import { prisma } from '@/lib/db'
 import type { ToolHandler } from '@/lib/tools/types'
 
 // ─────────────────────────────────────────────
@@ -13,7 +12,7 @@ import type { ToolHandler } from '@/lib/tools/types'
 
 export const getCustomerProfile: ToolHandler = async (_args, context) => {
   try {
-    const customer = await prisma.customer.findUnique({
+    const customer = await context.db.customer.findUnique({
       where: { id: context.customerId },
     })
 
@@ -24,7 +23,7 @@ export const getCustomerProfile: ToolHandler = async (_args, context) => {
     const extractedProfile = (customer.extractedProfile ?? {}) as Record<string, unknown>
 
     // Load recent conversations
-    const conversations = await prisma.conversation.findMany({
+    const conversations = await context.db.conversation.findMany({
       where: { customerId: context.customerId },
       orderBy: { createdAt: 'desc' },
       take: 5,
@@ -38,7 +37,7 @@ export const getCustomerProfile: ToolHandler = async (_args, context) => {
     })
 
     // Load policies
-    const policies = await prisma.policy.findMany({
+    const policies = await context.db.policy.findMany({
       where: { customerId: context.customerId },
       orderBy: { createdAt: 'desc' },
       take: 5,
@@ -79,7 +78,7 @@ export const getCustomerProfile: ToolHandler = async (_args, context) => {
 
 export const updateCustomerProfile: ToolHandler = async (args, context) => {
   try {
-    const customer = await prisma.customer.findUnique({
+    const customer = await context.db.customer.findUnique({
       where: { id: context.customerId },
     })
 
@@ -91,7 +90,7 @@ export const updateCustomerProfile: ToolHandler = async (args, context) => {
     const existing = (customer.extractedProfile ?? {}) as Record<string, unknown>
     const merged = { ...existing, ...args }
 
-    await prisma.customer.update({
+    await context.db.customer.update({
       where: { id: context.customerId },
       data: { extractedProfile: JSON.parse(JSON.stringify(merged)) },
     })

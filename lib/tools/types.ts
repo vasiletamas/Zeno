@@ -5,6 +5,15 @@
  * LLM-facing types (ToolCall, LLMToolDefinition) live in lib/llm/providers/types.ts.
  */
 
+import type { PrismaClient, Prisma } from '@/lib/generated/prisma/client'
+
+/**
+ * The db seam handlers write through (A2.4): the global client by default,
+ * or the gateway-injected transaction handle (which lacks $transaction /
+ * $executeRawUnsafe — hence the union, not `typeof prisma` alone).
+ */
+export type DbClient = PrismaClient | Prisma.TransactionClient
+
 // ==============================================
 // EXECUTION CLASSIFICATION
 // ==============================================
@@ -85,6 +94,12 @@ export interface ToolContext {
   customerId: string
   conversationId: string
   language: 'en' | 'ro'
+  /**
+   * Handlers MUST route their writes through this client so a commit can run
+   * inside the gateway's transaction (A2.4). buildToolContext sets the global
+   * client; the gateway overrides it with the tx handle.
+   */
+  db: DbClient
   product?: {
     id: string
     code: string

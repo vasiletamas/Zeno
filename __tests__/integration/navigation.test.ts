@@ -26,7 +26,7 @@ const { resolveProductRef } = await import('@/lib/tools/resolve-product')
 const { resolveGroupCodes } = await import('@/lib/engines/question-groups')
 const { calculateProgress } = await import('@/lib/engines/questionnaire-engine')
 
-const CTX = { conversationId: 'conv-1', customerId: 'cust-1', language: 'ro' as const } as unknown as Parameters<typeof changeSelection>[1]
+const CTX = { conversationId: 'conv-1', customerId: 'cust-1', language: 'ro' as const, db: prismaMock } as unknown as Parameters<typeof changeSelection>[1]
 
 describe('navigation integration', () => {
   beforeEach(() => { vi.clearAllMocks() })

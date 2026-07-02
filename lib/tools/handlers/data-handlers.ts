@@ -5,7 +5,6 @@
  * then returns a uiAction for the next needed field (or success when done).
  */
 
-import { prisma } from '@/lib/db'
 import { encrypt } from '@/lib/security/encryption'
 import type { ToolHandler } from '@/lib/tools/types'
 
@@ -177,13 +176,13 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
         return { success: false, error: `Unknown field: ${field}` }
     }
 
-    await prisma.customer.update({
+    await context.db.customer.update({
       where: { id: context.customerId },
       data: updateData,
     })
 
     // 3. Determine next needed field
-    const customer = await prisma.customer.findUnique({
+    const customer = await context.db.customer.findUnique({
       where: { id: context.customerId },
       select: {
         name: true,
@@ -239,7 +238,7 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
     }
 
     // 5. All collected: update Customer.isAnonymous = false, return success
-    await prisma.customer.update({
+    await context.db.customer.update({
       where: { id: context.customerId },
       data: { isAnonymous: false },
     })

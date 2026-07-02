@@ -48,6 +48,7 @@ vi.mock('@/lib/tools/handlers/insight-bump', () => ({
 const { setAnswer } = await import('@/lib/tools/handlers/set-answer-handlers')
 
 const CONTEXT = {
+  db: (await import('@/lib/db')).prisma,
   customerId: 'cust-1',
   conversationId: 'conv-1',
   language: 'ro' as const,

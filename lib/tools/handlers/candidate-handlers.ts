@@ -5,7 +5,6 @@
  * See docs/superpowers/specs/2026-05-26-zeno-phase-model-design.md.
  */
 
-import { prisma } from '@/lib/db'
 import type { ToolHandler } from '@/lib/tools/types'
 import { resolveProductRef, listAvailableProductRefs } from '@/lib/tools/resolve-product'
 
@@ -33,7 +32,7 @@ export const setCandidateProduct: ToolHandler = async (args, context) => {
       }
     }
 
-    const product = await prisma.product.findUnique({
+    const product = await context.db.product.findUnique({
       where: { id: ref.id },
       select: { id: true, name: true },
     })
@@ -41,7 +40,7 @@ export const setCandidateProduct: ToolHandler = async (args, context) => {
       return { success: false, error: `Product not found: ${ref.id}` }
     }
 
-    const current = await prisma.conversation.findUnique({
+    const current = await context.db.conversation.findUnique({
       where: { id: context.conversationId },
       select: { candidateProductId: true, candidateConfidence: true },
     })
@@ -68,7 +67,7 @@ export const setCandidateProduct: ToolHandler = async (args, context) => {
       }
     }
 
-    await prisma.conversation.update({
+    await context.db.conversation.update({
       where: { id: context.conversationId },
       data: {
         candidateProductId: ref.id,

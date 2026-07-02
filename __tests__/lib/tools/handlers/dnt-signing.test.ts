@@ -23,6 +23,7 @@ vi.mock('@/lib/analytics/events', () => ({ trackDntCompleted: vi.fn() }))
 const { signDnt } = await import('@/lib/tools/handlers/dnt-handlers')
 
 const CONTEXT = {
+  db: (await import('@/lib/db')).prisma,
   conversationId: 'conv-1', customerId: 'cust-1', language: 'ro' as const,
 } as unknown as Parameters<typeof signDnt>[1]
 

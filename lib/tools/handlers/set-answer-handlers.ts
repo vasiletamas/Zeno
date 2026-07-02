@@ -8,7 +8,6 @@
  * fresh deriveAndExpose output ({ state, actions }) plus a `save` confirmation.
  */
 
-import { prisma } from '@/lib/db'
 import type { ToolHandler } from '@/lib/tools/types'
 import { validateAnswer } from '@/lib/engines/questionnaire-engine'
 import { resolveGroupCodes, resolveActiveProductId } from '@/lib/engines/question-groups'
@@ -27,7 +26,7 @@ export const setAnswer: ToolHandler = async (args, context) => {
     const appCodes = await resolveGroupCodes(productId, 'application')
     const allCodes = [...new Set([...dntCodes, ...appCodes])]
 
-    const question = await prisma.question.findFirst({
+    const question = await context.db.question.findFirst({
       where: { code: questionCode, group: { code: { in: allCodes } } },
       include: { group: true },
     })
@@ -43,7 +42,7 @@ export const setAnswer: ToolHandler = async (args, context) => {
       return { success: false, error: validation.error ?? 'Invalid answer' }
     }
 
-    await prisma.answer.upsert({
+    await context.db.answer.upsert({
       where: { questionId_conversationId: { questionId: question.id, conversationId: context.conversationId } },
       create: { questionId: question.id, conversationId: context.conversationId, value: validation.normalizedValue },
       update: { value: validation.normalizedValue, answeredAt: new Date() },
@@ -55,19 +54,19 @@ export const setAnswer: ToolHandler = async (args, context) => {
       questionCode === 'PREMIUM_LEVEL' ||
       questionCode === 'BD_ADDON_INTEREST'
     ) {
-      const application = await prisma.application.findUnique({
+      const application = await context.db.application.findUnique({
         where: { conversationId: context.conversationId },
       })
       if (application) {
         const updateData: Record<string, unknown> = {}
         if (questionCode === 'PACKAGE_CHOICE') {
-          const tier = await prisma.pricingTier.findFirst({
+          const tier = await context.db.pricingTier.findFirst({
             where: { productId: application.productId, code: validation.normalizedValue },
           })
           if (tier) updateData.tierId = tier.id
         }
         if (questionCode === 'PREMIUM_LEVEL' && application.tierId) {
-          const level = await prisma.pricingLevel.findFirst({
+          const level = await context.db.pricingLevel.findFirst({
             where: { tierId: application.tierId, code: validation.normalizedValue },
           })
           if (level) updateData.levelId = level.id
@@ -76,14 +75,14 @@ export const setAnswer: ToolHandler = async (args, context) => {
           updateData.includesAddon = validation.normalizedValue === 'true'
         }
         if (Object.keys(updateData).length > 0) {
-          await prisma.application.update({ where: { id: application.id }, data: updateData })
+          await context.db.application.update({ where: { id: application.id }, data: updateData })
         }
       }
     }
 
     // Insight bump (only when the question carries an insightKey).
     if (question.insightKey) {
-      const priorInsight = await prisma.customerInsight.findUnique({
+      const priorInsight = await context.db.customerInsight.findUnique({
         where: { customerId_key: { customerId: context.customerId, key: question.insightKey } },
       })
       await bumpInsightOnAnswer({

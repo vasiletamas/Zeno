@@ -6,7 +6,6 @@
  * UI action for inline checkout in the chat.
  */
 
-import { prisma } from '@/lib/db'
 import { getPaymentProvider } from '@/lib/payments'
 import type { ToolHandler, ToolResult } from '@/lib/tools/types'
 import { logError } from '@/lib/errors/logger'
@@ -34,7 +33,7 @@ export const initiatePayment: ToolHandler = async (
 
     // If not in context, query the DB chain
     if (!policyId) {
-      const conversation = await prisma.conversation.findUnique({
+      const conversation = await context.db.conversation.findUnique({
         where: { id: context.conversationId },
         include: {
           application: {
@@ -102,7 +101,7 @@ export const initiatePayment: ToolHandler = async (
     // ─── Step 4: Create Payment record ─────────────────────
     const providerEnum = provider.name.toUpperCase() as 'STRIPE' | 'PAYU' | 'MOCK'
 
-    const payment = await prisma.payment.create({
+    const payment = await context.db.payment.create({
       data: {
         policyId,
         customerId: context.customerId,
@@ -116,7 +115,7 @@ export const initiatePayment: ToolHandler = async (
 
     // ─── Step 5: Build policy description for UI ───────────
     // Load tier/level names for display
-    const policy = await prisma.policy.findUnique({
+    const policy = await context.db.policy.findUnique({
       where: { id: policyId },
       include: {
         quote: {
