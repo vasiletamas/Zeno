@@ -46,8 +46,9 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   let appState: DomainSnapshot['application'] = null
   if (application && application.status !== 'CANCELLED') {
     const baseCodes = (await resolveGroupCodes(application.productId, 'application', db)) ?? []
-    // #4: the BD questionnaire is in the active set only while the addon is on
-    const groupCodes = application.includesAddon ? [...baseCodes, 'bd_medical'] : baseCodes
+    // #4: bd_medical is phase 'application' in the seeds, so it arrives IN
+    // baseCodes — the addon toggle EXCLUDES it when off (answers retained).
+    const groupCodes = application.includesAddon ? baseCodes : baseCodes.filter((c) => c !== 'bd_medical')
     const questions = groupCodes.length > 0 ? await db.question.findMany({ where: { group: { code: { in: groupCodes } } }, select: { id: true, code: true } }) : []
     const answered = await db.answer.findMany({ where: { applicationId: application.id, questionId: { in: questions.map((q) => q.id) } }, select: { questionId: true } })
     const answeredIds = new Set(answered.map((a) => a.questionId))

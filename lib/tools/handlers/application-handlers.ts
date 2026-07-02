@@ -33,7 +33,9 @@ import { bumpInsightOnAnswer } from './insight-bump'
 export async function appGroupCodesFor(context: { conversationId: string; product?: { id: string } }, includesAddon: boolean): Promise<string[]> {
   const productId = await resolveActiveProductId(context.conversationId, context.product?.id)
   const codes = (await resolveGroupCodes(productId, 'application')) ?? []
-  return includesAddon ? [...codes, 'bd_medical'] : codes
+  // bd_medical is seeded phase 'application', so it arrives IN codes — the
+  // addon toggle EXCLUDES it when off (answers retained, just excluded, #4).
+  return includesAddon ? codes : codes.filter((c) => c !== 'bd_medical')
 }
 
 /** The conversation's active application (T5.D4 channel pointer). */
