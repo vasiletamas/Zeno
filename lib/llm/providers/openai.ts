@@ -278,9 +278,11 @@ export class OpenAIProvider implements LLMProviderInterface {
   // chatStream()
   // ==============================================
 
-  async *chatStream(request: ChatRequest): AsyncIterable<StreamChunk> {
+  async chatStream(request: ChatRequest): Promise<AsyncIterable<StreamChunk>> {
     const reasoning = isReasoningModel(request.model)
 
+    // The request fires HERE, inside the awaited call, so auth/connection
+    // errors reject this promise and reach the gateway's failover logic.
     const stream = await this.client.chat.completions.create({
       model: request.model,
       messages: this.convertMessages(request.messages),
@@ -290,6 +292,12 @@ export class OpenAIProvider implements LLMProviderInterface {
       stream_options: { include_usage: true },
     })
 
+    return this.emitStreamChunks(stream)
+  }
+
+  private async *emitStreamChunks(
+    stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>,
+  ): AsyncIterable<StreamChunk> {
     let usage: TokenUsage | undefined
 
     for await (const chunk of stream) {
@@ -314,9 +322,11 @@ export class OpenAIProvider implements LLMProviderInterface {
   // chatStreamWithTools()
   // ==============================================
 
-  async *chatStreamWithTools(request: ChatWithToolsRequest): AsyncIterable<StreamChunk> {
+  async chatStreamWithTools(request: ChatWithToolsRequest): Promise<AsyncIterable<StreamChunk>> {
     const reasoning = isReasoningModel(request.model)
 
+    // The request fires HERE, inside the awaited call, so auth/connection
+    // errors reject this promise and reach the gateway's failover logic.
     const stream = await this.client.chat.completions.create({
       model: request.model,
       messages: this.convertMessages(request.messages),
@@ -331,6 +341,12 @@ export class OpenAIProvider implements LLMProviderInterface {
       stream_options: { include_usage: true },
     })
 
+    return this.emitStreamWithToolsChunks(stream)
+  }
+
+  private async *emitStreamWithToolsChunks(
+    stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>,
+  ): AsyncIterable<StreamChunk> {
     // Accumulate tool call deltas across chunks
     const toolCallAccum: Map<number, { id: string; name: string; args: string }> = new Map()
     let usage: TokenUsage | undefined

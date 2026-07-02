@@ -371,7 +371,7 @@ export class AnthropicProvider implements LLMProviderInterface {
   // chatStream()
   // ==============================================
 
-  async *chatStream(request: ChatRequest): AsyncIterable<StreamChunk> {
+  async chatStream(request: ChatRequest): Promise<AsyncIterable<StreamChunk>> {
     const { system, messages } = this.convertMessages(request.messages)
 
     const params: Anthropic.MessageCreateParamsStreaming = {
@@ -384,8 +384,17 @@ export class AnthropicProvider implements LLMProviderInterface {
     if (system) params.system = system
     if (request.temperature !== undefined) params.temperature = request.temperature
 
-    const stream = this.client.messages.stream(params)
+    // messages.create (unlike the lazy messages.stream helper) issues the
+    // request HERE, so auth/connection errors reject this awaited call and
+    // reach the gateway's failover logic instead of exploding mid-iteration.
+    const stream = await this.client.messages.create(params)
 
+    return this.emitStreamChunks(stream)
+  }
+
+  private async *emitStreamChunks(
+    stream: AsyncIterable<Anthropic.RawMessageStreamEvent>,
+  ): AsyncIterable<StreamChunk> {
     for await (const event of stream) {
       if (event.type === 'content_block_delta') {
         const delta = event.delta
@@ -404,7 +413,7 @@ export class AnthropicProvider implements LLMProviderInterface {
   // chatStreamWithTools()
   // ==============================================
 
-  async *chatStreamWithTools(request: ChatWithToolsRequest): AsyncIterable<StreamChunk> {
+  async chatStreamWithTools(request: ChatWithToolsRequest): Promise<AsyncIterable<StreamChunk>> {
     const { system, messages } = this.convertMessages(request.messages)
     const tools = this.convertToolDefinitions(request.tools)
     const toolChoice = this.convertToolChoice(request.toolChoice)
@@ -426,8 +435,17 @@ export class AnthropicProvider implements LLMProviderInterface {
       if (toolChoice) params.tool_choice = toolChoice
     }
 
-    const stream = this.client.messages.stream(params)
+    // messages.create (unlike the lazy messages.stream helper) issues the
+    // request HERE, so auth/connection errors reject this awaited call and
+    // reach the gateway's failover logic instead of exploding mid-iteration.
+    const stream = await this.client.messages.create(params)
 
+    return this.emitStreamWithToolsChunks(stream)
+  }
+
+  private async *emitStreamWithToolsChunks(
+    stream: AsyncIterable<Anthropic.RawMessageStreamEvent>,
+  ): AsyncIterable<StreamChunk> {
     // Accumulate tool use blocks during streaming
     const toolUseAccum: Map<number, { id: string; name: string; jsonChunks: string }> = new Map()
 

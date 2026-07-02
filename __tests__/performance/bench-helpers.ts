@@ -188,16 +188,20 @@ export function createMockProvider(options: MockProviderOptions = {}): LLMProvid
       return { ...buildResponse(), toolCalls: [] }
     },
 
-    async *chatStream(_request: ChatRequest): AsyncIterable<StreamChunk> {
+    async chatStream(_request: ChatRequest): Promise<AsyncIterable<StreamChunk>> {
       if (latencyMs > 0) await sleep(latencyMs)
-      yield { type: 'content', content }
-      yield { type: 'done', usage }
+      return (async function* () {
+        yield { type: 'content' as const, content }
+        yield { type: 'done' as const, usage }
+      })()
     },
 
-    async *chatStreamWithTools(_request: ChatWithToolsRequest): AsyncIterable<StreamChunk> {
+    async chatStreamWithTools(_request: ChatWithToolsRequest): Promise<AsyncIterable<StreamChunk>> {
       if (latencyMs > 0) await sleep(latencyMs)
-      yield { type: 'content', content }
-      yield { type: 'done', usage }
+      return (async function* () {
+        yield { type: 'content' as const, content }
+        yield { type: 'done' as const, usage }
+      })()
     },
   }
 }

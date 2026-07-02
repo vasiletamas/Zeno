@@ -129,12 +129,21 @@ export interface StreamChunk {
 // PROVIDER INTERFACE
 // ==============================================
 
-/** Both OpenAI and Anthropic providers implement this contract. */
+/**
+ * Both OpenAI and Anthropic providers implement this contract.
+ *
+ * The stream methods return a PROMISE of an iterable (not a bare async
+ * generator) so that request-time failures — auth errors, connection
+ * failures, rate limits — reject the awaited call inside the gateway's
+ * callWithFailover, where retry/failover/circuit-breaker logic lives.
+ * A bare `async *` method would defer the HTTP request to first iteration,
+ * bypassing failover entirely.
+ */
 export interface LLMProviderInterface {
   chat(request: ChatRequest): Promise<ChatResponse>
   chatWithTools(request: ChatWithToolsRequest): Promise<ChatWithToolsResponse>
-  chatStream(request: ChatRequest): AsyncIterable<StreamChunk>
-  chatStreamWithTools(request: ChatWithToolsRequest): AsyncIterable<StreamChunk>
+  chatStream(request: ChatRequest): Promise<AsyncIterable<StreamChunk>>
+  chatStreamWithTools(request: ChatWithToolsRequest): Promise<AsyncIterable<StreamChunk>>
 }
 
 // ==============================================
