@@ -16,11 +16,25 @@ export type UserRole = 'CUSTOMER' | 'ADMIN' | 'OPERATOR'
 // TOOL DEFINITION
 // ==============================================
 
+export type ToolKind = 'read' | 'commit' | 'internal'
+
 export interface ToolDefinition {
   name: string
   description: string
   parameters: Record<string, unknown> // JSON Schema for LLM
   executionMode: ExecutionMode
+  /**
+   * Gateway routing class (A2.2): 'commit' tools mutate funnel state and are
+   * executed ONLY through the commit gateway; 'read' tools stay on the plain
+   * executor path; 'internal' tools are background subsystems never
+   * gateway-routed.
+   */
+  kind: ToolKind
+  /**
+   * Gateway-enforced two-step confirmation (#8 step 4). Replaces the old
+   * handler-supplied literal-true confirm flags.
+   */
+  requiresConfirmation?: boolean
   customerVisible: boolean
   statusMessage: { ro: string[]; en: string[] } | null
   alwaysAllowed: boolean

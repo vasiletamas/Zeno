@@ -424,6 +424,7 @@ registerTool('list_products', {
   sideEffects: false,
   cacheable: true,
   cacheTtlMs: 300_000,
+  kind: 'read',
 }, listProductsHandler)
 
 registerTool('get_product_info', {
@@ -458,6 +459,7 @@ registerTool('get_product_info', {
   // on args only (no customer context) — caching would leak one customer's
   // age-trimmed result to another. The lookup + pure shaping is cheap.
   cacheable: false,
+  kind: 'read',
 }, getProductInfoHandler)
 
 registerTool('compare_products', {
@@ -483,6 +485,7 @@ registerTool('compare_products', {
   sideEffects: false,
   cacheable: true,
   cacheTtlMs: 300_000,
+  kind: 'read',
 }, compareProducts)
 
 registerTool('preview_product_requirements', {
@@ -504,6 +507,7 @@ registerTool('preview_product_requirements', {
   allowedRoles: ALL_ROLES,
   sideEffects: false,
   cacheable: false,
+  kind: 'read',
 }, previewProductRequirements)
 
 registerTool('get_current_state', {
@@ -520,6 +524,7 @@ registerTool('get_current_state', {
   allowedRoles: ALL_ROLES,
   sideEffects: false,
   cacheable: false,
+  kind: 'read',
 }, getStateHandler)
 
 registerTool('set_candidate_product', {
@@ -552,6 +557,7 @@ registerTool('set_candidate_product', {
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
+  kind: 'commit',
 }, setCandidateProduct)
 
 registerTool('switch_product', {
@@ -573,6 +579,7 @@ registerTool('switch_product', {
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
+  kind: 'commit',
 }, switchProduct)
 
 registerTool('get_objection_strategy', {
@@ -601,6 +608,7 @@ registerTool('get_objection_strategy', {
   sideEffects: false,
   cacheable: true,
   cacheTtlMs: 600_000,
+  kind: 'read',
 }, getObjectionStrategy)
 
 // --- Profile ---
@@ -618,6 +626,7 @@ registerTool('get_customer_profile', {
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffects: false,
+  kind: 'read',
 }, getCustomerProfile)
 
 registerTool('update_customer_profile', {
@@ -641,6 +650,7 @@ registerTool('update_customer_profile', {
   statusMessage: null,
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
+  kind: 'commit',
 }, updateCustomerProfile)
 
 // --- DNT (Declaration of Needs and Testing) ---
@@ -660,6 +670,7 @@ registerTool('check_dnt_status', {
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffects: false,
+  kind: 'read',
 }, checkDntStatus)
 
 registerTool('start_dnt_questionnaire', {
@@ -678,6 +689,7 @@ registerTool('start_dnt_questionnaire', {
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
+  kind: 'commit',
 }, startDntQuestionnaire)
 
 registerTool('save_dnt_answer', {
@@ -697,6 +709,7 @@ registerTool('save_dnt_answer', {
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'save',
+  kind: 'commit',
 }, saveDntAnswer)
 
 registerTool('sign_dnt', {
@@ -716,6 +729,8 @@ registerTool('sign_dnt', {
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
+  kind: 'commit',
+  requiresConfirmation: true,
 }, signDnt)
 
 // --- Application ---
@@ -738,6 +753,7 @@ registerTool('start_application', {
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
+  kind: 'commit',
 }, startApplication)
 
 registerTool('save_application_answer', {
@@ -757,6 +773,7 @@ registerTool('save_application_answer', {
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'save',
+  kind: 'commit',
 }, saveApplicationAnswer)
 
 registerTool('set_answer', {
@@ -779,6 +796,7 @@ registerTool('set_answer', {
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'save',
+  kind: 'commit',
 }, setAnswer)
 
 registerTool('resume_application', {
@@ -795,6 +813,7 @@ registerTool('resume_application', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
+  kind: 'commit',
 }, resumeApplication)
 
 registerTool('get_application_status', {
@@ -809,6 +828,7 @@ registerTool('get_application_status', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
+  kind: 'read',
 }, getApplicationStatus)
 
 registerTool('cancel_application', {
@@ -825,6 +845,7 @@ registerTool('cancel_application', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
+  kind: 'commit',
 }, cancelApplication)
 
 registerTool('change_selection', {
@@ -847,6 +868,7 @@ registerTool('change_selection', {
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
+  kind: 'commit',
 }, changeSelection)
 
 // --- Quote ---
@@ -866,6 +888,7 @@ registerTool('generate_quote', {
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'quote',
+  kind: 'commit',
 }, generateQuote)
 
 registerTool('accept_quote', {
@@ -885,6 +908,8 @@ registerTool('accept_quote', {
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
+  kind: 'commit',
+  requiresConfirmation: true,
 }, acceptQuote)
 
 registerTool('get_quote_details', {
@@ -901,6 +926,7 @@ registerTool('get_quote_details', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
+  kind: 'read',
 }, getQuoteDetails)
 
 registerTool('modify_quote', {
@@ -915,6 +941,7 @@ registerTool('modify_quote', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
+  kind: 'commit',
 }, modifyQuote)
 
 // --- BD Eligibility ---
@@ -933,6 +960,7 @@ registerTool('check_bd_eligibility', {
   statusMessage: STATUS_CHECK_BD_ELIGIBILITY,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
+  kind: 'commit',
 }, checkBdEligibility)
 
 // --- Payment ---
@@ -949,6 +977,7 @@ registerTool('initiate_payment', {
   statusMessage: STATUS_INITIATE_PAYMENT,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
+  kind: 'commit',
 }, initiatePayment)
 
 // --- Data Collection ---
@@ -969,6 +998,7 @@ registerTool('collect_customer_field', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
+  kind: 'commit',
 }, collectCustomerField)
 
 // --- Utility / Background ---
@@ -998,6 +1028,7 @@ registerTool('escalate_to_human', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ALL_ROLES,
+  kind: 'commit',
 }, escalateToHuman)
 
 registerTool('profile_extractor', {
@@ -1015,6 +1046,7 @@ registerTool('profile_extractor', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ADMIN_OPERATOR,
+  kind: 'internal',
 }, stubHandler)
 
 registerTool('summarizer', {
@@ -1033,6 +1065,7 @@ registerTool('summarizer', {
   statusMessage: null,
   alwaysAllowed: false,
   allowedRoles: ADMIN_OPERATOR,
+  kind: 'internal',
 }, stubHandler)
 
 // ============================================================
@@ -1104,6 +1137,7 @@ registerTool('record_gdpr_consent', {
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffect: 'consent',
+  kind: 'commit',
 }, recordGdprConsentHandler)
 
 registerTool('acknowledge_ai_disclosure', {
@@ -1119,4 +1153,5 @@ registerTool('acknowledge_ai_disclosure', {
   alwaysAllowed: true,
   allowedRoles: ALL_ROLES,
   sideEffect: 'consent',
+  kind: 'commit',
 }, acknowledgeAiDisclosureHandler)
