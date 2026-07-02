@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db'
 import type { Prisma } from '@/lib/generated/prisma/client'
 import { resolveGroupCodes } from '@/lib/engines/question-groups'
+import { getOpenCircuitTools } from '@/lib/tools/circuit-state'
 import type { DomainSnapshot } from './domain-types'
 
 // Widened for the A2 gateway: the interactive-transaction handle lacks
@@ -51,7 +52,8 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     schedule: { exists: false, settled: false, nextDueAt: null, lastPaymentStatus: null }, // Block D (PaymentSchedule) re-points
     policy: policy ? { id: policy.id, status: policy.status } : null,
     eligibility: { verdict: 'unknown' }, suitability: { verdict: 'unknown' },
-    openItems: [], circuit: { openTools: [] }, // A2.7 wires circuit; M2 (Block B) wires openItems
+    openItems: [], // M2 (Block B) wires openItems
+    circuit: { openTools: getOpenCircuitTools() }, // M10 degraded-mode input (A2.7)
     answers: {},
   }
 }

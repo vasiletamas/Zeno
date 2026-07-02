@@ -18,6 +18,7 @@ import { getToolDefinition, getToolHandler } from './registry'
 import { validateToolArgs } from './validation'
 import { materialArgsHash, stripConfirmArgs } from './args-hash'
 import { issueConfirmToken, verifyConfirmToken, confirmSecret } from './confirm-token'
+import { TimeoutError, CircuitOpenError } from '@/lib/errors/types'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { deriveAndExpose } from '@/lib/engines/derive-and-expose'
 import type { CommitActor, CommitEffect, CommitResult, DerivedStateV3, ReasonCode } from '@/lib/engines/domain-types'
@@ -69,6 +70,17 @@ export function resolveTargetRef(tool: string, args: Record<string, unknown>, st
 const CONFIRM_ARG_INJECTION: Record<string, Record<string, unknown>> = {
   sign_dnt: { confirmSignature: true, gdprConsent: true },
   accept_quote: { confirmAcceptance: true },
+}
+
+/**
+ * M10 invariant (A2.7): infrastructure failure ≠ domain rejection. The tx has
+ * rolled back, so state is unchanged and the customer may retry — but commits
+ * are NEVER auto-retried by the system; resubmission replays via the ledger.
+ * 'pending' is reserved for commits whose handlers record an external check
+ * (consumed by later blocks; the outcome value already exists in the envelope).
+ */
+export function toUnavailable(err: unknown): CommitResult {
+  return { outcome: 'unavailable', reason: 'temporarily_unavailable', effects: [], data: { retryable: true, retryAfterMs: 20_000, error: err instanceof Error ? err.name : 'unknown' } }
 }
 
 function outcomeForBlocked(reason: ReasonCode): CommitResult['outcome'] {
@@ -176,6 +188,16 @@ export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
 
   // (6+7) transactional apply under the per-conversation advisory lock,
   // ledger row in the same transaction, post-derive delta = advance_phase.
+  try {
+    return await runApplyTransaction(req, def.requiresConfirmation === true, targetRef, argsHash, validation.data ?? {})
+  } catch (err) {
+    if (err instanceof TimeoutError || err instanceof CircuitOpenError) return toUnavailable(err)
+    throw err
+  }
+}
+
+async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boolean, targetRef: string, argsHash: string, validatedArgs: Record<string, unknown>): Promise<CommitResult> {
+  const handler = getToolHandler(req.tool)!
   return prisma.$transaction(async (tx) => {
     // ::text cast because pg_advisory_xact_lock returns void, which the
     // client cannot deserialize.
@@ -186,7 +208,7 @@ export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
     if (lockedPrior) return writeReplayRow(tx, req, lockedPrior)
     if (ONE_SHOT.has(req.tool)) {
       const lockedConflict = await findFreshApplied(tx, req.conversationId, req.tool, { targetRef })
-      if (lockedConflict) return ledgeredReject(tx, req, targetRef, argsHash, 'already_applied', pre.state.phase)
+      if (lockedConflict) return ledgeredReject(tx, req, targetRef, argsHash, 'already_applied', lockedConflict.phaseTo ?? 'DISCOVERY')
     }
     const lockedPre = deriveAndExpose(await loadDomainSnapshot(req.conversationId, tx))
     if (!lockedPre.actions.available.includes(req.tool)) {
@@ -196,7 +218,7 @@ export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
       await writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, lockedPre.state.phase)
       return envelope
     }
-    const effectiveArgs = { ...(validation.data ?? {}), ...(def.requiresConfirmation ? CONFIRM_ARG_INJECTION[req.tool] ?? {} : {}) }
+    const effectiveArgs = { ...validatedArgs, ...(requiresConfirmation ? CONFIRM_ARG_INJECTION[req.tool] ?? {} : {}) }
     const handlerResult: ToolResult = await handler(effectiveArgs, { ...req.toolContext, db: tx })
     const post = deriveAndExpose(await loadDomainSnapshot(req.conversationId, tx))
     const effects: CommitEffect[] = []

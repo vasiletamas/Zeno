@@ -10,30 +10,10 @@ import { getToolHandler, getToolDefinition } from './registry'
 import { validateToolArgs } from './validation'
 import { checkPermission } from './permissions'
 import { isToolCacheable, getCachedResult, setCachedResult } from './cache'
-import { CircuitBreaker } from '@/lib/errors/circuit-breaker'
+import { getToolCircuit } from './circuit-state'
 import { TimeoutError } from '@/lib/errors/types'
 import { logError, logWarn } from '@/lib/errors/logger'
 import { eventBus } from '@/lib/events'
-
-// ==============================================
-// PER-TOOL CIRCUIT BREAKERS
-// ==============================================
-
-const toolCircuits = new Map<string, CircuitBreaker>()
-
-function getToolCircuit(name: string): CircuitBreaker {
-  let cb = toolCircuits.get(name)
-  if (!cb) {
-    cb = new CircuitBreaker({
-      name: `tool:${name}`,
-      failureThreshold: 3,
-      resetTimeoutMs: 20_000,
-      monitorWindowMs: 30_000,
-    })
-    toolCircuits.set(name, cb)
-  }
-  return cb
-}
 
 // ==============================================
 // TIMEOUT UTILITY
