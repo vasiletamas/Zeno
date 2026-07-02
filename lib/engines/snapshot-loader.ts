@@ -25,6 +25,10 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     select: { channel: true },
     orderBy: { createdAt: 'desc' },
   })
+  const validatedDocs = await db.customerDocument.findMany({
+    where: { customerId: conversation.customerId, status: 'validated' },
+    select: { kind: true },
+  })
   const activeProductId = conversation.productId ?? conversation.candidateProductId ?? null
   const prod = activeProductId ? await db.product.findUnique({ where: { id: activeProductId } }) : null
   const application = await db.application.findUnique({ where: { conversationId } })
@@ -104,6 +108,10 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     schedule: { exists: false, settled: false, nextDueAt: null, lastPaymentStatus: null }, // Block D (PaymentSchedule) re-points
     policy: policy ? { id: policy.id, status: policy.status } : null,
     eligibility: { verdict: 'unknown' }, suitability: { verdict: 'unknown' },
+    documents: {
+      requirementsByTool: (prod?.verificationRequirements as Record<string, string[]> | null) ?? {},
+      validated: [...new Set(validatedDocs.map((d) => d.kind as string))],
+    },
     openItems: [], // M2 (Block B) wires openItems
     circuit: { openTools: getOpenCircuitTools() }, // M10 degraded-mode input (A2.7)
     degraded: [], // backend circuits land with their blocks (payment provider in D3)

@@ -150,6 +150,9 @@ export async function seedProduct(prisma: PrismaClient) {
         healthRequirements: 'Simplified health declaration',
         notes: 'Maximum cumulative sum at risk across all life policies: 50,000 EUR',
       },
+      // B3.7 (#1 productDocuments): R6 resolved to before-initiate_payment;
+      // flip by seeding accept_quote: ['id_card'] if compliance wants accept-time.
+      verificationRequirements: { accept_quote: [], initiate_payment: ['id_card'] },
       features: [
         'Two packages: Standard and Optim',
         'Three premium levels per package (I, II, III)',
@@ -482,6 +485,9 @@ PRIORITATE LA CONTRADICȚII
         healthRequirements: 'Simplified health declaration',
         notes: 'Maximum cumulative sum at risk across all life policies: 50,000 EUR',
       },
+      // B3.7 (#1 productDocuments): R6 resolved to before-initiate_payment;
+      // flip by seeding accept_quote: ['id_card'] if compliance wants accept-time.
+      verificationRequirements: { accept_quote: [], initiate_payment: ['id_card'] },
       features: [
         'Two packages: Standard and Optim',
         'Three premium levels per package (I, II, III)',

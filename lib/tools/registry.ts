@@ -34,7 +34,7 @@ import { collectCustomerField } from './handlers/data-handlers'
 import { escalateToHuman } from './handlers/utility-handlers'
 import { initiatePayment } from './handlers/payment-handlers'
 import { resolveReferral, resolveWorkItem } from './handlers/operator-handlers'
-import { startChannelVerification, confirmChannelVerification } from './handlers/identity-handlers'
+import { startChannelVerification, confirmChannelVerification, requestDocumentUpload } from './handlers/identity-handlers'
 
 // ==============================================
 // INTERNAL STORAGE
@@ -994,6 +994,26 @@ registerTool('confirm_channel_verification', {
   sideEffect: 'lifecycle',
   kind: 'commit',
 }, confirmChannelVerification)
+
+registerTool('request_document_upload', {
+  description:
+    'Show the customer a secure control to upload a required identity document (ID card photo). ' +
+    'The image goes straight to the validation pipeline — you never see or handle it. ' +
+    'Use when a required document blocks a step (e.g. before payment).',
+  parameters: {
+    type: 'object',
+    properties: {
+      kind: { type: 'string', enum: ['id_card'], description: 'The document kind to request (default id_card).' },
+    },
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: true,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+}, requestDocumentUpload)
 
 // --- Operator queue (E2.4) ---
 // Never agent-exposed: no ACTION_RULES entry; the gateway's OPERATOR_TOOLS

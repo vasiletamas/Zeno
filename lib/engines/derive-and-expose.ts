@@ -40,7 +40,7 @@ const dntRule = (action: string, kind: 'read' | 'commit'): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.11.0' // 1.9.0: sign_dnt session-scoped, legacy answer tool retired, DNT slice aggregate-only (B2.6); 1.10.0: #1 identity rows land — generate_quote needs declared cnp-or-dob, accept_quote verified_channel, initiate_payment + product docs; tier derived from the provenance store (B3.2); 1.11.0: channel-verification commits exposed (start always, confirm on live challenge — B3.5)
+export const engineVersion = '1.12.0' // 1.10.0: #1 identity rows land — generate_quote needs declared cnp-or-dob, accept_quote verified_channel, initiate_payment + product docs; tier derived from the provenance store (B3.2); 1.11.0: channel-verification commits exposed (start always, confirm on live challenge — B3.5); 1.12.0: request_document_upload exposed on unmet product doc requirements; identity gate resolves productDocuments from the snapshot (B3.7)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -86,6 +86,8 @@ export const ACTION_RULES: ActionRule[] = [
   // confirm only makes sense while a live challenge is pending.
   { action: 'start_channel_verification', kind: 'commit', exposedWhen: always },
   { action: 'confirm_channel_verification', kind: 'commit', exposedWhen: (s) => s.identity.pendingChallenge !== null },
+  // B3.7: offerable while any product-required document is still unvalidated
+  { action: 'request_document_upload', kind: 'commit', exposedWhen: (s) => Object.values(s.documents.requirementsByTool).flat().some((k) => !s.documents.validated.includes(k)) },
   dntRule('sign_dnt', 'commit'),
   { action: 'start_application', kind: 'commit', exposedWhen: (s) => s.product !== null && s.dnt.valid && s.application === null,
     blockedReason: (s) => (s.application !== null ? { reason: 'application_already_open' } : s.product !== null && !s.dnt.valid ? { reason: s.dnt.signed ? 'dnt_expired' : 'dnt_not_signed' } : null) },
@@ -125,7 +127,7 @@ export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequiremen
         }
         // identity gate (A3.6, contradiction #1): an otherwise-exposed commit
         // with an unmet identity requirement is blocked with a needs payload.
-        const idCheck = checkIdentityRequirement(identityTable, rule.action, s.identity)
+        const idCheck = checkIdentityRequirement(identityTable, rule.action, s.identity, s.documents.requirementsByTool[rule.action] ?? [], s.documents.validated)
         if (!idCheck.ok) {
           blocked.push({ action: rule.action, reason: 'requires_identity', params: { needs: idCheck.needs } })
           continue

@@ -46,6 +46,21 @@ export const startChannelVerification: ToolHandler = async (args, context) => {
   }
 }
 
+export const requestDocumentUpload: ToolHandler = async (args, _context) => {
+  const kind = (args.kind as string | undefined) ?? 'id_card'
+  if (kind !== 'id_card') {
+    return { success: false, error: 'invalid_args: unsupported document kind.' }
+  }
+  // The agent never touches the image (Stripe-card pattern, T14.D5): the
+  // customer uploads through the GUI control straight to the upload route.
+  return {
+    success: true,
+    data: { kind },
+    message: 'A secure upload control is shown to the customer. The document is checked automatically; you will see the result in the state.',
+    uiAction: { type: 'show_document_upload', payload: { kind, uploadUrl: '/api/documents/upload' } },
+  }
+}
+
 export const confirmChannelVerification: ToolHandler = async (args, context) => {
   const code = String(args.code ?? '').trim()
   try {

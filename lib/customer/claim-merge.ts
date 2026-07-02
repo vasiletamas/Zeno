@@ -31,7 +31,7 @@ export const REPOINTERS: Repointer[] = [
   { table: 'Dnt', run: async (tx, d, c) => (await tx.dnt.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
   { table: 'DntSession', run: async (tx, d, c) => (await tx.dntSession.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
   { table: 'VerificationChallenge', run: async (tx, d, c) => (await tx.verificationChallenge.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
-  // B3.7 appends CustomerDocument
+  { table: 'CustomerDocument', run: async (tx, d, c) => (await tx.customerDocument.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
 ]
 
 const MIRROR_FIELDS = ['email', 'phone', 'name', 'dateOfBirth'] as const

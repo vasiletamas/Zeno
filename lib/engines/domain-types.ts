@@ -38,6 +38,13 @@ export interface DomainSnapshot {
   policy: { id: string; status: string } | null
   eligibility: { verdict: 'eligible' | 'ineligible' | 'unknown' } // engine lands per contradiction #9 (other block)
   suitability: { verdict: 'suitable' | 'conditionally_suitable' | 'unsuitable' | 'unknown' } // M7 (other block)
+  /**
+   * B3.7 (#1 productDocuments): per-commit document requirements from
+   * Product.verificationRequirements plus the customer's VALIDATED document
+   * kinds — consumed by the identity gate and request_document_upload
+   * exposure.
+   */
+  documents: { requirementsByTool: Record<string, string[]>; validated: string[] }
   openItems: Array<{ kind: string; refId: string }>
   circuit: { openTools: string[] } // M10 input to exposure (per-tool circuits)
   /**

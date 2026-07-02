@@ -9,6 +9,7 @@ export function makeSnapshot(overrides: Partial<DomainSnapshot> = {}): DomainSna
     application: null, quote: null, acceptedQuote: null,
     schedule: { exists: false, settled: false, nextDueAt: null, lastPaymentStatus: null },
     policy: null, eligibility: { verdict: 'unknown' }, suitability: { verdict: 'unknown' },
+    documents: { requirementsByTool: {}, validated: [] },
     openItems: [], circuit: { openTools: [] }, degraded: [], answers: {},
     ...overrides,
   }

@@ -156,6 +156,10 @@ const confirmChannelVerificationSchema = z.object({
   code: z.string().regex(/^\d{6}$/, 'The verification code is 6 digits'),
 }).strict()
 
+const requestDocumentUploadSchema = z.object({
+  kind: z.enum(['id_card']).optional(),
+}).strict()
+
 // ==============================================
 // OPERATOR QUEUE (E2.4)
 // ==============================================
@@ -235,6 +239,7 @@ const toolSchemas: Record<string, ZodType> = {
   // Identity / channel verification
   start_channel_verification: startChannelVerificationSchema,
   confirm_channel_verification: confirmChannelVerificationSchema,
+  request_document_upload: requestDocumentUploadSchema,
 
   // Operator queue
   resolve_referral: resolveReferralSchema,

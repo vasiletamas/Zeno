@@ -143,6 +143,11 @@ model Product {
   premiumRange            Json?
   paymentFrequencyOptions Json?
   insightKeys             Json?
+  // B3.7 (#1 productDocuments): per-commit document requirements, e.g.
+  // { accept_quote: [], initiate_payment: ["id_card"] }. R6 ambiguity
+  // resolved to before-initiate_payment; flip by seeding accept_quote:
+  // ["id_card"] if compliance wants accept-time.
+  verificationRequirements Json?
   quoteValidityDays       Int      @default(30)
   isActive                Boolean  @default(true)
   createdAt               DateTime @default(now())
@@ -317,6 +322,7 @@ model Customer {
   dnts              Dnt[]
   dntSessions       DntSession[]
   verificationChallenges VerificationChallenge[]
+  documents         CustomerDocument[]
 }
 
 // B3.4: ONE challenge primitive with two presentations (in-chat OTP code and
@@ -342,6 +348,40 @@ model VerificationChallenge {
   customer Customer @relation(fields: [customerId], references: [id])
 
   @@index([customerId, consumedAt])
+}
+
+// B3.7: identity documents. Images live ONLY here, AES-GCM encrypted —
+// never in the ledger or TurnDebug (T14.D5).
+enum DocumentKind {
+  id_card
+}
+
+enum DocumentStatus {
+  uploaded
+  extracted
+  validated
+  review
+  rejected
+}
+
+model CustomerDocument {
+  id                 String         @id @default(cuid())
+  customerId         String
+  kind               DocumentKind
+  status             DocumentStatus @default(uploaded)
+  encryptedData      Bytes
+  dataIv             String
+  dataTag            String
+  language           String?
+  extractedFields    Json?
+  validationFindings Json?
+  verifiedFields     String[]
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([customerId, status])
 }
 
 enum ConsentKind {
