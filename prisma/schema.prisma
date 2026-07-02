@@ -318,6 +318,32 @@ model Customer {
   consentEvents     ConsentEvent[]
   dnts              Dnt[]
   dntSessions       DntSession[]
+  verificationChallenges VerificationChallenge[]
+}
+
+// B3.4: ONE challenge primitive with two presentations (in-chat OTP code and
+// magic link) — the same row backs both, so the paths cannot diverge (T4-R5).
+enum VerificationChannel {
+  email
+  sms
+}
+
+model VerificationChallenge {
+  id                String              @id @default(cuid())
+  customerId        String
+  channel           VerificationChannel
+  target            String
+  codeHash          String
+  linkToken         String?             @unique
+  conversationId    String?
+  expiresAt         DateTime
+  attemptsRemaining Int                 @default(5)
+  consumedAt        DateTime?
+  createdAt         DateTime            @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([customerId, consumedAt])
 }
 
 enum ConsentKind {

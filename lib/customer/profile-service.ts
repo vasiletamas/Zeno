@@ -16,7 +16,7 @@ export type ProfileWriteResult =
   | { outcome: 'applied'; provenance: FieldRecord['provenance']; mirrorConflict?: string }
   | { outcome: 'rejected'; reason: 'field_verified_immutable' }
 
-type Db = Pick<typeof prisma, 'customerProfileField' | 'customer'>
+type Db = Pick<typeof prisma, 'customerProfileField' | 'customer' | 'verificationChallenge'>
 
 const MIRROR: Partial<Record<ProfileFieldName, (v: string) => Record<string, unknown>>> = {
   email: v => ({ email: v }),
@@ -85,8 +85,8 @@ export async function setVerifiedField(customerId: string, field: ProfileFieldNa
  * Identity facts for tier derivation (B3.2) — INTERNAL: cnp is decrypted so
  * deriveIdentityTier can checksum it; never serialize these values outward
  * (the snapshot stores only the derived tier + field presence/provenance).
- * verifiedChannels reads consumed VerificationChallenge rows once B3.4
- * lands the model; until then no channel can be verified.
+ * verifiedChannels = channels with a CONSUMED VerificationChallenge (B3.4);
+ * invalidated/expired challenges never count.
  */
 export async function getIdentityFacts(customerId: string, db: Db = prisma): Promise<{
   fields: Partial<Record<'name' | 'cnp' | 'dateOfBirth' | 'email' | 'phone', { value: string; provenance: 'declared' | 'verified' | 'conflict' }>>
@@ -98,7 +98,12 @@ export async function getIdentityFacts(customerId: string, db: Db = prisma): Pro
     if (!['name', 'cnp', 'dateOfBirth', 'email', 'phone'].includes(r.field)) continue
     fields[r.field] = { value: decodeFieldValue(r.field, r.value), provenance: r.provenance as 'declared' | 'verified' | 'conflict' }
   }
-  return { fields, verifiedChannels: [] }
+  const consumed = await db.verificationChallenge.findMany({
+    where: { customerId, consumedAt: { not: null } },
+    select: { channel: true },
+    distinct: ['channel'],
+  })
+  return { fields, verifiedChannels: consumed.map((r) => r.channel) }
 }
 
 export async function getProfile(customerId: string) {
