@@ -33,7 +33,6 @@ export interface PromptSections {
   customerContext: string | null
   coachingBriefing: string | null
   domainGuidance: string | null
-  workflowInstructions: string | null
   questionnaireContext: string | null
   productContext: string | null
   catalogOverview: string | null
@@ -87,7 +86,6 @@ const SECTION_REGISTRY: SectionConfig[] = [
   { key: 'customerMemory',      priority: 11, layer: 'dynamic',     alwaysInclude: false, prefix: '=== RETURNING CUSTOMER ===' },
   { key: 'agentKnowledge',      priority: 12, layer: 'dynamic',     alwaysInclude: false, prefix: '=== PROVEN PATTERNS ===' },
   { key: 'customerContext',     priority: 13, layer: 'dynamic',     alwaysInclude: false, prefix: '=== CUSTOMER PROFILE ===' },
-  { key: 'workflowInstructions',priority: 14, layer: 'dynamic',     alwaysInclude: true,  prefix: '=== ACTIVE WORKFLOW ===' },
   { key: 'questionnaireContext', priority: 15, layer: 'dynamic',     alwaysInclude: false, prefix: '=== ACTIVE QUESTIONNAIRE ===' },
   { key: 'dntContext',          priority: 16, layer: 'dynamic',     alwaysInclude: false, prefix: '=== NEEDS ANALYSIS (DNT) ===' },
   { key: 'paymentContext',      priority: 17, layer: 'dynamic',     alwaysInclude: false, prefix: '=== PAYMENT ===' },
@@ -109,11 +107,11 @@ const INTERNAL_GUIDANCE_SEPARATOR =
 // ==============================================
 
 /**
- * Fast-path GateSelection: only include questionnaire + workflow sections.
+ * Fast-path GateSelection: only include the questionnaire section.
  * Used when detectFastPath returns true.
  */
 export const FAST_PATH_GATE: GateSelection = {
-  requiredSections: ['questionnaireContext', 'workflowInstructions'],
+  requiredSections: ['questionnaireContext'],
   excludedSections: [
     'productContext',
     'coachingBriefing',

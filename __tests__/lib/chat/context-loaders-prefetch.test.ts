@@ -26,7 +26,6 @@ const { loadAllSections, loadCustomerContextFromData } = await import(
 )
 
 const emptyStateGroundingInput = {
-  workflowSession: null,
   application: null,
   product: null,
   customer: { gdprConsentAt: null, gdprConsentScope: null, aiDisclosureAcknowledgedAt: null },
@@ -64,8 +63,6 @@ describe('loadAllSections with prefetchedCustomer', () => {
       productId: null,
       conversationId: 'conv-1',
       customerId: 'cust-1',
-      workflowSession: null,
-      workflowStepCode: null,
       situationalBriefing: null,
       language: 'ro',
       prefetchedCustomer,
@@ -104,8 +101,6 @@ describe('loadAllSections with prefetchedCustomer', () => {
       productId: null,
       conversationId: 'conv-1',
       customerId: 'cust-1',
-      workflowSession: null,
-      workflowStepCode: null,
       situationalBriefing: null,
       language: 'ro',
       stateGroundingInput: emptyStateGroundingInput,
@@ -123,15 +118,12 @@ describe('loadAllSections with prefetchedCustomer', () => {
       productId: null,
       conversationId: 'conv-1',
       customerId: 'cust-1',
-      workflowSession: null,
-      workflowStepCode: null,
       situationalBriefing: null,
       language: 'ro',
       stateGroundingInput: emptyStateGroundingInput,
     })
 
     expect(result.stateGrounding).toContain('=== CURRENT SYSTEM STATE')
-    expect(result.stateGrounding).toContain('✗ No workflow is active')
     expect(result.stateGrounding).toContain('✗ No product is selected')
   })
 })

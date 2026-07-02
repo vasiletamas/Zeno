@@ -22,20 +22,6 @@ const baseConversation = {
   mode: 'SALES',
   productId: 'prod-1',
   product: { id: 'prod-1', code: 'PROD-1', name: { ro: 'Produs 1', en: 'Product 1' } },
-  workflowSession: {
-    id: 'ws-1',
-    workflowId: 'wf-1',
-    currentStepId: 'step-1',
-    currentStep: {
-      id: 'step-1',
-      code: 'INTRO',
-      name: 'Introduction',
-      agentInstructions: 'Greet the customer',
-      allowedTools: ['tool-a'],
-      autoTool: null,
-    },
-    data: { foo: 'bar' },
-  },
   application: {
     status: 'IN_PROGRESS',
     currentQuestionIndex: 2,
@@ -133,9 +119,6 @@ describe('loadTurnContext', () => {
 
       const ctx = await loadTurnContext('conv-1', 'cust-1')
 
-      expect(ctx.conversation.workflowSession?.id).toBe('ws-1')
-      expect(ctx.conversation.workflowSession?.currentStep.code).toBe('INTRO')
-      expect(ctx.conversation.workflowSession?.currentStep.allowedTools).toEqual(['tool-a'])
     })
 
     it('returns application with quote and policy', async () => {

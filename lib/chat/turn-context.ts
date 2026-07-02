@@ -21,20 +21,6 @@ export interface TurnContextConversation {
   candidateProductId: string | null
   candidateConfidence: number | null
   candidateSetAt: Date | null
-  workflowSession: {
-    id: string
-    workflowId: string
-    currentStepId: string
-    currentStep: {
-      id: string
-      code: string
-      name: string
-      agentInstructions: string | null
-      allowedTools: string[]
-      autoTool: string | null
-    }
-    data: unknown
-  } | null
   application: {
     status: string
     currentQuestionIndex: number
@@ -85,25 +71,11 @@ export async function loadTurnContext(
   customerId: string,
 ): Promise<TurnContext> {
   const [rawConversation, rawCustomer, rawMessages] = await Promise.all([
-    // Query 1 — conversation with product, workflowSession (+ currentStep), application (+ quote + policy)
+    // Query 1 — conversation with product and application (+ quote + policy)
     prisma.conversation.findUniqueOrThrow({
       where: { id: conversationId },
       include: {
         product: { select: { id: true, code: true, name: true } },
-        workflowSession: {
-          include: {
-            currentStep: {
-              select: {
-                id: true,
-                code: true,
-                name: true,
-                agentInstructions: true,
-                allowedTools: true,
-                autoTool: true,
-              },
-            },
-          },
-        },
         application: {
           select: {
             status: true,
@@ -162,7 +134,6 @@ export async function loadTurnContext(
     candidateProductId: rawConversation.candidateProductId,
     candidateConfidence: rawConversation.candidateConfidence,
     candidateSetAt: rawConversation.candidateSetAt,
-    workflowSession: rawConversation.workflowSession ?? null,
     application: (rawConversation as { application?: TurnContextConversation['application'] }).application ?? null,
   }
 

@@ -18,9 +18,6 @@ async function main() {
           insights: { orderBy: { createdAt: 'asc' } },
         },
       },
-      workflowSession: {
-        include: { currentStep: { select: { code: true, name: true, agentInstructions: true } } },
-      },
     },
   })
 
@@ -46,11 +43,6 @@ async function main() {
   console.log('=== EXTRACTED PROFILE ===')
   console.log(JSON.stringify(conv.customer.extractedProfile, null, 2).slice(0, 400))
   console.log('')
-  console.log('=== CURRENT WORKFLOW STEP ===')
-  console.log('code:', conv.workflowSession?.currentStep.code)
-  console.log('name:', conv.workflowSession?.currentStep.name)
-  console.log('agentInstructions:')
-  console.log((conv.workflowSession?.currentStep.agentInstructions ?? '').slice(0, 1000))
 
   await prisma.$disconnect()
 }

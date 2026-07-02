@@ -33,4 +33,8 @@ describe('vocabulary closure (taxonomy-closure seed; full gherkin meta-test is B
     const offenders = tsFiles(LIB).filter((p) => /SkillPack|activeSkillPacks/.test(readFileSync(p, 'utf8')))
     expect(offenders).toEqual([])
   })
+  it('the workflow step machine is gone (T1.D3)', () => {
+    const offenders = tsFiles(LIB).filter((p) => /WorkflowSession|WorkflowStep|StepTransition|workflowInstructions/.test(readFileSync(p, 'utf8')))
+    expect(offenders).toEqual([])
+  })
 })

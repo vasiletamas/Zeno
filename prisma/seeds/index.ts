@@ -3,7 +3,6 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { seedProduct } from './seed-product'
 import { seedQuestions } from './seed-questions'
 import { seedObjections } from './seed-objections'
-import { seedWorkflows } from './seed-workflows'
 import { seedAgents } from './seed-agents'
 import { seedModelCatalog } from './seed-model-catalog'
 import { seedUsers } from './seed-users'
@@ -20,7 +19,6 @@ async function main() {
     await seedProduct(prisma)
     await seedQuestions(prisma)
     await seedObjections(prisma)
-    await seedWorkflows(prisma)
     await seedAgents(prisma)
     await seedModelCatalog(prisma)
     await seedAgentKnowledge(prisma)

@@ -31,7 +31,6 @@ describe('executeComplianceCheck selects the rule set from the pinned Phase', ()
   it('DISCOVERY uses the narrow presentation rule set', async () => {
     await executeComplianceCheck({
       messages: [{ role: 'user', content: 'hi' }],
-      workflowStepCode: null,
       customerProfile: null,
       phase: 'DISCOVERY',
     })
@@ -47,7 +46,6 @@ describe('executeComplianceCheck selects the rule set from the pinned Phase', ()
   it('every non-DISCOVERY Phase uses the full rule set', async () => {
     await executeComplianceCheck({
       messages: [{ role: 'user', content: 'hi' }],
-      workflowStepCode: 'application_fill',
       customerProfile: null,
       phase: 'APPLICATION',
     })

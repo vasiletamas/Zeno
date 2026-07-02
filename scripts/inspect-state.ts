@@ -13,12 +13,6 @@ async function main() {
       application: {
         include: { tier: { select: { code: true } }, level: { select: { code: true } } },
       },
-      workflowSession: {
-        include: {
-          currentStep: { select: { code: true } },
-          workflow: { select: { code: true } },
-        },
-      },
     },
   })
   if (!conv) {
@@ -41,12 +35,6 @@ async function main() {
               level: conv.application.level?.code ?? null,
               currentQuestionIndex: conv.application.currentQuestionIndex,
               totalQuestions: conv.application.totalQuestions,
-            }
-          : null,
-        workflowSession: conv.workflowSession
-          ? {
-              workflow: conv.workflowSession.workflow?.code ?? null,
-              step: conv.workflowSession.currentStep?.code ?? null,
             }
           : null,
       },

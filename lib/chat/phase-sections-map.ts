@@ -3,7 +3,7 @@ import type { Phase, AppSubphase, DerivedStateV3, ExposedActions } from '@/lib/e
 // TARGET map (A4.3, T10.D4). Every removal from the A1 content-preserving map
 // carries its 'retired because X' note in
 // docs/superpowers/notes/2026-06-zeno-prompt-section-inventory.md:
-// workflowInstructions retired (dead machine, row 14); coachingBriefing off
+// the workflow-instructions section retired (dead machine, row 14); coachingBriefing off
 // the QUOTE surfaces (row 7); productContext/complianceGuidance off
 // PAYMENT/POLICY, replaced by the dedicated per-state sections (rows 6, 9 —
 // the compliance CHECKER still runs there).

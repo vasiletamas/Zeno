@@ -51,13 +51,6 @@ enum PaymentProvider {
   MOCK
 }
 
-enum WorkflowSessionStatus {
-  ACTIVE
-  PAUSED
-  COMPLETED
-  CANCELLED
-}
-
 enum LLMProvider {
   OPENAI
   ANTHROPIC
@@ -322,7 +315,6 @@ model Conversation {
   product          Product?             @relation("ConversationProduct", fields: [productId], references: [id])
   candidateProduct Product?             @relation("ConversationCandidateProduct", fields: [candidateProductId], references: [id])
   messages         Message[]
-  workflowSession  WorkflowSession?
   summary          ConversationSummary?
   answers          Answer[]
   application      Application?
@@ -360,74 +352,8 @@ model ConversationSummary {
 }
 
 // ==========================================
-// DOMAIN: WORKFLOW AND QUESTIONNAIRE
+// DOMAIN: QUESTIONNAIRE
 // ==========================================
-
-model Workflow {
-  id          String   @id @default(cuid())
-  code        String   @unique
-  name        String
-  description String?
-  isActive    Boolean  @default(true)
-  version     Int      @default(1)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  steps    WorkflowStep[]
-  sessions WorkflowSession[]
-}
-
-model WorkflowStep {
-  id                String   @id @default(cuid())
-  workflowId        String
-  code              String
-  name              String
-  type              String
-  orderIndex        Int
-  autoTool          String?
-  allowedTools      String[]
-  agentInstructions String?  @db.Text
-  salesPlaybook     String?  @db.Text
-  uiAction          String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  workflow         Workflow          @relation(fields: [workflowId], references: [id])
-  transitionsFrom  StepTransition[]  @relation("fromStep")
-  transitionsTo    StepTransition[]  @relation("toStep")
-  workflowSessions WorkflowSession[]
-
-  @@unique([workflowId, code])
-}
-
-model StepTransition {
-  id             String   @id @default(cuid())
-  fromStepId     String
-  toStepId       String
-  conditionType  String
-  conditionValue String
-  label          String?
-  priority       Int      @default(0)
-  createdAt      DateTime @default(now())
-
-  fromStep WorkflowStep @relation("fromStep", fields: [fromStepId], references: [id])
-  toStep   WorkflowStep @relation("toStep", fields: [toStepId], references: [id])
-}
-
-model WorkflowSession {
-  id             String                @id @default(cuid())
-  workflowId     String
-  currentStepId  String
-  conversationId String                @unique
-  status         WorkflowSessionStatus @default(ACTIVE)
-  data           Json?
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
-
-  workflow     Workflow     @relation(fields: [workflowId], references: [id])
-  currentStep  WorkflowStep @relation(fields: [currentStepId], references: [id])
-  conversation Conversation @relation(fields: [conversationId], references: [id])
-}
 
 model QuestionGroup {
   id          String   @id @default(cuid())

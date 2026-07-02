@@ -142,13 +142,6 @@ export interface ToolContext {
     premiumAnnual: number
     paymentFrequency: string | null
   }
-  workflowSession?: {
-    id: string
-    workflowId: string
-    currentStepId: string
-    currentStepCode: string
-    data: unknown
-  }
 }
 
 // ==============================================
@@ -157,12 +150,4 @@ export interface ToolContext {
 
 export interface PipelineResult {
   toolResult: ToolResult
-  transition?: {
-    previousStepCode: string
-    newStepCode: string
-    newStepName: string
-    newStepInstructions: string | null
-    newStepAutoTool: string | null
-  }
-  transitionError?: boolean
 }

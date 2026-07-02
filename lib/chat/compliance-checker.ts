@@ -5,7 +5,6 @@ import type { Phase } from '@/lib/engines/domain-types'
 
 export interface ComplianceCheckInput {
   messages: Message[]
-  workflowStepCode: string | null
   customerProfile: Record<string, unknown> | null
   phase: Phase
 }
@@ -70,9 +69,6 @@ export async function executeComplianceCheck(
   try {
     const contextParts: string[] = [...rulesForPhase(input.phase)]
 
-    if (input.workflowStepCode) {
-      contextParts.push(`Current workflow step: ${input.workflowStepCode}`)
-    }
     if (input.customerProfile) {
       contextParts.push(`Customer profile: ${JSON.stringify(input.customerProfile)}`)
     }

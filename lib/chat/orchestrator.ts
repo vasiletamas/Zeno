@@ -30,7 +30,7 @@ import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { deriveAndExpose, engineVersion } from '@/lib/engines/derive-and-expose'
 import type { DeriveAndExposeResult } from '@/lib/engines/domain-types'
 import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
-import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, loadDntContext, loadPaymentContext, loadPolicyContext, type WorkflowSessionData, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
+import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, loadDntContext, loadPaymentContext, loadPolicyContext, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
 import { buildTurnTools, DEGRADED_FLOOR } from './turn-tools'
 import { shouldRefreshExposure, formatRoundRefreshMessage } from './round-refresh'
 import { loadTurnContext, type TurnContext } from './turn-context'
@@ -128,8 +128,6 @@ interface TurnState {
   language: 'en' | 'ro'
   messageCount: number
   productId: string | null
-  workflowSessionId: string | null
-  workflowStepCode: string | null
   savedMessageId: string | null
   totalInputTokens: number
   totalOutputTokens: number
@@ -170,8 +168,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     language: input.language ?? 'ro',
     messageCount: 0,
     productId: null,
-    workflowSessionId: null,
-    workflowStepCode: null,
     savedMessageId: null,
     totalInputTokens: 0,
     totalOutputTokens: 0,
@@ -355,8 +351,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
   state.messageCount = turnCtx.conversation.messageCount
   state.productId = turnCtx.conversation.productId
-  state.workflowSessionId = turnCtx.conversation.workflowSession?.id ?? null
-  state.workflowStepCode = turnCtx.conversation.workflowSession?.currentStep.code ?? null
   state.conversationMode = turnCtx.conversation.mode ?? 'SALES'
   state.phases['step1_resolve'] = Date.now() - step1Start
   eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'resolve', durationMs: Date.now() - step1Start })
@@ -447,30 +441,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
     let sections: Awaited<ReturnType<typeof loadAllSections>>
     try {
-      // Build WorkflowSessionData from turnCtx
-      const workflowSessionData: WorkflowSessionData | null = turnCtx.conversation.workflowSession
-        ? {
-            currentStepCode: turnCtx.conversation.workflowSession.currentStep.code,
-            currentStepName: turnCtx.conversation.workflowSession.currentStep.name,
-            agentInstructions: turnCtx.conversation.workflowSession.currentStep.agentInstructions,
-            allowedTools: turnCtx.conversation.workflowSession.currentStep.allowedTools,
-            data: turnCtx.conversation.workflowSession.data,
-          }
-        : null
-
       // Build StateGroundingInput from turnCtx — feeds the "=== CURRENT SYSTEM STATE ==="
       // section so the agent has explicit ✓/✗ facts about the current world.
       // See docs/superpowers/specs/2026-05-20-zeno-state-grounding-design.md.
       const stateGroundingInput: StateGroundingInput = {
-        workflowSession: turnCtx.conversation.workflowSession
-          ? {
-              currentStep: {
-                code: turnCtx.conversation.workflowSession.currentStep.code,
-                name: turnCtx.conversation.workflowSession.currentStep.name,
-              },
-              status: 'ACTIVE',
-            }
-          : null,
         application: turnCtx.conversation.application
           ? {
               id: 'application',
@@ -498,8 +472,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         productId: state.productId,
         conversationId: state.conversationId,
         customerId: state.customerId,
-        workflowSession: workflowSessionData,
-        workflowStepCode: state.workflowStepCode,
         situationalBriefing: null, // patched after gate completes
         language: state.language,
         prefetchedCustomer: turnCtx.customer,
@@ -517,15 +489,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       // Minimal fallback — identity, constraints, and state grounding only
       // (state grounding is alwaysInclude: true, so it must be present even on fallback)
       const fallbackStateGroundingInput: StateGroundingInput = {
-        workflowSession: turnCtx.conversation.workflowSession
-          ? {
-              currentStep: {
-                code: turnCtx.conversation.workflowSession.currentStep.code,
-                name: turnCtx.conversation.workflowSession.currentStep.name,
-              },
-              status: 'ACTIVE',
-            }
-          : null,
         application: turnCtx.conversation.application
           ? {
               id: 'application',
@@ -555,7 +518,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         customerContext: null,
         coachingBriefing: null,
         domainGuidance: null,
-        workflowInstructions: null,
         questionnaireContext: null,
         productContext: null,
         catalogOverview: null,
@@ -614,7 +576,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     try {
       const complianceResult = await executeComplianceCheck({
         messages: complianceMessages,
-        workflowStepCode: state.workflowStepCode,
         customerProfile: null,
         phase: exposure.state.phase,
       })
@@ -808,13 +769,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       // GUI-originated commit: the customer clicked, the server resolved the
       // actor — never the model (A2.9).
       { ...toolContext, actor: 'gui' },
-      toolContext.workflowSession
-        ? {
-            id: toolContext.workflowSession.id,
-            currentStepId: toolContext.workflowSession.currentStepId,
-            workflowId: toolContext.workflowSession.workflowId,
-          }
-        : null,
       state.traceId,
     )
 
@@ -828,7 +782,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         data: pipelineResult.toolResult.data,
         error: pipelineResult.toolResult.error,
         uiAction: pipelineResult.toolResult.uiAction as unknown as Record<string, unknown> | undefined,
-        transition: pipelineResult.transition as unknown as Record<string, unknown> | undefined,
         confirmation: pipelineResult.toolResult.confirmation,
         traceId: state.traceId,
       },
@@ -882,22 +835,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       toolCalls: [tc],
     }
     messages.push(syntheticAssistantMsg, toolResultMessage)
-
-    // If transition occurred, inject context
-    if (pipelineResult.transition) {
-      const trParts = [
-        `[Workflow Transition]`,
-        `Previous step: "${pipelineResult.transition.previousStepCode}"`,
-        `New step: "${pipelineResult.transition.newStepName}"`,
-      ]
-      if (pipelineResult.transition.newStepInstructions) {
-        trParts.push(`\nNew step instructions:\n${pipelineResult.transition.newStepInstructions}`)
-      }
-      if (pipelineResult.transition.newStepAutoTool) {
-        trParts.push(`\nYou should now call: ${pipelineResult.transition.newStepAutoTool}`)
-      }
-      messages.push({ role: 'system', content: trParts.join('\n') })
-    }
 
     // Stream a natural language response
     const responseStream = await gateway.stream(agentSlug, {
@@ -1052,13 +989,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           tc.name,
           tc.arguments,
           toolContext,
-          toolContext.workflowSession
-            ? {
-                id: toolContext.workflowSession.id,
-                currentStepId: toolContext.workflowSession.currentStepId,
-                workflowId: toolContext.workflowSession.workflowId,
-              }
-            : null,
           state.traceId,
         ).catch((err: unknown) => logError({
           layer: 'orchestrator',
@@ -1120,13 +1050,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
                 tc.name,
                 tc.arguments,
                 toolContext,
-                toolContext.workflowSession
-                  ? {
-                      id: toolContext.workflowSession.id,
-                      currentStepId: toolContext.workflowSession.currentStepId,
-                      workflowId: toolContext.workflowSession.workflowId,
-                    }
-                  : null,
                 state.traceId,
               )
             } catch (err: unknown) {
@@ -1152,8 +1075,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
               data: pipelineResult.toolResult.data,
               error: pipelineResult.toolResult.error,
               uiAction: pipelineResult.toolResult.uiAction as unknown as Record<string, unknown> | undefined,
-              transition: pipelineResult.transition as unknown as Record<string, unknown> | undefined,
-              confirmation: pipelineResult.toolResult.confirmation,
+                    confirmation: pipelineResult.toolResult.confirmation,
               traceId: state.traceId,
             },
           })
@@ -1200,13 +1122,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
             tc.name,
             tc.arguments,
             toolContext,
-            toolContext.workflowSession
-              ? {
-                  id: toolContext.workflowSession.id,
-                  currentStepId: toolContext.workflowSession.currentStepId,
-                  workflowId: toolContext.workflowSession.workflowId,
-                }
-              : null,
             state.traceId,
           )
         } catch (err: unknown) {
@@ -1228,8 +1143,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
             data: pipelineResult.toolResult.data,
             error: pipelineResult.toolResult.error,
             uiAction: pipelineResult.toolResult.uiAction as unknown as Record<string, unknown> | undefined,
-            transition: pipelineResult.transition as unknown as Record<string, unknown> | undefined,
-            confirmation: pipelineResult.toolResult.confirmation,
+                confirmation: pipelineResult.toolResult.confirmation,
             traceId: state.traceId,
           },
         })
@@ -1262,22 +1176,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           toolCallId: tc.id,
         })
 
-        if (pipelineResult.transition) {
-          const trParts = [
-            `[Workflow Transition]`,
-            `Previous step: "${pipelineResult.transition.previousStepCode}"`,
-            `New step: "${pipelineResult.transition.newStepName}"`,
-          ]
-          if (pipelineResult.transition.newStepInstructions) {
-            trParts.push(`\nNew step instructions:\n${pipelineResult.transition.newStepInstructions}`)
-          }
-          if (pipelineResult.transition.newStepAutoTool) {
-            trParts.push(`\nYou should now call: ${pipelineResult.transition.newStepAutoTool}`)
-          } else {
-            trParts.push(`\nThis is an interactive step — follow the instructions above.`)
-          }
-          messages.push({ role: 'system', content: trParts.join('\n') })
-        }
       }
 
       // Re-derive exposure after every applied commit round (A3.4, T1.D5):

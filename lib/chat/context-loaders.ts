@@ -7,9 +7,8 @@
  * Three layers:
  * - CONSTITUTION: loadAgentIdentity, loadCapabilityManifest, loadConstraints
  * - REASONING:    situationalBriefing (passed through from gate output)
- * - DYNAMIC:      loadProductContext, loadCoachingBriefing, loadWorkflowInstructions,
- *                 loadQuestionnaireContext, loadCustomerContext, loadCustomerMemory,
- *                 loadAgentKnowledge
+ * - DYNAMIC:      loadProductContext, loadCoachingBriefing, loadQuestionnaireContext,
+ *                 loadCustomerContext, loadCustomerMemory, loadAgentKnowledge
  */
 
 import { prisma } from '@/lib/db'
@@ -33,15 +32,6 @@ const catalogOverviewCache = new LRUCache<string, string>(2, 10 * 60 * 1000) // 
 // ==============================================
 // TYPES
 // ==============================================
-
-/** Shape of workflow session data passed in from orchestrator */
-export interface WorkflowSessionData {
-  currentStepCode: string
-  currentStepName: string
-  agentInstructions: string | null
-  allowedTools: string[]
-  data: unknown
-}
 
 /** Shape for Json fields with en/ro keys */
 interface LocalizedText {
@@ -112,10 +102,6 @@ export function loadConstraints(
  * Input shape for loadStateGrounding. Comes from already-loaded turn context.
  */
 export interface StateGroundingInput {
-  workflowSession: {
-    currentStep: { code: string; name: string }
-    status: string
-  } | null
   application: {
     id: string
     status: string
@@ -154,13 +140,6 @@ function formatStateDate(d: Date): string {
 export function loadStateGrounding(input: StateGroundingInput): string {
   const lines: string[] = []
   lines.push('=== CURRENT SYSTEM STATE (ground truth — do not contradict) ===')
-
-  if (input.workflowSession) {
-    const s = input.workflowSession
-    lines.push(`✓ Active workflow: ${s.currentStep.code} (${s.currentStep.name})`)
-  } else {
-    lines.push('✗ No workflow is active')
-  }
 
   if (input.application) {
     const a = input.application
@@ -377,38 +356,16 @@ export function flushCatalogOverviewCache(): void {
 }
 
 /**
- * Load coaching briefing section.
- *
- * Prefers WorkflowStep.salesPlaybook when a workflow step is active
- * (subsystem B). Falls back to Product.defaultPlaybook when no workflow
- * is active OR when the active step has no playbook. Returns null when
- * neither source provides content — including the case where productId
- * is null and workflowStepCode is null.
- *
- * Cache key includes both inputs because the same product can be hit
- * with different workflow steps in the same conversation.
+ * Load coaching briefing section from Product.defaultPlaybook (the
+ * per-step playbook source died with the machine, A5.3).
  */
 export async function loadCoachingBriefing(
   productId: string | null,
-  workflowStepCode: string | null,
 ): Promise<string | null> {
-  const cacheKey = `${productId ?? 'null'}:${workflowStepCode ?? 'null'}`
+  const cacheKey = productId ?? 'null'
   const cached = coachingBriefingCache.get(cacheKey)
   if (cached !== undefined) return cached
 
-  // Prefer WorkflowStep.salesPlaybook
-  if (workflowStepCode) {
-    const step = await prisma.workflowStep.findFirst({
-      where: { code: workflowStepCode },
-      select: { salesPlaybook: true },
-    })
-    if (step?.salesPlaybook) {
-      coachingBriefingCache.set(cacheKey, step.salesPlaybook)
-      return step.salesPlaybook
-    }
-  }
-
-  // Fallback: Product.defaultPlaybook
   if (productId) {
     const product = await prisma.product.findUnique({
       where: { id: productId },
@@ -428,52 +385,6 @@ export async function loadCoachingBriefing(
  */
 export function flushCoachingBriefingCache(): void {
   coachingBriefingCache.clear()
-}
-
-/**
- * Load workflow instructions section.
- * Formats current step, agent instructions, and available tools.
- */
-export function loadWorkflowInstructions(
-  workflowSession: WorkflowSessionData | null,
-): string | null {
-  if (!workflowSession) return null
-
-  const parts: string[] = []
-  parts.push(
-    `Workflow step: ${workflowSession.currentStepName} (${workflowSession.currentStepCode})`,
-  )
-
-  if (workflowSession.agentInstructions) {
-    parts.push('')
-    parts.push('YOUR INSTRUCTIONS FOR THIS STEP:')
-    parts.push(workflowSession.agentInstructions)
-  }
-
-  if (workflowSession.allowedTools.length > 0) {
-    parts.push('')
-    parts.push('TOOLS YOU CAN USE NOW:')
-    for (const tool of workflowSession.allowedTools) {
-      parts.push(`- ${tool}`)
-    }
-  }
-
-  // Include collected data if available
-  if (workflowSession.data) {
-    const data = workflowSession.data as unknown as Record<string, unknown>
-    const entries = Object.entries(data).filter(
-      ([, v]) => v != null && v !== '',
-    )
-    if (entries.length > 0) {
-      parts.push('')
-      parts.push('DATA COLLECTED SO FAR:')
-      for (const [key, value] of entries) {
-        parts.push(`- ${key}: ${String(value)}`)
-      }
-    }
-  }
-
-  return parts.join('\n')
 }
 
 /**
@@ -963,8 +874,6 @@ export async function loadAllSections(params: {
   productId: string | null
   conversationId: string
   customerId: string
-  workflowSession: WorkflowSessionData | null
-  workflowStepCode: string | null
   situationalBriefing: string | null
   language: 'en' | 'ro'
   prefetchedCustomer?: PrefetchedCustomer
@@ -977,8 +886,6 @@ export async function loadAllSections(params: {
     productId,
     conversationId,
     customerId,
-    workflowSession,
-    workflowStepCode,
     situationalBriefing,
     language,
     prefetchedCustomer,
@@ -990,7 +897,6 @@ export async function loadAllSections(params: {
   const agentIdentity = loadAgentIdentity(agentConfig.systemPrompt)
   const capabilityManifest = loadCapabilityManifest(allowedTools)
   const constraints = loadConstraints(agentConfig.constraints)
-  const workflowInstructions = loadWorkflowInstructions(workflowSession)
   const stateGrounding = loadStateGrounding(stateGroundingInput)
 
   // Async loaders — run in parallel
@@ -1005,13 +911,13 @@ export async function loadAllSections(params: {
   ] = await Promise.all([
     loadCatalogOverview(language),
     productId ? loadProductContext(productId, language) : null,
-    (productId || workflowStepCode) ? loadCoachingBriefing(productId, workflowStepCode) : null,
-    loadQuestionnaireContext(conversationId, customerId, workflowStepCode, language),
+    productId ? loadCoachingBriefing(productId) : null,
+    loadQuestionnaireContext(conversationId, customerId, null, language), // dead input — C1 re-keys the questionnaire surface
     prefetchedCustomer
       ? Promise.resolve(loadCustomerContextFromData(prefetchedCustomer))
       : loadCustomerContext(customerId),
     loadCustomerMemory(customerId, preloadedInsights),
-    loadAgentKnowledge(productId, workflowStepCode),
+    loadAgentKnowledge(productId, null),
   ])
 
   return {
@@ -1026,7 +932,6 @@ export async function loadAllSections(params: {
     customerContext,
     coachingBriefing,
     domainGuidance: null, // former pack-injection slot; the pack subsystem died in A5.2
-    workflowInstructions,
     questionnaireContext,
     productContext,
     catalogOverview,

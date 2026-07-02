@@ -26,7 +26,6 @@ function makeSections(
     customerContext: 'Ion, age 35, married.',
     coachingBriefing: 'Focus on value, not price.',
     domainGuidance: null,
-    workflowInstructions: 'Ask the next DNT question.',
     questionnaireContext: 'Q5: What is your annual income?',
     productContext: 'Protect Standard I: 190 RON/year.',
     catalogOverview: 'These are the ONLY products: - [LIFE] Protect — life cover.',
@@ -75,19 +74,17 @@ describe('buildPrompt', () => {
     const prompt = result.prompt
 
     // Stable prefix: identity(1) → constraints(2) → product(4) → coaching(5)
-    // Dynamic suffix: briefing(10) → workflow(14)
+    // Dynamic suffix: briefing(10)
     const identityIdx = prompt.indexOf('You are Zeno')
     const constraintsIdx = prompt.indexOf('Never give medical advice')
     const productIdx = prompt.indexOf('Protect Standard I')
     const coachingIdx = prompt.indexOf('Focus on value')
     const briefingIdx = prompt.indexOf('Customer is asking about pricing')
-    const workflowIdx = prompt.indexOf('Ask the next DNT question')
 
     expect(identityIdx).toBeLessThan(constraintsIdx)
     expect(constraintsIdx).toBeLessThan(productIdx)
     expect(productIdx).toBeLessThan(coachingIdx)
     expect(coachingIdx).toBeLessThan(briefingIdx)
-    expect(briefingIdx).toBeLessThan(workflowIdx)
   })
 
   it('gate-driven exclusion removes non-alwaysInclude sections', () => {
@@ -121,7 +118,6 @@ describe('buildPrompt', () => {
         'agentIdentity',
         'constraints',
         'situationalBriefing',
-        'workflowInstructions',
       ],
       confidence: 0.9,
     }
@@ -132,13 +128,11 @@ describe('buildPrompt', () => {
     expect(result.prompt).toContain('You are Zeno')
     expect(result.prompt).toContain('Never give medical advice')
     expect(result.prompt).toContain('Customer is asking about pricing')
-    expect(result.prompt).toContain('Ask the next DNT question')
 
     // They should be in includedSections, not excludedSections
     expect(result.includedSections).toContain('agentIdentity')
     expect(result.includedSections).toContain('constraints')
     expect(result.includedSections).toContain('situationalBriefing')
-    expect(result.includedSections).toContain('workflowInstructions')
     expect(result.excludedSections).not.toContain('agentIdentity')
     expect(result.excludedSections).not.toContain('constraints')
   })
@@ -231,14 +225,13 @@ describe('prompt caching — stable prefix', () => {
     expect(result.dynamicSuffix).not.toContain('Protect Standard I')
   })
 
-  it('places situational + customer + workflow in dynamic suffix', () => {
+  it('places situational + customer in dynamic suffix', () => {
     const sections = makeSections()
     const result = buildPrompt(sections, NO_GATE)
 
     // Dynamic suffix should contain these
     expect(result.dynamicSuffix).toContain('Customer is asking about pricing')
     expect(result.dynamicSuffix).toContain('Ion, age 35')
-    expect(result.dynamicSuffix).toContain('Ask the next DNT question')
   })
 })
 
@@ -284,7 +277,6 @@ describe('detectFastPath', () => {
 describe('FAST_PATH_GATE', () => {
   it('has the expected shape', () => {
     expect(FAST_PATH_GATE.requiredSections).toContain('questionnaireContext')
-    expect(FAST_PATH_GATE.requiredSections).toContain('workflowInstructions')
     expect(FAST_PATH_GATE.excludedSections).toContain('productContext')
     expect(FAST_PATH_GATE.excludedSections).toContain('coachingBriefing')
     expect(FAST_PATH_GATE.excludedSections).toContain('customerContext')
@@ -312,7 +304,6 @@ describe('FAST_PATH_GATE', () => {
     // These should still be present (alwaysInclude or not excluded)
     expect(result.prompt).toContain('You are Zeno')
     expect(result.prompt).toContain('Never give medical advice')
-    expect(result.prompt).toContain('Ask the next DNT question')
     expect(result.prompt).toContain('Q5: What is your annual income?')
   })
 })

@@ -24,7 +24,6 @@ describe('executeComplianceCheck', () => {
 
     const result = await executeComplianceCheck({
       messages: [{ role: 'user', content: 'I want the cheapest plan' }],
-      workflowStepCode: 'quote_presentation',
       customerProfile: { age: 35 },
       phase: 'APPLICATION',
     })
@@ -41,7 +40,6 @@ describe('executeComplianceCheck', () => {
 
     await executeComplianceCheck({
       messages: [{ role: 'user', content: 'test' }],
-      workflowStepCode: null,
       customerProfile: null,
       phase: 'APPLICATION',
     })
@@ -55,8 +53,7 @@ describe('executeComplianceCheck', () => {
   it('returns passing result on empty response', async () => {
     vi.mocked(gateway.call).mockResolvedValue({ content: '' } as never)
     const result = await executeComplianceCheck({
-      messages: [], workflowStepCode: null, customerProfile: null, phase: 'APPLICATION',
-    })
+      messages: [], customerProfile: null, phase: 'APPLICATION' })
     expect(result.passed).toBe(true)
     expect(result.gaps).toEqual([])
   })
@@ -64,16 +61,14 @@ describe('executeComplianceCheck', () => {
   it('returns passing result on parse failure', async () => {
     vi.mocked(gateway.call).mockResolvedValue({ content: 'not json' } as never)
     const result = await executeComplianceCheck({
-      messages: [], workflowStepCode: null, customerProfile: null, phase: 'APPLICATION',
-    })
+      messages: [], customerProfile: null, phase: 'APPLICATION' })
     expect(result.passed).toBe(true)
   })
 
   it('returns passing result on gateway error (fail-open)', async () => {
     vi.mocked(gateway.call).mockRejectedValue(new Error('timeout'))
     const result = await executeComplianceCheck({
-      messages: [], workflowStepCode: null, customerProfile: null, phase: 'APPLICATION',
-    })
+      messages: [], customerProfile: null, phase: 'APPLICATION' })
     expect(result.passed).toBe(true)
     expect(result.gaps).toEqual([])
   })

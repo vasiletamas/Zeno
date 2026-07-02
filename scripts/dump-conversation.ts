@@ -28,13 +28,6 @@ async function main() {
           aiDisclosureAcknowledgedAt: true,
         },
       },
-      workflowSession: {
-        include: {
-          currentStep: {
-            select: { code: true, name: true, salesPlaybook: true },
-          },
-        },
-      },
       application: { select: { id: true, status: true, tierId: true, levelId: true } },
       messages: { orderBy: { createdAt: "asc" } },
       turnTraces: { orderBy: { messageIndex: "asc" } },
@@ -74,12 +67,6 @@ async function main() {
     startedAt: convo.startedAt,
     completedAt: convo.completedAt,
     customer: convo.customer,
-    workflow: convo.workflowSession ? {
-      status: convo.workflowSession.status,
-      currentStep: convo.workflowSession.currentStep?.code,
-      currentStepHasSalesPlaybook: convo.workflowSession.currentStep?.salesPlaybook != null,
-      data: convo.workflowSession.data,
-    } : null,
     application: convo.application,
     metadata: convo.metadata,
   }, null, 2));

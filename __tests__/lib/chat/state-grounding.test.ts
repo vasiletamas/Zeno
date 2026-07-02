@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import { loadStateGrounding } from '@/lib/chat/context-loaders'
 
 const emptyState = {
-  workflowSession: null,
   application: null,
   product: null,
   customer: { gdprConsentAt: null, gdprConsentScope: null, aiDisclosureAcknowledgedAt: null },
@@ -12,7 +11,6 @@ describe('loadStateGrounding', () => {
   it('returns the all-negative form when no state is present', () => {
     const result = loadStateGrounding(emptyState)
     expect(result).toContain('=== CURRENT SYSTEM STATE (ground truth — do not contradict) ===')
-    expect(result).toContain('✗ No workflow is active')
     expect(result).toContain('✗ No application has been started')
     expect(result).toContain('✗ No product is selected')
     expect(result).toContain('✗ GDPR consent has NOT been granted by this customer')
@@ -22,10 +20,6 @@ describe('loadStateGrounding', () => {
 
   it('returns positive lines for fields that are populated', () => {
     const result = loadStateGrounding({
-      workflowSession: {
-        currentStep: { code: 'dnt_questionnaire', name: 'DNT Questionnaire' },
-        status: 'ACTIVE',
-      },
       application: {
         id: 'APP-12345',
         status: 'IN_PROGRESS',
@@ -40,7 +34,6 @@ describe('loadStateGrounding', () => {
       },
     })
 
-    expect(result).toContain('✓ Active workflow: dnt_questionnaire (DNT Questionnaire)')
     expect(result).toContain('✓ Active application: APP-12345 (question 5/14)')
     expect(result).toContain('✓ Selected product: LIFE-PRO — Asigurare Viață Premium')
     expect(result).toContain('✓ GDPR consent: Granted at 2026-05-20')
@@ -50,13 +43,11 @@ describe('loadStateGrounding', () => {
 
   it('renders mixed states per-line correctly', () => {
     const result = loadStateGrounding({
-      workflowSession: null,
       application: null,
       product: { code: 'LIFE-PRO', name: 'Asigurare Viață Premium' },
       customer: { gdprConsentAt: null, gdprConsentScope: null, aiDisclosureAcknowledgedAt: null },
     })
 
-    expect(result).toContain('✗ No workflow is active')
     expect(result).toContain('✗ No application has been started')
     expect(result).toContain('✓ Selected product: LIFE-PRO — Asigurare Viață Premium')
     expect(result).toContain('✗ GDPR consent has NOT been granted by this customer')
@@ -64,7 +55,6 @@ describe('loadStateGrounding', () => {
 
   it('handles non-string product name shapes by stringifying defensively', () => {
     const result = loadStateGrounding({
-      workflowSession: null,
       application: null,
       product: { code: 'LIFE-PRO', name: { ro: 'Asigurare Viață Premium', en: 'Premium Life' } as unknown },
       customer: { gdprConsentAt: null, gdprConsentScope: null, aiDisclosureAcknowledgedAt: null },

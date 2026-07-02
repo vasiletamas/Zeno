@@ -53,16 +53,6 @@ export async function buildToolContext(
           },
         },
       },
-      workflowSession: {
-        include: {
-          currentStep: {
-            select: {
-              id: true,
-              code: true,
-            },
-          },
-        },
-      },
     },
   })
 
@@ -118,18 +108,6 @@ export async function buildToolContext(
           paymentFrequency: pol.paymentFrequency,
         }
       }
-    }
-  }
-
-  // Map workflow session if present
-  if (conversation?.workflowSession) {
-    const ws = conversation.workflowSession
-    ctx.workflowSession = {
-      id: ws.id,
-      workflowId: ws.workflowId,
-      currentStepId: ws.currentStepId,
-      currentStepCode: ws.currentStep.code,
-      data: ws.data,
     }
   }
 
