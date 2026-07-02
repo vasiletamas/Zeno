@@ -63,11 +63,14 @@ export function adaptAction(action: UIAction): ToolCall | null {
     }
 
     // ── Quote actions ──
+    // No self-confirmed buttons (M4/A3.5): the first click carries NO confirm
+    // flag — the gateway answers requires_confirmation with a token, the GUI
+    // confirm dialog round-trips it.
     case 'accept_quote':
       return {
         id: `action_${Date.now()}`,
         name: 'accept_quote',
-        arguments: { confirmAcceptance: true },
+        arguments: action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {},
       }
 
     case 'modify_quote':
@@ -115,7 +118,7 @@ export function adaptAction(action: UIAction): ToolCall | null {
       return {
         id: `action_${Date.now()}`,
         name: 'sign_dnt',
-        arguments: action.payload,
+        arguments: action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {},
       }
 
     case 'start_application':

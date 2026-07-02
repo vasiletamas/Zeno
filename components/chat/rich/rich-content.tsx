@@ -5,6 +5,7 @@ import { ProductCard } from './product-card'
 import { QuoteCard } from './quote-card'
 import { QuestionCard } from './question-card'
 import { BdResultCard } from './bd-result-card'
+import { ConfirmRequiredCard } from './confirm-required-card'
 import { PolicyIssuedCard } from './policy-issued-card'
 import { InlineDataForm } from './inline-data-form'
 import { PaymentCard } from './payment-card'
@@ -166,6 +167,20 @@ export function RichContent({
       )
     }
 
+    /* ── Gateway confirm round-trip (A3.5/M4) ─────── */
+    case 'confirm_required': {
+      return (
+        <ConfirmRequiredCard
+          tool={p.tool as string}
+          confirmToken={p.confirmToken as string}
+          onConfirm={(confirmAction) => onAction(confirmAction)}
+          language={language}
+          isAnswered={isAnswered}
+          isLoading={isLoading}
+        />
+      )
+    }
+
     /* ── Quote card ───────────────────────────────── */
     case 'show_quote': {
       return (
@@ -180,7 +195,9 @@ export function RichContent({
           addonCoverages={p.addonCoverages as CoveragePayload[]}
           validUntil={p.validUntil as string}
           onAccept={() =>
-            onAction({ type: 'accept_quote', payload: { confirmAcceptance: true } })
+            // No self-confirm (M4/A3.5): the tokenless first click makes the
+            // gateway answer requires_confirmation → confirm_required card.
+            onAction({ type: 'accept_quote', payload: {} })
           }
           onModify={() => onAction({ type: 'modify_quote', payload: {} })}
           language={language}

@@ -885,6 +885,23 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       }
     }
 
+    // Gateway parity (A3.5/M4): a requires_confirmation envelope becomes a
+    // confirm_required ui_action carrying the token, so the GUI renders the
+    // confirm dialog that round-trips the SAME commit + token the agent would.
+    if (pipelineResult.toolResult.envelope?.outcome === 'requires_confirmation') {
+      yield {
+        event: 'ui_action',
+        data: {
+          type: 'confirm_required',
+          payload: {
+            tool: tc.name,
+            confirmToken: pipelineResult.toolResult.envelope.confirmToken,
+            preview: pipelineResult.toolResult.envelope.data,
+          },
+        },
+      }
+    }
+
     // Build tool result message for LLM
     const toolResultMessage: Message = {
       role: 'tool',
