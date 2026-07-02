@@ -12,9 +12,9 @@
  * 5. Send confirmation email (catch errors, never throw)
  */
 
-import crypto from 'crypto'
 import { prisma } from '@/lib/db'
 import { getEmailProvider } from '@/lib/email'
+import { issueChallenge } from '@/lib/customer/verification-service'
 import { purchaseConfirmationEmail } from '@/lib/email/templates/purchase-confirmation'
 import { generateDntReport } from '@/lib/compliance/dnt-report'
 import { trackPaymentCompleted } from '@/lib/analytics/events'
@@ -83,21 +83,28 @@ export async function runPostPaymentFlow(
     })
   }
 
-  // ─── Step 4: Generate magic link ───────────────────────────
-  const magicLinkToken = crypto.randomUUID()
-  const magicLinkExpiresAt = new Date()
-  magicLinkExpiresAt.setDate(magicLinkExpiresAt.getDate() + 7)
-
+  // ─── Step 4: Mint the re-entry link (B3.6: challenge primitive) ─
+  // The link rides the purchase-confirmation email below, so the
+  // challenge's own send is suppressed. It carries the paying conversation
+  // id — /api/auth/verify returns the customer to that conversation with a
+  // bound session (fixes the old dead /dashboard?token=... URL).
   await prisma.customer.update({
     where: { id: customer.id },
-    data: {
-      magicLinkToken,
-      magicLinkExpiresAt,
-      isAnonymous: false,
-    },
+    data: { isAnonymous: false },
   })
 
-  const dashboardUrl = `${process.env.APP_URL ?? 'http://localhost:3001'}/dashboard?token=${magicLinkToken}`
+  const appUrl = process.env.APP_URL ?? 'http://localhost:3001'
+  let dashboardUrl = `${appUrl}/dashboard`
+  if (customer.email) {
+    const conversationId = payment.policy.quote?.application?.conversationId ?? null
+    const { linkToken } = await issueChallenge(
+      customer.id, 'email', customer.email, conversationId,
+      prisma,
+      { send: async () => ({ messageId: 'embedded-in-confirmation-email' }) },
+      7 * 24 * 60 * 60 * 1000,
+    )
+    dashboardUrl = `${appUrl}/api/auth/verify?token=${linkToken}`
+  }
 
   // ─── Step 5: Send confirmation email ───────────────────────
   let emailSent = false

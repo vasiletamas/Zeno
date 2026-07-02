@@ -9,8 +9,7 @@
  * transaction — the conversation is repointed and the envelope carries the
  * canonical customerId for the session layer to rebind.
  */
-import { issueChallenge, confirmByCode } from '@/lib/customer/verification-service'
-import { claimAndMerge } from '@/lib/customer/claim-merge'
+import { issueChallenge, confirmByCode, applyVerifiedClaim } from '@/lib/customer/verification-service'
 import type { ToolHandler } from '@/lib/tools/types'
 
 const maskTarget = (channel: 'email' | 'sms', target: string): string => {
@@ -61,18 +60,13 @@ export const confirmChannelVerification: ToolHandler = async (args, context) => 
       return { success: false, error: `${r.reason}: ${prose[r.reason]}` }
     }
 
-    // Verified claim path (T4.D4): if the target already belongs to another
-    // customer, THIS verification is the proof of ownership — merge the
-    // anonymous shell into the verified owner, inside the gateway tx.
-    const ownerWhere = r.channel === 'email' ? { email: r.target } : { phone: r.target }
-    const owner = await context.db.customer.findFirst({
-      where: { ...ownerWhere, id: { not: context.customerId }, mergedIntoId: null },
-    })
-    if (owner) {
-      await claimAndMerge(context.customerId, owner.id, context.db)
+    // Verified claim path (T4.D4) — shared with the magic-link route so the
+    // two presentations cannot diverge; runs inside the gateway tx.
+    const claim = await applyVerifiedClaim(r, context.db)
+    if (claim.merged) {
       return {
         success: true,
-        data: { customerId: owner.id, merged: true, channel: r.channel },
+        data: { customerId: claim.customerId, merged: true, channel: r.channel },
         message: 'Channel verified — this contact already had an account, so the conversation now continues on it with the customer’s history.',
       }
     }

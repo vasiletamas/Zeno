@@ -95,9 +95,11 @@ export async function DELETE(request: NextRequest) {
         address: Prisma.DbNull,
         dateOfBirth: null,
         isAnonymous: true,
-        magicLinkToken: null,
-        magicLinkExpiresAt: null,
       },
+    })
+    // B3.6: magic links are VerificationChallenge rows now — erase them too.
+    const challengeResult = await prisma.verificationChallenge.deleteMany({
+      where: { customerId },
     })
     // The B0 provenance store holds per-field PII — erase it with the mirrors.
     const profileFieldResult = await prisma.customerProfileField.deleteMany({
@@ -111,7 +113,7 @@ export async function DELETE(request: NextRequest) {
       'address',
       `profileFields (${profileFieldResult.count} records)`,
       'dateOfBirth',
-      'magicLinkToken',
+      `verificationChallenges (${challengeResult.count} records)`,
     )
 
     // 2. Delete Answers for customer's conversations

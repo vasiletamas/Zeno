@@ -11,6 +11,7 @@ import { createHash, randomInt, randomUUID } from 'crypto'
 import { prisma } from '@/lib/db'
 import { getEmailProvider } from '@/lib/email'
 import { setVerifiedField } from '@/lib/customer/profile-service'
+import { claimAndMerge } from '@/lib/customer/claim-merge'
 import type { EmailProvider } from '@/lib/email/types'
 import type { VerificationChallenge, Prisma } from '@/lib/generated/prisma/client'
 
@@ -25,6 +26,11 @@ export type ConfirmResult =
   | { ok: true; channel: 'email' | 'sms'; target: string; conversationId: string | null; challengeId: string; customerId: string }
   | { ok: false; reason: 'no_active_challenge' | 'code_mismatch' | 'attempts_exhausted' | 'expired_or_consumed' }
 
+/**
+ * Callers embedding the link in their own message (e.g. the post-payment
+ * confirmation email) pass a no-op provider to suppress the standalone
+ * send, and a longer ttlMs — the challenge itself is unchanged.
+ */
 export async function issueChallenge(
   customerId: string,
   channel: 'email' | 'sms',
@@ -32,6 +38,7 @@ export async function issueChallenge(
   conversationId: string | null,
   db: Db = prisma,
   provider: EmailProvider = getEmailProvider(),
+  ttlMs: number = CHALLENGE_TTL_MS,
 ): Promise<{ challengeId: string; code: string; linkToken: string }> {
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0')
   const linkToken = randomUUID()
@@ -49,7 +56,7 @@ export async function issueChallenge(
       codeHash: sha256(code),
       linkToken,
       conversationId,
-      expiresAt: new Date(Date.now() + CHALLENGE_TTL_MS),
+      expiresAt: new Date(Date.now() + ttlMs),
       attemptsRemaining: MAX_ATTEMPTS,
     },
   })
@@ -107,6 +114,27 @@ export async function confirmByLinkToken(linkToken: string, db: Db = prisma): Pr
     return { ok: false, reason: 'expired_or_consumed' }
   }
   return completeChannelVerification(challenge, db)
+}
+
+/**
+ * Verified claim (T4.D4), shared by the OTP commit and the magic-link route
+ * so the two paths cannot diverge: if the just-verified target belongs to
+ * another customer, THIS verification proves ownership — the shell merges
+ * INTO the owner and the caller continues on the canonical customerId.
+ * Inside a gateway commit pass the tx client (claimAndMerge otherwise opens
+ * its own transaction).
+ */
+export async function applyVerifiedClaim(
+  r: Extract<ConfirmResult, { ok: true }>,
+  db: Db = prisma,
+): Promise<{ customerId: string; merged: boolean }> {
+  const ownerWhere = r.channel === 'email' ? { email: r.target } : { phone: r.target }
+  const owner = await db.customer.findFirst({
+    where: { ...ownerWhere, id: { not: r.customerId }, mergedIntoId: null },
+  })
+  if (!owner) return { customerId: r.customerId, merged: false }
+  await claimAndMerge(r.customerId, owner.id, db === prisma ? undefined : (db as Parameters<typeof claimAndMerge>[2]))
+  return { customerId: owner.id, merged: true }
 }
 
 /** Channels this customer has verified — consumed challenges only. */

@@ -300,8 +300,6 @@ model Customer {
   isAnonymous        Boolean   @default(true)
   mergedIntoId       String?
   mergedAt           DateTime?
-  magicLinkToken     String?   @unique
-  magicLinkExpiresAt DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
