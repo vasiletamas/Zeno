@@ -1,43 +1,34 @@
 /**
  * Utility Handlers
  *
- * escalate_to_human
+ * escalate_to_human — persists an ESCALATION WorkItem through the commit
+ * gateway (E2.2). Conversation status is untouched: it carries zero funnel
+ * semantics (contradiction #11).
  */
 
+import { createWorkItem } from '@/lib/work-items/service'
 import type { ToolHandler } from '@/lib/tools/types'
 
-// ─────────────────────────────────────────────
-// escalate_to_human
-// ─────────────────────────────────────────────
+const PRIORITY_MAP: Record<string, 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'> = {
+  low: 'LOW', medium: 'MEDIUM', high: 'HIGH', urgent: 'URGENT',
+}
 
 export const escalateToHuman: ToolHandler = async (args, context) => {
   const reason = (args.reason as string | undefined) ?? 'unspecified'
-  const priority = (args.priority as string | undefined) ?? 'medium'
-
+  const priority = PRIORITY_MAP[(args.priority as string | undefined) ?? 'medium'] ?? 'MEDIUM'
   try {
-    // Update Conversation status -> IDLE
-    await context.db.conversation.update({
-      where: { id: context.conversationId },
-      data: { status: 'IDLE' },
-    })
-
-    // Log escalation (console for now; DB persistence in Phase B)
-    console.log(`[ESCALATION] Conversation ${context.conversationId}:`, {
-      reason,
-      priority,
-      customerId: context.customerId,
-      timestamp: new Date().toISOString(),
-    })
-
+    const item = await createWorkItem(
+      {
+        kind: 'ESCALATION', reason, priority,
+        refs: { conversationId: context.conversationId, customerId: context.customerId },
+        createdBy: 'agent',
+      },
+      context.db,
+    )
     return {
       success: true,
-      data: {
-        escalated: true,
-        reason,
-        priority,
-      },
-      message:
-        'Conversation escalated to a human agent. A specialist will follow up shortly with full context of this conversation.',
+      data: { escalated: true, workItemId: item.id, reason, priority },
+      message: 'Escalation recorded. A specialist will follow up with full context of this conversation.',
     }
   } catch (error) {
     return { success: false, error: String(error) }
