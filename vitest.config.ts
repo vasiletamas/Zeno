@@ -29,6 +29,9 @@ export default defineConfig({
           name: 'integration',
           include: ['__tests__/integration/**/*.test.ts'],
           fileParallelism: false,
+          // Loads .env AND aliases DATABASE_URL <-> TEST_DATABASE_URL before
+          // any test imports '@/lib/db' (single-client rule, A2.ADD-1).
+          setupFiles: ['./__tests__/helpers/integration-env.ts'],
         },
       },
     ],
