@@ -21,6 +21,9 @@ vi.mock('@/lib/db', () => ({
     },
     // B2.6: the DNT gate reads the customer-scoped Dnt aggregate.
     dnt: { findFirst: () => Promise.resolve({ id: 'dnt-1', status: 'ACTIVE', signedAt: new Date(), validUntil: new Date(Date.now() + 3600e3), productTypesCovered: ['LIFE'] }) },
+    // B3.ADD-3: the soft verification offer derives the identity tier.
+    customerProfileField: { findMany: () => Promise.resolve([]) },
+    verificationChallenge: { findMany: () => Promise.resolve([]) },
   },
 }))
 vi.mock('@/lib/engines/questionnaire-engine', () => ({
