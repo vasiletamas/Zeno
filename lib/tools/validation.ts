@@ -144,6 +144,19 @@ const escalateToHumanSchema = z.object({
 }).strict()
 
 // ==============================================
+// IDENTITY / CHANNEL VERIFICATION (B3.5)
+// ==============================================
+
+const startChannelVerificationSchema = z.object({
+  channel: z.enum(['email', 'sms']),
+  target: z.string().min(3, 'Target contact is required'),
+}).strict()
+
+const confirmChannelVerificationSchema = z.object({
+  code: z.string().regex(/^\d{6}$/, 'The verification code is 6 digits'),
+}).strict()
+
+// ==============================================
 // OPERATOR QUEUE (E2.4)
 // ==============================================
 
@@ -218,6 +231,10 @@ const toolSchemas: Record<string, ZodType> = {
 
   // Consent
   withdraw_consent: withdrawConsentSchema,
+
+  // Identity / channel verification
+  start_channel_verification: startChannelVerificationSchema,
+  confirm_channel_verification: confirmChannelVerificationSchema,
 
   // Operator queue
   resolve_referral: resolveReferralSchema,

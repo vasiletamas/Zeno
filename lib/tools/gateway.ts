@@ -53,7 +53,12 @@ const ONE_SHOT = new Set(['sign_dnt', 'accept_quote', 'generate_quote', 'start_a
  * never by replaying a stale applied envelope — the session may have moved
  * or closed since the original apply, so a replay would lie about state.
  */
-const REPLAY_EXEMPT = new Set(['open_dnt_session'])
+const REPLAY_EXEMPT = new Set([
+  'open_dnt_session',
+  // B3.5: a repeated start with identical args is a RESEND — it must issue a
+  // fresh challenge (invalidating the prior), never replay the old envelope.
+  'start_channel_verification',
+])
 
 /**
  * Operator commits (E2.4): resolved by back-office staff, never exposed to

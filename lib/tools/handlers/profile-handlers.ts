@@ -5,7 +5,8 @@
  * facts with provenance, surfaced conflicts, and a history summary.
  */
 
-import { getProfile } from '@/lib/customer/profile-service'
+import { getProfile, getIdentityFacts } from '@/lib/customer/profile-service'
+import { deriveIdentityTier, missingIdentityFields } from '@/lib/engines/identity-rules'
 import type { ToolHandler } from '@/lib/tools/types'
 
 // ─────────────────────────────────────────────
@@ -23,6 +24,14 @@ export const getCustomerProfile: ToolHandler = async (_args, context) => {
     }
 
     const profile = await getProfile(context.customerId)
+
+    // B3 (M2): the identity slice — tier derived, never stored.
+    const facts = await getIdentityFacts(context.customerId)
+    const identity = {
+      tier: deriveIdentityTier(facts),
+      verifiedChannels: facts.verifiedChannels,
+      missingFields: missingIdentityFields(facts),
+    }
 
     // Load recent conversations
     const conversations = await context.db.conversation.findMany({
@@ -65,6 +74,7 @@ export const getCustomerProfile: ToolHandler = async (_args, context) => {
           fields: profile.fields as unknown as Record<string, unknown>,
           conflicts: profile.conflicts,
         },
+        identity: identity as unknown as Record<string, unknown>,
         recentConversations: conversations as unknown as Record<string, unknown>[],
         policies: policies as unknown as Record<string, unknown>[],
       },

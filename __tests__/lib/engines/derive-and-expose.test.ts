@@ -21,7 +21,7 @@ describe('deriveAndExpose — exposure over the FULL snapshot (contradiction #12
     expect(r.actions.blocked).toContainEqual(expect.objectContaining({ action: 'generate_quote', reason: 'requires_consent' }))
   })
   it('generate_quote available in APPLICATION/QUOTE_GENERATION with consent and declared cnp-or-dob (#1 row, B3.2)', () => {
-    const identity = { tier: 'anonymous' as const, fields: { dateOfBirth: { provenance: 'declared' as const } }, verifiedChannels: [] as ('email' | 'sms')[] }
+    const identity = { tier: 'anonymous' as const, fields: { dateOfBirth: { provenance: 'declared' as const } }, verifiedChannels: [] as ('email' | 'sms')[], pendingChallenge: null }
     const r = deriveAndExpose(makeSnapshot({ application: doneApp, dnt: validDnt, identity, consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true } }))
     expect(r.actions.available).toContain('generate_quote')
   })

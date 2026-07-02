@@ -17,6 +17,10 @@ export class MockEmailProvider implements EmailProvider {
   }): Promise<{ messageId: string }> {
     const messageId = `mock_email_${Date.now()}`
 
+    // test seam (B3.5): integration tests read the last send (e.g. to pull
+    // the OTP code out of the subject) without a provider injection point
+    ;(globalThis as Record<string, unknown>).__lastMockEmail = input
+
     console.log('[MockEmail] ─────────────────────────────────')
     console.log(`  To:      ${input.to}`)
     console.log(`  Subject: ${input.subject}`)

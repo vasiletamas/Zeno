@@ -20,6 +20,11 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   const consentEvents = await db.consentEvent.findMany({ where: { customerId: conversation.customerId }, orderBy: { createdAt: 'asc' } })
   const consents = deriveConsents(consentEvents as unknown as ConsentEventLike[])
   const identityFacts = await getIdentityFacts(conversation.customerId, db)
+  const pendingChallenge = await db.verificationChallenge.findFirst({
+    where: { customerId: conversation.customerId, consumedAt: null, expiresAt: { gt: new Date() } },
+    select: { channel: true },
+    orderBy: { createdAt: 'desc' },
+  })
   const activeProductId = conversation.productId ?? conversation.candidateProductId ?? null
   const prod = activeProductId ? await db.product.findUnique({ where: { id: activeProductId } }) : null
   const application = await db.application.findUnique({ where: { conversationId } })
@@ -82,6 +87,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
       tier: deriveIdentityTier(identityFacts),
       fields: Object.fromEntries(Object.entries(identityFacts.fields).map(([k, v]) => [k, { provenance: v.provenance }])),
       verifiedChannels: identityFacts.verifiedChannels,
+      pendingChallenge: pendingChallenge ? { channel: pendingChallenge.channel } : null,
     },
     consents,
     dnt: {

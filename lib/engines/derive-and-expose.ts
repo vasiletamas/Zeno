@@ -40,7 +40,7 @@ const dntRule = (action: string, kind: 'read' | 'commit'): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.10.0' // 1.8.0: write_dnt_answer exposed on active session (B2.5); 1.9.0: sign_dnt session-scoped, legacy answer tool retired, DNT slice aggregate-only (B2.6); 1.10.0: #1 identity rows land — generate_quote needs declared cnp-or-dob, accept_quote verified_channel, initiate_payment + product docs; tier derived from the provenance store (B3.2)
+export const engineVersion = '1.11.0' // 1.9.0: sign_dnt session-scoped, legacy answer tool retired, DNT slice aggregate-only (B2.6); 1.10.0: #1 identity rows land — generate_quote needs declared cnp-or-dob, accept_quote verified_channel, initiate_payment + product docs; tier derived from the provenance store (B3.2); 1.11.0: channel-verification commits exposed (start always, confirm on live challenge — B3.5)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -82,6 +82,10 @@ export const ACTION_RULES: ActionRule[] = [
   { action: 'switch_product', kind: 'commit', exposedWhen: (s) => s.product !== null },
   { action: 'collect_customer_field', kind: 'commit', exposedWhen: always },
   { action: 'withdraw_consent', kind: 'commit', exposedWhen: (s) => s.consents.hasAnyEvents },
+  // B3.5: verification is offerable at any point (soft, never a wall pre-gate);
+  // confirm only makes sense while a live challenge is pending.
+  { action: 'start_channel_verification', kind: 'commit', exposedWhen: always },
+  { action: 'confirm_channel_verification', kind: 'commit', exposedWhen: (s) => s.identity.pendingChallenge !== null },
   dntRule('sign_dnt', 'commit'),
   { action: 'start_application', kind: 'commit', exposedWhen: (s) => s.product !== null && s.dnt.valid && s.application === null,
     blockedReason: (s) => (s.application !== null ? { reason: 'application_already_open' } : s.product !== null && !s.dnt.valid ? { reason: s.dnt.signed ? 'dnt_expired' : 'dnt_not_signed' } : null) },

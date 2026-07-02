@@ -19,7 +19,7 @@ export interface DomainSnapshot {
   customerId: string
   product: { id: string; code: string; insuranceType: string } | null // committed > candidate
   candidateProductId: string | null
-  identity: { tier: IdentityTier; fields: Record<string, { provenance: Provenance } | undefined>; verifiedChannels: ('email' | 'sms')[] } // tier DERIVED by the loader via identity-rules (B3.2), never stored
+  identity: { tier: IdentityTier; fields: Record<string, { provenance: Provenance } | undefined>; verifiedChannels: ('email' | 'sms')[]; pendingChallenge: { channel: 'email' | 'sms' } | null } // tier DERIVED by the loader via identity-rules (B3.2), never stored; pendingChallenge = live unconsumed VerificationChallenge (B3.5 exposure fact)
   consents: { gdprProcessing: boolean; aiDisclosure: boolean; marketing: boolean; gdprWithdrawn: boolean; hasAnyEvents: boolean } // derived from the ConsentEvent ledger (B1); gdprWithdrawn = latest gdpr event is an explicit withdrawal
   dnt: {
     // legacy conversation-stamp semantics — retired at B2.6 with the columns

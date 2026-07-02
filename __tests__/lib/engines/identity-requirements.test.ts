@@ -13,14 +13,14 @@ describe('identity-requirements mechanism (contradiction #1)', () => {
     const r = checkIdentityRequirement(
       { accept_quote: { minTier: 'verified_channel', anyDeclaredOf: ['cnp'] } },
       'accept_quote',
-      { tier: 'declared', fields: {}, verifiedChannels: [] },
+      { tier: 'declared', fields: {}, verifiedChannels: [], pendingChallenge: null },
     )
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.needs).toEqual(['verified_channel', 'declared:cnp'])
   })
   it('product-document requirements resolve against validated documents', () => {
     const row = { initiate_payment: { minTier: 'anonymous' as const, productDocuments: true } }
-    const identity = { tier: 'declared' as const, fields: {}, verifiedChannels: [] as ('email' | 'sms')[] }
+    const identity = { tier: 'declared' as const, fields: {}, verifiedChannels: [] as ('email' | 'sms')[], pendingChallenge: null }
     const missing = checkIdentityRequirement(row, 'initiate_payment', identity, ['id_card'], [])
     expect(missing).toEqual({ ok: false, needs: ['document:id_card'] })
     expect(checkIdentityRequirement(row, 'initiate_payment', identity, ['id_card'], ['id_card'])).toEqual({ ok: true })

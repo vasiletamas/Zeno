@@ -40,8 +40,18 @@ const MIRROR_FIELDS = ['email', 'phone', 'name', 'dateOfBirth'] as const
 const toRecord = (row: { field: string; value: string } & Omit<FieldRecord, 'value'>): FieldRecord =>
   ({ ...row, value: decodeFieldValue(row.field, row.value) })
 
-export async function claimAndMerge(duplicateId: string, canonicalId: string): Promise<MergeReport> {
-  return prisma.$transaction(async tx => {
+/**
+ * When called from inside a gateway commit, pass the gateway's transaction
+ * client — opening a nested $transaction from a handler would touch rows the
+ * outer tx already locked (e.g. the just-verified profile field) and
+ * deadlock on the second connection (the E2 lesson, same class).
+ */
+export async function claimAndMerge(duplicateId: string, canonicalId: string, db?: Tx): Promise<MergeReport> {
+  if (db) return runMerge(db, duplicateId, canonicalId)
+  return prisma.$transaction(async tx => runMerge(tx, duplicateId, canonicalId))
+}
+
+async function runMerge(tx: Tx, duplicateId: string, canonicalId: string): Promise<MergeReport> {
     const repointed: Record<string, number> = {}
     for (const r of REPOINTERS) repointed[r.table] = await r.run(tx, duplicateId, canonicalId)
 
@@ -81,5 +91,4 @@ export async function claimAndMerge(duplicateId: string, canonicalId: string): P
     if (Object.keys(mirror).length) await tx.customer.update({ where: { id: canonicalId }, data: mirror })
 
     return { canonicalId, tombstonedId: duplicateId, repointed, conflicts }
-  })
 }

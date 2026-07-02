@@ -34,6 +34,7 @@ import { collectCustomerField } from './handlers/data-handlers'
 import { escalateToHuman } from './handlers/utility-handlers'
 import { initiatePayment } from './handlers/payment-handlers'
 import { resolveReferral, resolveWorkItem } from './handlers/operator-handlers'
+import { startChannelVerification, confirmChannelVerification } from './handlers/identity-handlers'
 
 // ==============================================
 // INTERNAL STORAGE
@@ -948,6 +949,51 @@ registerTool('escalate_to_human', {
   allowedRoles: ALL_ROLES,
   kind: 'commit',
 }, escalateToHuman)
+
+// --- Identity / channel verification (B3.5) ---
+
+registerTool('start_channel_verification', {
+  description:
+    'Send the customer a 6-digit verification code (plus a one-click link) to the email address or phone number THEY provided. ' +
+    'Verifying a channel raises the identity tier (needed before accepting a quote). ' +
+    'Never reveals whether the address belongs to an existing account. Re-calling resends a fresh code.',
+  parameters: {
+    type: 'object',
+    properties: {
+      channel: { type: 'string', enum: ['email', 'sms'], description: 'Which channel to verify.' },
+      target: { type: 'string', description: 'The email address or Romanian phone number the customer gave, exactly as provided.' },
+    },
+    required: ['channel', 'target'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+}, startChannelVerification)
+
+registerTool('confirm_channel_verification', {
+  description:
+    'Confirm the pending channel verification with the 6-digit code the customer read back from their email/SMS. ' +
+    'Only call it AFTER the customer told you the code — never guess or invent one. ' +
+    'If the contact already belongs to an existing account, verifying proves ownership and the conversation continues on that account.',
+  parameters: {
+    type: 'object',
+    properties: {
+      code: { type: 'string', description: 'The 6-digit code exactly as the customer gave it.' },
+    },
+    required: ['code'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+}, confirmChannelVerification)
 
 // --- Operator queue (E2.4) ---
 // Never agent-exposed: no ACTION_RULES entry; the gateway's OPERATOR_TOOLS

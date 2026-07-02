@@ -52,13 +52,19 @@ async function applyWrite(
       update: { value: encodeFieldValue(field, n.value), provenance: n.provenance, source: n.source, evidenceRef: n.evidenceRef, conflictValue: n.conflictValue, conflictSource: n.conflictSource, recordedAt: n.recordedAt },
     })
     if (MIRROR[field]) {
+      // B0 erratum 3: an email already mirrored on another Customer (@unique)
+      // is the returning-customer case — keep the provenance row, skip the
+      // mirror, surface the collision so the caller can offer the T4.D4
+      // verified-claim path. Detected by PRE-CHECK, not by catching P2002:
+      // inside a gateway transaction a unique violation ABORTS the tx (B3.5).
+      if (field === 'email') {
+        const holder = await db.customer.findFirst({ where: { email: n.value, id: { not: customerId } } })
+        if (holder) return { outcome: 'applied', provenance: n.provenance, mirrorConflict: 'email_in_use' }
+      }
       try {
         await db.customer.update({ where: { id: customerId }, data: MIRROR[field]!(n.value) })
       } catch (e) {
-        // B0 erratum 3: a declared email/phone already mirrored on another
-        // Customer (@unique) is the returning-customer case — keep the
-        // provenance row, skip the mirror, surface the collision so the
-        // caller can offer the T4.D4 verified-claim path.
+        // race fallback (only reachable outside a transaction)
         if (!isUniqueViolation(e)) throw e
         return { outcome: 'applied', provenance: n.provenance, mirrorConflict: `${field}_in_use` }
       }
