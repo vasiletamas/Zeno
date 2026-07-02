@@ -211,7 +211,7 @@ export const openDntSession: ToolHandler = async (_args, context) => {
 
     // Return the first pending question inline (B2.7 live lesson): without
     // it agents narrate the first question from memory and GUESS its code.
-    const { next, progress } = await sessionNextQuestion(context.db, await resolveGroupCodes(productId, 'dnt'), session.id)
+    const { next, progress, pendingCodes } = await sessionNextQuestion(context.db, await resolveGroupCodes(productId, 'dnt'), session.id)
     const lang = context.language ?? 'ro'
     return {
       success: true,
@@ -222,6 +222,10 @@ export const openDntSession: ToolHandler = async (_args, context) => {
         nextQuestion: next
           ? { id: next.id, code: next.code, text: (next.text as { en: string; ro: string })[lang], type: next.type, options: next.options }
           : null,
+        // customers often answer several questions in one message — the
+        // agent may batch write_dnt_answer calls ONLY with codes from this
+        // list (B2.7 live lesson: never guess codes)
+        pendingCodes,
         progress,
       },
       message: next
@@ -257,13 +261,17 @@ async function sessionNextQuestion(
   let next: (typeof questions)[number] | null = null
   let total = 0
   let answered = 0
+  const pendingCodes: string[] = []
   for (const q of questions) {
     if (!shouldShowQuestion({ parentQuestionId: q.parentQuestionId, showWhenValue: q.showWhenValue }, answersMap)) continue
     total++
     if (answersMap.has(q.id)) answered++
-    else if (!next) next = q
+    else {
+      if (!next) next = q
+      if (q.code) pendingCodes.push(q.code)
+    }
   }
-  return { next, progress: { answered, total } }
+  return { next, progress: { answered, total }, pendingCodes }
 }
 
 export const writeDntAnswer: ToolHandler = async (args, context) => {
@@ -298,7 +306,7 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
       update: { value: v.normalizedValue, answeredAt: new Date() },
     })
 
-    const { next, progress } = await sessionNextQuestion(context.db, codes, session.id)
+    const { next, progress, pendingCodes } = await sessionNextQuestion(context.db, codes, session.id)
     const lang = context.language ?? 'ro'
     return {
       success: true,
@@ -315,6 +323,7 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
               options: next.options,
             }
           : null,
+        pendingCodes,
         progress,
       },
       message: next === null
