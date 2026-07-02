@@ -209,11 +209,23 @@ export const openDntSession: ToolHandler = async (_args, context) => {
       }
     }
 
+    // Return the first pending question inline (B2.7 live lesson): without
+    // it agents narrate the first question from memory and GUESS its code.
+    const { next, progress } = await sessionNextQuestion(context.db, await resolveGroupCodes(productId, 'dnt'), session.id)
+    const lang = context.language ?? 'ro'
     return {
       success: true,
-      data: { sessionId: session.id, type, prefilled },
+      data: {
+        sessionId: session.id,
+        type,
+        prefilled,
+        nextQuestion: next
+          ? { id: next.id, code: next.code, text: (next.text as { en: string; ro: string })[lang], type: next.type, options: next.options }
+          : null,
+        progress,
+      },
       message: type === 'NEW'
-        ? 'DNT session opened — first analysis for this customer.'
+        ? 'DNT session opened — first analysis for this customer. Answer questions with write_dnt_answer using the exact question code.'
         : `DNT session opened as an update; ${prefilled} prior answers pre-filled for review.`,
     }
   } catch (error) {
