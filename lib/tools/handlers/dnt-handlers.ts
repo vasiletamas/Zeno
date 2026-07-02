@@ -267,7 +267,15 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
     const question = await context.db.question.findFirst({
       where: { code: questionCode, group: { code: { in: codes } } },
     })
-    if (!question) return { success: false, error: `Unknown DNT question code: ${questionCode}` }
+    if (!question) {
+      // Self-healing hint (B2.7 live lesson): agents sometimes guess codes —
+      // hand back the CURRENT question's exact code so the retry lands.
+      const { next } = await sessionNextQuestion(context.db, codes, session.id)
+      return {
+        success: false,
+        error: `Unknown DNT question code: ${questionCode}. Use the exact code from the tool result — the current unanswered question is ${next?.code ?? '(none — session complete)'}.`,
+      }
+    }
 
     const v = validateAnswer({ type: question.type, options: question.options, validationRules: question.validationRules }, value)
     if (!v.valid) return { success: false, error: v.error ?? 'Invalid answer.' }
