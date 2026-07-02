@@ -1,7 +1,9 @@
 /**
  * Profile Handlers
  *
- * get_customer_profile, update_customer_profile
+ * get_customer_profile. Profile facts live in the CustomerProfileField
+ * provenance store (B0); until B0.4 re-backs this handler with the
+ * profile-service, `fields` is returned empty.
  */
 
 import type { ToolHandler } from '@/lib/tools/types'
@@ -19,8 +21,6 @@ export const getCustomerProfile: ToolHandler = async (_args, context) => {
     if (!customer) {
       return { success: false, error: 'Customer not found.' }
     }
-
-    const extractedProfile = (customer.extractedProfile ?? {}) as Record<string, unknown>
 
     // Load recent conversations
     const conversations = await context.db.conversation.findMany({
@@ -60,50 +60,12 @@ export const getCustomerProfile: ToolHandler = async (_args, context) => {
           dateOfBirth: customer.dateOfBirth?.toISOString() ?? null,
           language: customer.language,
           isAnonymous: customer.isAnonymous,
-          extractedProfile,
+          fields: {},
         },
         recentConversations: conversations as unknown as Record<string, unknown>[],
         policies: policies as unknown as Record<string, unknown>[],
       },
       message: `Customer profile: ${customer.name ?? 'Anonymous'}${customer.email ? `, ${customer.email}` : ''}.`,
-    }
-  } catch (error) {
-    return { success: false, error: String(error) }
-  }
-}
-
-// ─────────────────────────────────────────────
-// update_customer_profile
-// ─────────────────────────────────────────────
-
-export const updateCustomerProfile: ToolHandler = async (args, context) => {
-  try {
-    const customer = await context.db.customer.findUnique({
-      where: { id: context.customerId },
-    })
-
-    if (!customer) {
-      return { success: false, error: 'Customer not found.' }
-    }
-
-    // Merge fields into extractedProfile
-    const existing = (customer.extractedProfile ?? {}) as Record<string, unknown>
-    const merged = { ...existing, ...args }
-
-    await context.db.customer.update({
-      where: { id: context.customerId },
-      data: { extractedProfile: JSON.parse(JSON.stringify(merged)) },
-    })
-
-    const updatedFields = Object.keys(args)
-
-    return {
-      success: true,
-      data: {
-        updatedFields,
-        extractedProfile: merged,
-      },
-      message: `Updated customer profile: ${updatedFields.join(', ')}.`,
     }
   } catch (error) {
     return { success: false, error: String(error) }

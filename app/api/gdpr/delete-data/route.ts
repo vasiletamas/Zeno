@@ -93,12 +93,15 @@ export async function DELETE(request: NextRequest) {
         cnpIv: null,
         cnpTag: null,
         address: Prisma.DbNull,
-        extractedProfile: Prisma.DbNull,
         dateOfBirth: null,
         isAnonymous: true,
         magicLinkToken: null,
         magicLinkExpiresAt: null,
       },
+    })
+    // The B0 provenance store holds per-field PII — erase it with the mirrors.
+    const profileFieldResult = await prisma.customerProfileField.deleteMany({
+      where: { customerId },
     })
     deletedFields.push(
       'name',
@@ -106,7 +109,7 @@ export async function DELETE(request: NextRequest) {
       'phone',
       'cnp (encrypted)',
       'address',
-      'extractedProfile',
+      `profileFields (${profileFieldResult.count} records)`,
       'dateOfBirth',
       'magicLinkToken',
     )

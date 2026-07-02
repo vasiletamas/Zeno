@@ -45,8 +45,6 @@ const getObjectionStrategySchema = z.object({
 
 const getCustomerProfileSchema = z.object({}).strict()
 
-const updateCustomerProfileSchema = z.record(z.string(), z.unknown())
-
 // ==============================================
 // DNT TOOL SCHEMAS
 // ==============================================
@@ -159,7 +157,6 @@ const toolSchemas: Record<string, ZodType> = {
 
   // Profile
   get_customer_profile: getCustomerProfileSchema,
-  update_customer_profile: updateCustomerProfileSchema,
 
   // DNT
   check_dnt_status: checkDntStatusSchema,

@@ -51,21 +51,11 @@ export function diffIdentity(
     scalarDiffs,
   )
 
-  // Customer scalars (excluding extractedProfile, handled separately)
-  const { extractedProfile: curProfile, ...curCust } = current.customer
-  const { extractedProfile: prevProfile, ...prevCust } = previous.customer
+  // Customer scalars
   diffScalars(
-    curCust as Record<string, unknown>,
-    prevCust as Record<string, unknown>,
+    current.customer as unknown as Record<string, unknown>,
+    previous.customer as unknown as Record<string, unknown>,
     'customer',
-    scalarDiffs,
-  )
-
-  // extractedProfile — shallow per-leaf
-  diffScalars(
-    curProfile ?? {},
-    prevProfile ?? {},
-    'customer.extractedProfile',
     scalarDiffs,
   )
 

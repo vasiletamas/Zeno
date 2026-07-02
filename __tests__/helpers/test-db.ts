@@ -10,6 +10,7 @@ import { seedQuestions } from '@/prisma/seeds/seed-questions'
  * SimulationConversation via their references into this set).
  */
 export const DOMAIN_TABLES: string[] = [
+  'CustomerProfileField',
   'CommitLedger',
   'Payment',
   'Policy',
@@ -26,6 +27,10 @@ export const DOMAIN_TABLES: string[] = [
 ]
 
 export async function resetFunnelTables(): Promise<void> {
+  // B0.1 guard: refuse to truncate anything that isn't opted in as a test DB.
+  if (!process.env.DATABASE_URL?.includes('test') && process.env.ZENO_ALLOW_DB_TESTS !== '1') {
+    throw new Error('refusing truncate: not a test DB (set ZENO_ALLOW_DB_TESTS=1 or use a *test* DATABASE_URL)')
+  }
   await prisma.$executeRawUnsafe(
     `TRUNCATE TABLE ${DOMAIN_TABLES.map((t) => `"${t}"`).join(',')} RESTART IDENTITY CASCADE`,
   )
@@ -41,6 +46,10 @@ export async function resetDb(): Promise<void> {
   await resetFunnelTables()
   await seedProduct(prisma)
   await seedQuestions(prisma)
+}
+
+export async function createCustomer(data: Record<string, unknown> = {}) {
+  return prisma.customer.create({ data: { language: 'ro', ...data } })
 }
 
 export async function ensureTestProduct() {

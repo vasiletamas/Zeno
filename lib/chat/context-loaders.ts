@@ -555,7 +555,7 @@ function resolveQuestionnaireType(workflowStepCode: string): string {
 
 /**
  * Load customer context section.
- * Formats basic customer info and extracted profile data.
+ * Formats basic customer info (profile facts live in the B0 provenance store).
  */
 export async function loadCustomerContext(
   customerId: string,
@@ -583,49 +583,6 @@ export async function loadCustomerContext(
     parts.push('Status: Anonymous visitor')
   }
 
-  // Extracted profile (from profile-extractor agent)
-  if (customer.extractedProfile) {
-    const profile = customer.extractedProfile as unknown as Record<
-      string,
-      unknown
-    >
-
-    // Demographics
-    if (profile.occupation && typeof profile.occupation === 'string') {
-      parts.push(`Occupation: ${profile.occupation}`)
-    }
-    if (profile.incomeLevel && typeof profile.incomeLevel === 'string') {
-      parts.push(`Income level: ${profile.incomeLevel}`)
-    }
-    if (profile.education && typeof profile.education === 'string') {
-      parts.push(`Education: ${profile.education}`)
-    }
-
-    // Family
-    if (profile.familySize != null) {
-      parts.push(`Family size: ${String(profile.familySize)}`)
-    }
-    if (profile.hasSpouse != null) {
-      parts.push(`Has spouse: ${String(profile.hasSpouse)}`)
-    }
-    if (profile.hasChildren != null) {
-      parts.push(`Has children: ${String(profile.hasChildren)}`)
-    }
-    if (profile.minorChildren != null) {
-      parts.push(`Minor children: ${String(profile.minorChildren)}`)
-    }
-
-    // Motivations and interests
-    if (Array.isArray(profile.motivations) && profile.motivations.length > 0) {
-      parts.push(
-        `Motivations: ${(profile.motivations as string[]).join(', ')}`,
-      )
-    }
-    if (Array.isArray(profile.interests) && profile.interests.length > 0) {
-      parts.push(`Interests: ${(profile.interests as string[]).join(', ')}`)
-    }
-  }
-
   return parts.length > 0 ? parts.join('\n') : null
 }
 
@@ -633,7 +590,6 @@ export async function loadCustomerContext(
 export interface PrefetchedCustomer {
   name: string | null
   dateOfBirth: Date | null
-  extractedProfile: Record<string, unknown>
   language: string
   isAnonymous: boolean
 }
@@ -661,44 +617,6 @@ export function loadCustomerContextFromData(
 
   if (data.isAnonymous) {
     parts.push('Status: Anonymous visitor')
-  }
-
-  // Extracted profile
-  const profile = data.extractedProfile
-
-  // Demographics
-  if (profile.occupation && typeof profile.occupation === 'string') {
-    parts.push(`Occupation: ${profile.occupation}`)
-  }
-  if (profile.incomeLevel && typeof profile.incomeLevel === 'string') {
-    parts.push(`Income level: ${profile.incomeLevel}`)
-  }
-  if (profile.education && typeof profile.education === 'string') {
-    parts.push(`Education: ${profile.education}`)
-  }
-
-  // Family
-  if (profile.familySize != null) {
-    parts.push(`Family size: ${String(profile.familySize)}`)
-  }
-  if (profile.hasSpouse != null) {
-    parts.push(`Has spouse: ${String(profile.hasSpouse)}`)
-  }
-  if (profile.hasChildren != null) {
-    parts.push(`Has children: ${String(profile.hasChildren)}`)
-  }
-  if (profile.minorChildren != null) {
-    parts.push(`Minor children: ${String(profile.minorChildren)}`)
-  }
-
-  // Motivations and interests
-  if (Array.isArray(profile.motivations) && profile.motivations.length > 0) {
-    parts.push(
-      `Motivations: ${(profile.motivations as string[]).join(', ')}`,
-    )
-  }
-  if (Array.isArray(profile.interests) && profile.interests.length > 0) {
-    parts.push(`Interests: ${(profile.interests as string[]).join(', ')}`)
   }
 
   return parts.length > 0 ? parts.join('\n') : null

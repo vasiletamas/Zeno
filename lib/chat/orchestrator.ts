@@ -265,7 +265,8 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // only runs on turns whose message contains a category keyword.
   // Best-effort: a failure here must not break the turn.
   // See docs/superpowers/specs/2026-05-26-zeno-phase-model-design.md.
-  const interests = (turnCtx.customer.extractedProfile as { interests?: string[] } | null)?.interests ?? null
+  // B0 dropped the extractedProfile divergence store; interest hints with it.
+  const interests: string[] | null = null
   if (
     turnCtx.conversation.candidateProductId === null &&
     turnCtx.conversation.productId === null &&

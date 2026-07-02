@@ -26,7 +26,7 @@ import { previewProductRequirements } from './handlers/preview-handlers'
 import { getStateHandler } from './handlers/state-handlers'
 import { setCandidateProduct } from './handlers/candidate-handlers'
 import { switchProduct } from './handlers/product-switch-handler'
-import { getCustomerProfile, updateCustomerProfile } from './handlers/profile-handlers'
+import { getCustomerProfile } from './handlers/profile-handlers'
 import { getObjectionStrategy } from './handlers/objection-handlers'
 import { checkBdEligibility } from './handlers/bd-handlers'
 import { collectCustomerField } from './handlers/data-handlers'
@@ -331,19 +331,16 @@ const getProductInfoHandler: ToolHandler = async (
     }
 
     // Resolve the customer's age (best-effort) to trim age-banded coverages.
-    // Prefer dateOfBirth; fall back to the agent-saved extractedProfile.age.
-    // Any failure here just means we return all age bands.
+    // Any failure here just means we return all age bands. B0.4 re-routes
+    // this through profile-service getAge (DOB → declaredAge precedence).
     let age: number | undefined
     try {
       const customer = await prisma.customer.findUnique({
         where: { id: context.customerId },
-        select: { dateOfBirth: true, extractedProfile: true },
+        select: { dateOfBirth: true },
       })
       if (customer?.dateOfBirth) {
         age = calculateAge(customer.dateOfBirth, new Date()) ?? undefined
-      } else {
-        const profileAge = (customer?.extractedProfile as { age?: unknown } | null)?.age
-        if (typeof profileAge === 'number') age = profileAge
       }
     } catch {
       // age is optional — fall back to all bands
@@ -588,29 +585,6 @@ registerTool('get_customer_profile', {
   sideEffects: false,
   kind: 'read',
 }, getCustomerProfile)
-
-registerTool('update_customer_profile', {
-  description: 'Update the extracted customer profile with new information.',
-  parameters: {
-    type: 'object',
-    properties: {
-      age: { type: 'number', description: 'Customer age.' },
-      occupation: { type: 'string', description: 'Customer occupation.' },
-      familySize: { type: 'number', description: 'Family size.' },
-      hasSpouse: { type: 'boolean', description: 'Whether customer has a spouse.' },
-      hasChildren: { type: 'boolean', description: 'Whether customer has children.' },
-      incomeLevel: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Income bracket.' },
-      motivations: { type: 'array', items: { type: 'string' }, description: 'Customer motivations.' },
-      interests: { type: 'array', items: { type: 'string' }, description: 'Customer interests.' },
-    },
-    additionalProperties: false,
-  },
-  executionMode: 'background',
-  customerVisible: false,
-  statusMessage: null,
-  allowedRoles: ALL_ROLES,
-  kind: 'commit',
-}, updateCustomerProfile)
 
 // --- DNT (Declaration of Needs and Testing) ---
 

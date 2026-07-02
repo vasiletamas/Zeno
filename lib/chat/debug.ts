@@ -136,7 +136,6 @@ export interface DebugIdentityPayload {
     name: string | null
     age: number | null
     language: string
-    extractedProfile: Record<string, unknown>
   }
   consent: {
     gdprConsentAt: string | null
@@ -275,7 +274,6 @@ export function buildIdentityPayload(
       name: input.customer.name,
       age: calculateAge(input.customer.dateOfBirth, input.now),
       language: input.customer.language,
-      extractedProfile: input.customer.extractedProfile,
     },
     consent: {
       gdprConsentAt: input.customer.gdprConsentAt

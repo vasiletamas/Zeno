@@ -104,6 +104,9 @@ ADMIN_PASSWORD=change-me
 APP_URL=http://localhost:3000
 REPORTS_PATH=./tmp-reports
 OTEL_ENABLED=false
+# B0.1 truncate guard opt-in: the integration ring truncates DOMAIN_TABLES; in this
+# sandbox dev DB == test DB, so opt in explicitly (B0 erratum 1)
+ZENO_ALLOW_DB_TESTS=1
 EOF
 # API keys are NOT written into .env: OPENAI_API_KEY and ANTHROPIC_API_KEY arrive as
 # session environment variables (configured in the claude.ai/code environment settings)

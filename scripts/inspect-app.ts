@@ -40,9 +40,6 @@ async function main() {
     console.log(`  ${i.category}/${i.key} = ${i.value}  (conf=${i.confidence})`)
   })
   console.log('')
-  console.log('=== EXTRACTED PROFILE ===')
-  console.log(JSON.stringify(conv.customer.extractedProfile, null, 2).slice(0, 400))
-  console.log('')
 
   await prisma.$disconnect()
 }

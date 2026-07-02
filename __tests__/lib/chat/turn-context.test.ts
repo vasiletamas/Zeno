@@ -37,7 +37,6 @@ const baseConversation = {
 const baseCustomer = {
   name: 'Ion Popescu',
   dateOfBirth: new Date('1985-06-15'),
-  extractedProfile: { smoker: false },
   language: 'ro',
   isAnonymous: false,
   gdprConsentAt: null,
@@ -142,7 +141,6 @@ describe('loadTurnContext', () => {
 
       expect(ctx.customer.name).toBe('Ion Popescu')
       expect(ctx.customer.dateOfBirth).toEqual(new Date('1985-06-15'))
-      expect(ctx.customer.extractedProfile).toEqual({ smoker: false })
       expect(ctx.customer.language).toBe('ro')
       expect(ctx.customer.isAnonymous).toBe(false)
     })
@@ -204,7 +202,6 @@ describe('loadTurnContext', () => {
 
       expect(ctx.customer.name).toBeNull()
       expect(ctx.customer.dateOfBirth).toBeNull()
-      expect(ctx.customer.extractedProfile).toEqual({})
       expect(ctx.customer.language).toBe('ro')
       expect(ctx.customer.isAnonymous).toBe(true)
       expect(ctx.customer.gdprConsentAt).toBeNull()

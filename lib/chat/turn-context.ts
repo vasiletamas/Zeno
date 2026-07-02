@@ -36,7 +36,6 @@ export interface TurnContextConversation {
 export interface TurnContextCustomer {
   name: string | null
   dateOfBirth: Date | null
-  extractedProfile: Record<string, unknown>
   language: string
   isAnonymous: boolean
   gdprConsentAt: Date | null
@@ -99,7 +98,6 @@ export async function loadTurnContext(
       select: {
         name: true,
         dateOfBirth: true,
-        extractedProfile: true,
         language: true,
         isAnonymous: true,
         gdprConsentAt: true,
@@ -144,7 +142,6 @@ export async function loadTurnContext(
     ? {
         name: rawCustomer.name ?? null,
         dateOfBirth: rawCustomer.dateOfBirth ?? null,
-        extractedProfile: (rawCustomer.extractedProfile as Record<string, unknown>) ?? {},
         language: rawCustomer.language,
         isAnonymous: rawCustomer.isAnonymous,
         gdprConsentAt: rawCustomer.gdprConsentAt ?? null,
@@ -154,7 +151,6 @@ export async function loadTurnContext(
     : {
         name: null,
         dateOfBirth: null,
-        extractedProfile: {},
         language: 'ro',
         isAnonymous: true,
         gdprConsentAt: null,

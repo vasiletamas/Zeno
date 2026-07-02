@@ -11,7 +11,6 @@ function makeIdentity(overrides: Partial<NonNullable<DebugTurn['identity']>> = {
       name: null,
       age: null,
       language: 'ro',
-      extractedProfile: {},
     },
     consent: {
       gdprConsentAt: null,
@@ -40,16 +39,16 @@ describe('diffIdentity', () => {
     expect(r.newMemoryIds.size).toBe(0)
   })
 
-  it('flags a changed extractedProfile leaf', () => {
+  it('flags a changed customer scalar', () => {
     const previous = makeIdentity({
-      customer: { name: null, age: null, language: 'ro', extractedProfile: {} },
+      customer: { name: null, age: null, language: 'ro' },
     })
     const current = makeIdentity({
-      customer: { name: null, age: null, language: 'ro', extractedProfile: { familySize: 3 } },
+      customer: { name: 'Ana', age: null, language: 'ro' },
     })
     const r = diffIdentity(current, previous)
-    expect(r.scalarDiffs.get('customer.extractedProfile.familySize')).toEqual({
-      now: 3,
+    expect(r.scalarDiffs.get('customer.name')).toEqual({
+      now: 'Ana',
       was: null,
     })
     expect(r.changes).toBe(1)
@@ -103,11 +102,10 @@ describe('diffIdentity', () => {
 
   it('treats null and undefined as equal for scalar comparison', () => {
     const previous = makeIdentity({
-      customer: { name: null, age: null, language: 'ro', extractedProfile: {} },
+      customer: { name: null, age: null, language: 'ro' },
     })
     const current = makeIdentity({
-      // simulate a profile key that was explicitly undefined; should not register as changed vs null
-      customer: { name: null, age: null, language: 'ro', extractedProfile: {} },
+      customer: { name: null, age: undefined as unknown as number | null, language: 'ro' },
     })
     const r = diffIdentity(current, previous)
     expect(r.changes).toBe(0)

@@ -61,7 +61,6 @@ const mockCustomer = {
   id: 'cust-bench-1',
   name: 'Test Customer',
   dateOfBirth: new Date('1990-01-01'),
-  extractedProfile: {},
   language: 'ro',
   isAnonymous: false,
 }

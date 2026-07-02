@@ -39,25 +39,6 @@ export function IdentitySection({ identity, previousIdentity }: Props) {
         <Row label="language" path="customer.language" diff={diff}>
           {identity.customer.language}
         </Row>
-        <div className="pt-1">
-          <div className="text-gray-500">extractedProfile:</div>
-          {Object.keys(identity.customer.extractedProfile).length === 0 ? (
-            <div className="pl-3 text-gray-400">—</div>
-          ) : (
-            <div className="pl-3 space-y-0.5">
-              {Object.entries(identity.customer.extractedProfile).map(([k, v]) => (
-                <Row
-                  key={k}
-                  label={k}
-                  path={`customer.extractedProfile.${k}`}
-                  diff={diff}
-                >
-                  {formatValue(v)}
-                </Row>
-              ))}
-            </div>
-          )}
-        </div>
       </Group>
 
       <Group title="Consent">

@@ -268,8 +268,9 @@ model Customer {
   cnpTag           String?
   address          Json?
   language         String    @default("ro")
-  extractedProfile   Json?
   isAnonymous        Boolean   @default(true)
+  mergedIntoId       String?
+  mergedAt           DateTime?
   magicLinkToken     String?   @unique
   magicLinkExpiresAt DateTime?
   createdAt          DateTime  @default(now())
@@ -288,6 +289,33 @@ model Customer {
   referralsReceived Referral[] @relation("referred")
   user              User?
   insights          CustomerInsight[]
+  profileFields     CustomerProfileField[]
+}
+
+enum FieldProvenance {
+  declared
+  verified
+  conflict
+}
+
+// B0: per-field provenance store — the SSOT for profile facts (M1).
+// cnp values are stored as the AES-GCM JSON envelope, never plaintext.
+model CustomerProfileField {
+  id             String          @id @default(cuid())
+  customerId     String
+  field          String
+  value          String
+  provenance     FieldProvenance
+  source         String
+  evidenceRef    String?
+  conflictValue  String?
+  conflictSource String?
+  recordedAt     DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@unique([customerId, field])
 }
 
 model Conversation {

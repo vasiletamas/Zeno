@@ -7,7 +7,6 @@ function makeCustomer(overrides: Partial<TurnContextCustomer> = {}): TurnContext
   return {
     name: null,
     dateOfBirth: null,
-    extractedProfile: {},
     language: 'ro',
     isAnonymous: true,
     gdprConsentAt: null,
@@ -39,7 +38,6 @@ describe('buildIdentityPayload', () => {
     const customer = makeCustomer({
       name: 'Ana',
       dateOfBirth: new Date('1992-01-10T00:00:00Z'),
-      extractedProfile: { occupation: 'engineer' },
       isAnonymous: false,
       gdprConsentAt: new Date('2026-05-26T10:00:00Z'),
       gdprConsentScope: 'sales',
@@ -72,7 +70,6 @@ describe('buildIdentityPayload', () => {
         name: 'Ana',
         age: 34,
         language: 'ro',
-        extractedProfile: { occupation: 'engineer' },
       },
       consent: {
         gdprConsentAt: '2026-05-26T10:00:00.000Z',

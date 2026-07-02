@@ -22,7 +22,6 @@ async function main() {
           id: true,
           name: true,
           language: true,
-          extractedProfile: true,
           gdprConsentAt: true,
           gdprConsentScope: true,
           aiDisclosureAcknowledgedAt: true,
