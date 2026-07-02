@@ -7,6 +7,12 @@ import type { ToolResult } from '@/lib/tools/types'
  * performed, preventing re-confirmation loops.
  */
 export function serializeToolResultForModel(toolResult: ToolResult): string {
+  // Commits: the gateway envelope IS the contract — serialized verbatim so
+  // the model reads outcome/effects/reason codes, never prose-only errors
+  // (A2.9).
+  if (toolResult.envelope !== undefined) {
+    return JSON.stringify({ envelope: toolResult.envelope, data: toolResult.data })
+  }
   const payload: Record<string, unknown> = { success: toolResult.success }
   if (toolResult.data !== undefined) payload.data = toolResult.data
   if (toolResult.error !== undefined) payload.error = toolResult.error

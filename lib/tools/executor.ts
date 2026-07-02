@@ -11,6 +11,7 @@ import { validateToolArgs } from './validation'
 import { checkPermission } from './permissions'
 import { isToolCacheable, getCachedResult, setCachedResult } from './cache'
 import { getToolCircuit } from './circuit-state'
+import { executeCommit } from './gateway'
 import { TimeoutError } from '@/lib/errors/types'
 import { logError, logWarn } from '@/lib/errors/logger'
 import { eventBus } from '@/lib/events'
@@ -83,6 +84,54 @@ export async function executeTool(
     return {
       success: false,
       error: permission.reason ?? `Permission denied for "${name}".`,
+    }
+  }
+
+  // 3a. Commits are gateway-owned (A2.9): legality, confirm tokens, replay,
+  // ledger, and the apply transaction all happen in executeCommit. Cache /
+  // circuit / timeout handling below stays for reads only.
+  if (definition.kind === 'commit') {
+    const actor = context.actor ?? 'agent'
+    const execStart = Date.now()
+    if (traceId) {
+      eventBus.emit({ type: 'tool:start', traceId, toolName: name, args: (validation.data ?? {}) as Record<string, unknown> })
+    }
+    try {
+      const envelope = await executeCommit({
+        tool: name,
+        args: (validation.data ?? {}) as Record<string, unknown>,
+        actor,
+        conversationId: context.conversationId,
+        customerId: context.customerId,
+        confirmToken: (args as Record<string, unknown> | null | undefined)?.confirmToken as string | undefined,
+        toolContext: context,
+      })
+      const d = (envelope.data ?? {}) as Record<string, unknown>
+      const result: ToolResult = {
+        success: envelope.outcome === 'applied',
+        envelope,
+        data: d,
+        error: envelope.outcome === 'rejected' ? String(d.error ?? envelope.reason) : undefined,
+        uiAction: d._uiAction as ToolResult['uiAction'],
+        confirmation: d._confirmation as ToolResult['confirmation'],
+        message: d._message as string | undefined,
+      }
+      if (traceId) {
+        eventBus.emit({ type: 'tool:end', traceId, toolName: name, durationMs: Date.now() - execStart, success: result.success, cached: false })
+      }
+      return result
+    } catch (err: unknown) {
+      if (traceId) {
+        eventBus.emit({ type: 'tool:end', traceId, toolName: name, durationMs: Date.now() - execStart, success: false, cached: false })
+      }
+      logError({
+        layer: 'tool',
+        category: 'gateway',
+        message: `Commit "${name}" threw in the gateway`,
+        context: { toolName: name },
+        error: err,
+      })
+      return { success: false, error: err instanceof Error ? err.message : 'Commit execution failed' }
     }
   }
 

@@ -789,6 +789,9 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
   let toolContext = await buildToolContext(state.customerId, state.conversationId, state.language)
   toolContext.activeSkillPacks = state.activeSkillPacks
+  // Server-resolved commit actor (A2.9): every LLM tool-loop call is the
+  // agent's; the synthetic branch below overrides per-call with 'gui'.
+  toolContext.actor = 'agent'
   const effectiveTools = effectivePacks.length > 0
     ? computeAllowedTools(stepAllowedTools, effectivePacks)
     : stepAllowedTools
@@ -834,7 +837,9 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     const pipelineResult = await executeToolWithPipeline(
       tc.name,
       tc.arguments,
-      toolContext,
+      // GUI-originated commit: the customer clicked, the server resolved the
+      // actor — never the model (A2.9).
+      { ...toolContext, actor: 'gui' },
       toolContext.workflowSession
         ? {
             id: toolContext.workflowSession.id,

@@ -6,6 +6,7 @@
  */
 
 import type { PrismaClient, Prisma } from '@/lib/generated/prisma/client'
+import type { CommitActor, CommitResult } from '@/lib/engines/domain-types'
 
 /**
  * The db seam handlers write through (A2.4): the global client by default,
@@ -71,6 +72,11 @@ export type ToolHandler = (
 
 export interface ToolResult {
   success: boolean
+  /**
+   * The gateway's typed consequence envelope (A2.9) — present on every commit
+   * result. Serialized VERBATIM to the model; reads never carry one.
+   */
+  envelope?: CommitResult
   data?: Record<string, unknown>
   error?: string
   message?: string
@@ -100,6 +106,12 @@ export interface ToolContext {
    * client; the gateway overrides it with the tx handle.
    */
   db: DbClient
+  /**
+   * Server-resolved commit actor (A2.9): 'gui' on the orchestrator's
+   * synthetic-tool-call branch, 'agent' on the LLM tool loop. Recorded on
+   * every CommitLedger row. Defaults to 'agent' when absent.
+   */
+  actor?: CommitActor
   product?: {
     id: string
     code: string
