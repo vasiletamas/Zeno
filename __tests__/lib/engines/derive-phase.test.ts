@@ -3,7 +3,7 @@ import { derivePhase } from '@/lib/engines/derive-and-expose'
 import { makeSnapshot } from './snapshot-fixtures'
 
 const openApp = { id: 'app-1', status: 'OPEN' as const, tier: null, level: null, addon: null, answeredCount: 0, requiredCount: 6, missingCodes: ['Q1'] }
-const validDnt = { signed: true, valid: true, validUntil: '2027-01-01T00:00:00.000Z', coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false }
+const validDnt = { signed: true, valid: true, validUntil: '2027-01-01T00:00:00.000Z', coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0 }
 
 describe('derivePhase — pinned #10 table', () => {
   it('DISCOVERY: no open application', () => {

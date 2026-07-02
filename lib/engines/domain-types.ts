@@ -8,7 +8,7 @@ export const COMMIT_OUTCOMES = ['applied', 'rejected', 'referred', 'pending', 'u
 export type CommitOutcome = (typeof COMMIT_OUTCOMES)[number]
 export const COMMIT_EFFECTS = ['advance_phase', 're_rating', 'cascade_invalidate', 'cascade_expand', 'questions_removed', 'eligibility_recheck', 'terminal'] as const
 export type CommitEffect = (typeof COMMIT_EFFECTS)[number]
-export const REASON_CODES = ['no_product_in_focus', 'no_open_application', 'application_already_open', 'application_paused', 'requires_consent', 'gdpr_processing_withdrawn', 'dnt_not_signed', 'dnt_incomplete', 'dnt_expired', 'questionnaire_incomplete', 'selection_incomplete', 'quote_already_issued', 'no_issued_quote', 'quote_expired', 'quote_already_accepted', 'requires_confirmation', 'requires_identity', 'requires_disclosures', 'already_applied', 'stale_confirm_token', 'invalid_args', 'handler_rejected', 'temporarily_unavailable', 'degraded_mode', 'no_policy', 'payment_not_pending', 'permission_denied', 'not_exposed'] as const
+export const REASON_CODES = ['no_product_in_focus', 'no_open_application', 'application_already_open', 'application_paused', 'requires_consent', 'gdpr_processing_withdrawn', 'dnt_not_signed', 'dnt_incomplete', 'dnt_expired', 'dnt_session_already_active', 'dnt_session_incomplete', 'no_active_dnt_session', 'questionnaire_incomplete', 'selection_incomplete', 'quote_already_issued', 'no_issued_quote', 'quote_expired', 'quote_already_accepted', 'requires_confirmation', 'requires_identity', 'requires_disclosures', 'already_applied', 'stale_confirm_token', 'invalid_args', 'handler_rejected', 'temporarily_unavailable', 'degraded_mode', 'no_policy', 'payment_not_pending', 'permission_denied', 'not_exposed'] as const
 export type ReasonCode = (typeof REASON_CODES)[number]
 
 export type CommitActor = 'agent' | 'gui' | 'system' | 'operator'
@@ -21,7 +21,16 @@ export interface DomainSnapshot {
   candidateProductId: string | null
   identity: { tier: IdentityTier; fields: Record<string, { provenance: Provenance } | undefined> }
   consents: { gdprProcessing: boolean; aiDisclosure: boolean; marketing: boolean; gdprWithdrawn: boolean; hasAnyEvents: boolean } // derived from the ConsentEvent ledger (B1); gdprWithdrawn = latest gdpr event is an explicit withdrawal
-  dnt: { signed: boolean; valid: boolean; validUntil: string | null; coversProductTypes: string[]; answeredCount: number; totalCount: number; sessionActive: boolean }
+  dnt: {
+    // legacy conversation-stamp semantics — retired at B2.6 with the columns
+    signed: boolean; valid: boolean; validUntil: string | null; coversProductTypes: string[]; answeredCount: number; totalCount: number; sessionActive: boolean
+    // B2 aggregate facts (customer-scoped)
+    latest: { status: string; signedAt: string; validUntil: string; productTypesCovered: string[] } | null
+    activeSessionId: string | null
+    sessionType: string | null
+    sessionAnswered: number
+    sessionTotal: number
+  }
   application: { id: string; status: 'OPEN' | 'PAUSED' | 'COMPLETED'; tier: string | null; level: string | null; addon: boolean | null; answeredCount: number; requiredCount: number; missingCodes: string[] } | null
   quote: { id: string; status: string; premiumAnnual: number; validUntil: string; expired: boolean } | null // issued, unaccepted
   acceptedQuote: { id: string; acceptedAt: string | null } | null

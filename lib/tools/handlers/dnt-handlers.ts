@@ -1,7 +1,9 @@
 /**
  * DNT Handlers — Declaration of Needs and Testing
  *
- * check_dnt_status, start_dnt_questionnaire, save_dnt_answer, sign_dnt
+ * Reads: get_dnt_state, get_dnt_questions, get_dnt_next_question (B2.4 —
+ * the pinned #7 surface; session details are absorbed into get_dnt_state).
+ * Commits: save_dnt_answer (legacy until B2.5), sign_dnt.
  */
 
 import {
@@ -10,6 +12,8 @@ import {
   calculateProgress,
 } from '@/lib/engines/questionnaire-engine'
 import { resolveGroupCodes, resolveActiveProductId } from '@/lib/engines/question-groups'
+import { shouldShowQuestion } from '@/lib/engines/questionnaire-engine'
+import { isDntValidFor, isExpiringOrExpired, type DntFact } from '@/lib/engines/dnt-rules'
 import { appendConsentEvents } from '@/lib/customer/consent-service'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackDntCompleted } from '@/lib/analytics/events'
@@ -21,42 +25,49 @@ async function dntGroupCodes(context: { conversationId: string; product?: { id: 
 }
 
 // ─────────────────────────────────────────────
-// check_dnt_status
+// get_dnt_state (B2.4 — absorbs session details, #7)
 // ─────────────────────────────────────────────
 
-export const checkDntStatus: ToolHandler = async (_args, context) => {
+export const getDntState: ToolHandler = async (_args, context) => {
   try {
-    const { conversationId } = context
-
-    // Calculate progress across all DNT groups
-    const codes = await dntGroupCodes(context)
-    const progress = await calculateProgress(codes, { kind: 'conversation', conversationId: conversationId })
-
-    // Read signing state from Conversation
-    const conv = await context.db.conversation.findUnique({
-      where: { id: conversationId },
-      select: { dntSignedAt: true, dntValidUntil: true },
+    const now = new Date()
+    const latest = await context.db.dnt.findFirst({
+      where: { customerId: context.customerId },
+      orderBy: { signedAt: 'desc' },
     })
-    const isSigned = !!conv?.dntSignedAt && (!conv.dntValidUntil || conv.dntValidUntil > new Date())
-    const signedAt = conv?.dntSignedAt?.toISOString() ?? null
-    const validUntil = conv?.dntValidUntil?.toISOString() ?? null
-
+    const session = await context.db.dntSession.findFirst({
+      where: { customerId: context.customerId, status: 'ACTIVE' },
+    })
+    let sessionSummary: Record<string, unknown> | null = null
+    if (session) {
+      const codes = await resolveGroupCodes(session.productId, 'dnt')
+      const progress = await calculateProgress(codes, { kind: 'dntSession', sessionId: session.id })
+      sessionSummary = {
+        id: session.id,
+        type: session.type,
+        answered: progress.answered,
+        total: progress.total,
+        startedAt: session.startedAt.toISOString(),
+      }
+    }
+    const fact = latest as DntFact | null
+    const valid = isDntValidFor(fact, 'LIFE', now)
     return {
       success: true,
       data: {
-        dntExists: progress.total > 0,
-        completionPercentage: progress.percentage,
-        answered: progress.answered,
-        total: progress.total,
-        isSigned,
-        signedAt,
-        validUntil,
+        valid,
+        validUntil: latest?.validUntil.toISOString() ?? null,
+        productTypesCovered: latest?.productTypesCovered ?? [],
+        status: latest?.status ?? null,
+        expiring: fact ? isExpiringOrExpired(fact, now) : false,
+        expiringWithinDays: latest ? Math.max(0, Math.ceil((latest.validUntil.getTime() - now.getTime()) / 86400e3)) : null,
+        session: sessionSummary,
       },
-      message: isSigned
-        ? 'DNT is signed and valid. Customer can proceed with applications.'
-        : progress.percentage === 100
-          ? 'All DNT questions answered. Ready for signature.'
-          : `DNT progress: ${progress.percentage}% (${progress.answered}/${progress.total}).`,
+      message: valid
+        ? 'A valid DNT covers this customer.'
+        : sessionSummary
+          ? 'No valid DNT; a questionnaire session is in progress.'
+          : 'No valid DNT for this customer.',
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -64,56 +75,85 @@ export const checkDntStatus: ToolHandler = async (_args, context) => {
 }
 
 // ─────────────────────────────────────────────
-// start_dnt_questionnaire
+// get_dnt_questions (preview — no session required)
 // ─────────────────────────────────────────────
 
-export const startDntQuestionnaire: ToolHandler = async (_args, context) => {
+export const getDntQuestions: ToolHandler = async (_args, context) => {
   try {
     const codes = await dntGroupCodes(context)
-    const result = await getNextQuestion(codes, { kind: 'conversation', conversationId: context.conversationId })
+    const groups = await context.db.questionGroup.findMany({
+      where: { code: { in: codes } },
+      orderBy: { orderIndex: 'asc' },
+    })
+    const questions = await context.db.question.findMany({
+      where: { groupId: { in: groups.map((g) => g.id) } },
+      orderBy: [{ groupId: 'asc' }, { orderIndex: 'asc' }],
+    })
+    const groupCodeMap = new Map(groups.map((g) => [g.id, g.code]))
+    const lang = context.language ?? 'ro'
+    // visible-by-default: no answers yet, so only unconditional questions show
+    const emptyAnswers = new Map<string, string>()
+    const visible = questions
+      .filter((q) => shouldShowQuestion({ parentQuestionId: q.parentQuestionId, showWhenValue: q.showWhenValue }, emptyAnswers))
+      .map((q) => ({
+        id: q.id,
+        code: q.code,
+        text: (q.text as { en: string; ro: string })[lang],
+        type: q.type,
+        options: q.options,
+        groupCode: groupCodeMap.get(q.groupId) ?? '',
+      }))
+    return {
+      success: true,
+      data: { questions: visible },
+      message: `${visible.length} DNT questions (more may appear based on answers).`,
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
 
-    if (!result) {
+// ─────────────────────────────────────────────
+// get_dnt_next_question (steps the customer's ACTIVE session)
+// ─────────────────────────────────────────────
+
+export const getDntNextQuestion: ToolHandler = async (_args, context) => {
+  try {
+    const session = await context.db.dntSession.findFirst({
+      where: { customerId: context.customerId, status: 'ACTIVE' },
+    })
+    if (!session) {
+      return { success: false, error: 'no_active_dnt_session: open_dnt_session first.' }
+    }
+    const codes = await resolveGroupCodes(session.productId, 'dnt')
+    const next = await getNextQuestion(codes, { kind: 'dntSession', sessionId: session.id })
+    if (!next) {
+      const progress = await calculateProgress(codes, { kind: 'dntSession', sessionId: session.id })
       return {
         success: true,
-        data: { alreadyComplete: true },
-        message: 'All DNT questions have already been answered. Ready for signature.',
+        data: { sessionId: session.id, complete: true, question: null, progress },
+        message: 'All DNT questions answered. Ready for signature (sign_dnt).',
       }
     }
-
     const lang = context.language ?? 'ro'
-    const q = result.question
-    const text = q.text as { en: string; ro: string }
-
+    const q = next.question
     return {
       success: true,
       data: {
-        currentQuestion: {
+        sessionId: session.id,
+        complete: false,
+        question: {
           id: q.id,
           code: q.code,
-          text: text[lang],
+          text: (q.text as { en: string; ro: string })[lang],
           helpText: q.helpText ? (q.helpText as { en: string; ro: string })[lang] : null,
           type: q.type,
           options: q.options,
           groupCode: q.groupCode,
         },
-        progress: result.progress,
+        progress: next.progress,
       },
-      message: `Started DNT questionnaire. ${result.progress.total} questions total.`,
-      uiAction: {
-        type: 'show_question',
-        payload: {
-          question: {
-            id: q.id,
-            code: q.code,
-            text: q.text as { en: string; ro: string },
-            helpText: q.helpText as { en: string; ro: string } | null,
-            type: q.type,
-            options: q.options,
-          },
-          progress: result.progress,
-          groupType: 'dnt',
-        } as unknown as Record<string, unknown>,
-      },
+      message: `Next DNT question (${next.progress.answered}/${next.progress.total} answered).`,
     }
   } catch (error) {
     return { success: false, error: String(error) }

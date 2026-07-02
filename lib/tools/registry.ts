@@ -16,7 +16,7 @@ import { shapeProductInfo, type RawProduct } from './shape-product-info'
 import { calculateAge } from '@/lib/chat/age'
 
 // --- Handler imports ---
-import { checkDntStatus, startDntQuestionnaire, saveDntAnswer, signDnt } from './handlers/dnt-handlers'
+import { getDntState, getDntQuestions, getDntNextQuestion, saveDntAnswer, signDnt } from './handlers/dnt-handlers'
 import { startApplication, saveApplicationAnswer, resumeApplication, cancelApplication } from './handlers/application-handlers'
 import { changeSelection } from './handlers/change-selection-handlers'
 import { setAnswer } from './handlers/set-answer-handlers'
@@ -589,40 +589,38 @@ registerTool('get_customer_profile', {
 
 // --- DNT (Declaration of Needs and Testing) ---
 
-registerTool('check_dnt_status', {
-  description: 'Check the status of the customer\'s DNT (declaration of needs and testing).',
-  parameters: {
-    type: 'object',
-    properties: {
-      insuranceType: { type: 'string', description: 'Insurance type to check DNT for.' },
-    },
-    additionalProperties: false,
-  },
+registerTool('get_dnt_state', {
+  description: 'Report the customer\'s DNT state: validity, coverage, expiry, and the active questionnaire session summary if one exists.',
+  parameters: { type: 'object', properties: {}, additionalProperties: false },
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
   allowedRoles: ALL_ROLES,
   sideEffects: false,
   kind: 'read',
-}, checkDntStatus)
+}, getDntState)
 
-registerTool('start_dnt_questionnaire', {
-  description: 'Start the DNT questionnaire for a given insurance type.',
-  parameters: {
-    type: 'object',
-    properties: {
-      insuranceType: { type: 'string', description: 'Insurance type (e.g. LIFE, HEALTH).' },
-    },
-    required: ['insuranceType'],
-    additionalProperties: false,
-  },
+registerTool('get_dnt_questions', {
+  description: 'Preview the DNT questionnaire: the default-visible questions for the product in focus (no session required).',
+  parameters: { type: 'object', properties: {}, additionalProperties: false },
   executionMode: 'blocking',
   customerVisible: false,
   statusMessage: null,
   allowedRoles: ALL_ROLES,
-  sideEffect: 'lifecycle',
-  kind: 'commit',
-}, startDntQuestionnaire)
+  sideEffects: false,
+  kind: 'read',
+}, getDntQuestions)
+
+registerTool('get_dnt_next_question', {
+  description: 'Get the next unanswered question of the customer\'s ACTIVE DNT session, with progress.',
+  parameters: { type: 'object', properties: {}, additionalProperties: false },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffects: false,
+  kind: 'read',
+}, getDntNextQuestion)
 
 registerTool('save_dnt_answer', {
   description: 'Save an answer to the current DNT question.',

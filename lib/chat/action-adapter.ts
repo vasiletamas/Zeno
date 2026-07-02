@@ -103,7 +103,7 @@ export function adaptAction(action: UIAction): ToolCall | null {
     case 'start_dnt':
       return {
         id: `action_${Date.now()}`,
-        name: 'start_dnt_questionnaire',
+        name: 'open_dnt_session',
         arguments: action.payload,
       }
 

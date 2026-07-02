@@ -2,6 +2,37 @@ import type { DomainSnapshot, Phase, AppSubphase } from './domain-types'
 import type { BlockedAction, DeriveAndExposeResult, DerivedStateV3, ReasonCode } from './domain-types'
 import { checkIdentityRequirement, IDENTITY_REQUIREMENTS, type IdentityRequirementsTable } from './identity-requirements'
 import { consentBlocksCommit } from './consent-rules'
+import { dntExposure, type DntFact, type ProductTypeStr } from './dnt-rules'
+
+/**
+ * Adapt the snapshot's DNT aggregate facts to the pure #12 exposure
+ * predicates (B2). Governs the new 6-tool surface progressively: reads +
+ * open_dnt_session from B2.4, write_dnt_answer from B2.5, sign_dnt at B2.6.
+ */
+function dntExposureFromSnapshot(s: DomainSnapshot): ReturnType<typeof dntExposure> {
+  const latest: DntFact | null = s.dnt.latest
+    ? { status: s.dnt.latest.status, signedAt: new Date(s.dnt.latest.signedAt), validUntil: new Date(s.dnt.latest.validUntil), productTypesCovered: s.dnt.latest.productTypesCovered as ProductTypeStr[] }
+    : null
+  return dntExposure({
+    productTypeInFocus: (s.product?.insuranceType as ProductTypeStr) ?? null,
+    latestDnt: latest,
+    activeSession: s.dnt.activeSessionId ? { id: s.dnt.activeSessionId } : null,
+    sessionHasPendingQuestion: s.dnt.activeSessionId !== null && s.dnt.sessionAnswered < s.dnt.sessionTotal,
+    sessionFinished: s.dnt.activeSessionId !== null && s.dnt.sessionTotal > 0 && s.dnt.sessionAnswered >= s.dnt.sessionTotal,
+    openApplicationProductType: s.application !== null && s.product ? (s.product.insuranceType as ProductTypeStr) : null,
+    now: new Date(),
+  })
+}
+
+const dntRule = (action: string, kind: 'read' | 'commit'): ActionRule => ({
+  action,
+  kind,
+  exposedWhen: (s) => dntExposureFromSnapshot(s).available.includes(action),
+  blockedReason: (s) => {
+    const b = dntExposureFromSnapshot(s).blocked.find((x) => x.action === action)
+    return b ? { reason: b.reason as ReasonCode, params: b.params } : null
+  },
+})
 
 /**
  * Engine version stamp carried in every per-turn legality snapshot
@@ -9,7 +40,7 @@ import { consentBlocksCommit } from './consent-rules'
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.6.0' // 1.4.0: standalone consent tools retired — capture folds into sign_dnt (B1.1); 1.5.0: gdpr-withdrawn halt rule in exposure (B1.3); 1.6.0: withdraw_consent exposed on any ledger history (B1.4)
+export const engineVersion = '1.7.0' // 1.5.0: gdpr-withdrawn halt rule in exposure (B1.3); 1.6.0: withdraw_consent exposed on any ledger history (B1.4); 1.7.0: DNT read surface + open_dnt_session via #12 predicates, check_dnt_status/start_dnt_questionnaire retired (B2.4)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -40,15 +71,16 @@ export const ACTION_RULES: ActionRule[] = [
   { action: 'get_current_state', kind: 'read', exposedWhen: always },
   { action: 'get_objection_strategy', kind: 'read', exposedWhen: always },
   { action: 'get_customer_profile', kind: 'read', exposedWhen: always },
-  { action: 'check_dnt_status', kind: 'read', exposedWhen: (s) => s.product !== null || s.dnt.signed },
+  dntRule('get_dnt_state', 'read'),
+  dntRule('get_dnt_questions', 'read'),
+  dntRule('get_dnt_next_question', 'read'),
+  dntRule('open_dnt_session', 'commit'),
   { action: 'get_quote_details', kind: 'read', exposedWhen: (s) => s.quote !== null || s.acceptedQuote !== null },
   { action: 'escalate_to_human', kind: 'commit', exposedWhen: always },
   { action: 'set_candidate_product', kind: 'commit', exposedWhen: always },
   { action: 'switch_product', kind: 'commit', exposedWhen: (s) => s.product !== null },
   { action: 'collect_customer_field', kind: 'commit', exposedWhen: always },
   { action: 'withdraw_consent', kind: 'commit', exposedWhen: (s) => s.consents.hasAnyEvents },
-  { action: 'start_dnt_questionnaire', kind: 'commit', exposedWhen: (s) => s.product !== null && !s.dnt.valid && s.dnt.answeredCount < s.dnt.totalCount,
-    blockedReason: (s) => (s.product === null ? { reason: 'no_product_in_focus' } : null) },
   { action: 'save_dnt_answer', kind: 'commit', exposedWhen: (s) => s.product !== null && !s.dnt.signed && s.dnt.totalCount > 0 && s.dnt.answeredCount < s.dnt.totalCount },
   { action: 'sign_dnt', kind: 'commit', exposedWhen: (s) => s.product !== null && !s.dnt.signed && s.dnt.totalCount > 0 && s.dnt.answeredCount >= s.dnt.totalCount,
     blockedReason: (s) => (s.product !== null && !s.dnt.signed && s.dnt.answeredCount < s.dnt.totalCount ? { reason: 'dnt_incomplete', params: { answered: s.dnt.answeredCount, total: s.dnt.totalCount } } : null) },
@@ -68,7 +100,7 @@ export const ACTION_RULES: ActionRule[] = [
   { action: 'initiate_payment', kind: 'commit', exposedWhen: (s) => s.policy !== null && s.policy.status === 'PENDING_SUBMISSION' },
 ]
 
-const NEXT_BEST_PRIORITY = ['initiate_payment', 'accept_quote', 'generate_quote', 'save_application_answer', 'sign_dnt', 'save_dnt_answer', 'start_dnt_questionnaire', 'start_application', 'set_candidate_product', 'list_products']
+const NEXT_BEST_PRIORITY = ['initiate_payment', 'accept_quote', 'generate_quote', 'save_application_answer', 'sign_dnt', 'save_dnt_answer', 'open_dnt_session', 'start_application', 'set_candidate_product', 'list_products']
 
 export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequirements?: IdentityRequirementsTable }): DeriveAndExposeResult {
   const d = derivePhase(s)

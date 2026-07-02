@@ -36,22 +36,38 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
       missingCodes: questions.filter((q) => !answeredIds.has(q.id)).map((q) => q.code ?? q.id),
     }
   }
-  // DNT facts (interim source: Conversation.dntSignedAt/dntValidUntil; Block B re-points to the Dnt aggregate behind this seam)
-  // Counting is VISIBILITY-AWARE (B1.6 fix): conditional questions hidden by
-  // the customer's answers must not keep sign_dnt blocked at n-1/n — the
-  // exposure gate has to agree with the handler's calculateProgress.
+  // DNT facts. Legacy conversation-stamp semantics survive until B2.6; the
+  // customer-scoped aggregate facts (latest Dnt + ACTIVE session) feed the
+  // B2 dntExposure predicates. Counting is VISIBILITY-AWARE (B1.6 fix):
+  // conditional questions hidden by answers must not block sign at n-1/n.
+  const countVisible = (
+    questions: { id: string; parentQuestionId: string | null; showWhenValue: string | null }[],
+    answers: Map<string, string>,
+  ) => {
+    let total = 0
+    let answered = 0
+    for (const q of questions) {
+      if (!shouldShowQuestion({ parentQuestionId: q.parentQuestionId, showWhenValue: q.showWhenValue }, answers)) continue
+      total++
+      if (answers.has(q.id)) answered++
+    }
+    return { total, answered }
+  }
   const dntGroupCodes = prod ? ((await resolveGroupCodes(prod.id, 'dnt', db)) ?? []) : []
   const dntQuestions = dntGroupCodes.length > 0 ? await db.question.findMany({ where: { group: { code: { in: dntGroupCodes } } }, select: { id: true, parentQuestionId: true, showWhenValue: true } }) : []
   const dntAnswerRows = dntQuestions.length > 0 ? await db.answer.findMany({ where: { conversationId, questionId: { in: dntQuestions.map((q) => q.id) } }, select: { questionId: true, value: true } }) : []
-  const dntAnswersMap = new Map(dntAnswerRows.map((a) => [a.questionId, a.value]))
-  let dntVisibleTotal = 0
-  let dntVisibleAnswered = 0
-  for (const q of dntQuestions) {
-    if (!shouldShowQuestion({ parentQuestionId: q.parentQuestionId, showWhenValue: q.showWhenValue }, dntAnswersMap)) continue
-    dntVisibleTotal++
-    if (dntAnswersMap.has(q.id)) dntVisibleAnswered++
-  }
+  const legacyCounts = countVisible(dntQuestions, new Map(dntAnswerRows.map((a) => [a.questionId, a.value])))
   const dntValid = conversation.dntSignedAt != null && conversation.dntValidUntil != null && conversation.dntValidUntil.getTime() > Date.now()
+  // aggregate facts (B2)
+  const latestDnt = await db.dnt.findFirst({ where: { customerId: conversation.customerId }, orderBy: { signedAt: 'desc' } })
+  const activeDntSession = await db.dntSession.findFirst({ where: { customerId: conversation.customerId, status: 'ACTIVE' } })
+  let sessionCounts = { total: 0, answered: 0 }
+  if (activeDntSession) {
+    const sessionCodes = (await resolveGroupCodes(activeDntSession.productId, 'dnt', db)) ?? []
+    const sessionQuestions = sessionCodes.length > 0 ? await db.question.findMany({ where: { group: { code: { in: sessionCodes } } }, select: { id: true, parentQuestionId: true, showWhenValue: true } }) : []
+    const sessionAnswerRows = sessionQuestions.length > 0 ? await db.dntAnswer.findMany({ where: { sessionId: activeDntSession.id }, select: { questionId: true, value: true } }) : []
+    sessionCounts = countVisible(sessionQuestions, new Map(sessionAnswerRows.map((a) => [a.questionId, a.value])))
+  }
   // quotes: issued (today: DRAFT, non-expired) and accepted
   const issued = application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'DRAFT' }, orderBy: { createdAt: 'desc' } }) : null
   const accepted = application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'ACCEPTED' } }) : null
@@ -62,7 +78,14 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     candidateProductId: conversation.candidateProductId,
     identity: { tier: customer.isAnonymous ? 'anonymous' : 'declared', fields: {} }, // B0 provenance store replaces fields
     consents,
-    dnt: { signed: conversation.dntSignedAt != null, valid: dntValid, validUntil: conversation.dntValidUntil?.toISOString() ?? null, coversProductTypes: dntValid && prod ? [prod.insuranceType] : [], answeredCount: dntVisibleAnswered, totalCount: dntVisibleTotal, sessionActive: conversation.dntSignedAt == null && dntVisibleAnswered > 0 && dntVisibleAnswered < dntVisibleTotal },
+    dnt: {
+      signed: conversation.dntSignedAt != null, valid: dntValid, validUntil: conversation.dntValidUntil?.toISOString() ?? null, coversProductTypes: dntValid && prod ? [prod.insuranceType] : [], answeredCount: legacyCounts.answered, totalCount: legacyCounts.total, sessionActive: conversation.dntSignedAt == null && legacyCounts.answered > 0 && legacyCounts.answered < legacyCounts.total,
+      latest: latestDnt ? { status: latestDnt.status, signedAt: latestDnt.signedAt.toISOString(), validUntil: latestDnt.validUntil.toISOString(), productTypesCovered: latestDnt.productTypesCovered } : null,
+      activeSessionId: activeDntSession?.id ?? null,
+      sessionType: activeDntSession?.type ?? null,
+      sessionAnswered: sessionCounts.answered,
+      sessionTotal: sessionCounts.total,
+    },
     application: appState,
     quote: issued ? { id: issued.id, status: issued.status, premiumAnnual: issued.premiumAnnual, validUntil: issued.validUntil.toISOString(), expired: issued.validUntil.getTime() <= Date.now() } : null,
     acceptedQuote: accepted ? { id: accepted.id, acceptedAt: accepted.updatedAt.toISOString() } : null,

@@ -26,8 +26,9 @@ describe('consentBlocksCommit (halt predicate)', () => {
     expect(consentBlocksCommit(withdrawn, 'escalate_to_human')).toEqual({ blocked: false })
     expect(consentBlocksCommit({ ...withdrawn, gdprProcessing: true, gdprWithdrawn: false }, 'select_coverage')).toEqual({ blocked: false })
   })
-  it('the DNT-session commits are exempt so the re-grant path stays reachable (B1 erratum 2)', () => {
-    expect(consentBlocksCommit(withdrawn, 'start_dnt_questionnaire')).toEqual({ blocked: false })
+  it('the DNT-session commits are exempt so the re-grant path stays reachable (B1 erratum 2, B2 vocabulary)', () => {
+    expect(consentBlocksCommit(withdrawn, 'open_dnt_session')).toEqual({ blocked: false })
+    expect(consentBlocksCommit(withdrawn, 'write_dnt_answer')).toEqual({ blocked: false })
     expect(consentBlocksCommit(withdrawn, 'save_dnt_answer')).toEqual({ blocked: false })
   })
   it('a fresh customer with no events is never halted (talk is free, consent captured AT signing)', () => {

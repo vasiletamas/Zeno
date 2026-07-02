@@ -49,13 +49,9 @@ const getCustomerProfileSchema = z.object({}).strict()
 // DNT TOOL SCHEMAS
 // ==============================================
 
-const checkDntStatusSchema = z.object({
-  insuranceType: InsuranceTypeSchema.optional(),
-}).strict()
-
-const startDntQuestionnaireSchema = z.object({
-  insuranceType: InsuranceTypeSchema,
-}).strict()
+const getDntStateSchema = z.object({}).strict()
+const getDntQuestionsSchema = z.object({}).strict()
+const getDntNextQuestionSchema = z.object({}).strict()
 
 const saveDntAnswerSchema = z.object({
   questionId: z.string().optional(),
@@ -169,8 +165,9 @@ const toolSchemas: Record<string, ZodType> = {
   get_customer_profile: getCustomerProfileSchema,
 
   // DNT
-  check_dnt_status: checkDntStatusSchema,
-  start_dnt_questionnaire: startDntQuestionnaireSchema,
+  get_dnt_state: getDntStateSchema,
+  get_dnt_questions: getDntQuestionsSchema,
+  get_dnt_next_question: getDntNextQuestionSchema,
   save_dnt_answer: saveDntAnswerSchema,
   sign_dnt: signDntSchema,
 
