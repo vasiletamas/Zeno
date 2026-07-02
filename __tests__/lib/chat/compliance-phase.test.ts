@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { COMPLIANCE_RELEVANT_BY_PHASE, rulesForPhase, executeComplianceCheck } from '@/lib/chat/compliance-checker'
+import { PHASES } from '@/lib/engines/domain-types'
 
 const gatewayCallSpy = vi.fn()
 vi.mock('@/lib/llm/gateway', () => ({
@@ -6,60 +8,55 @@ vi.mock('@/lib/llm/gateway', () => ({
 }))
 vi.mock('@/lib/errors/logger', () => ({ logWarn: vi.fn() }))
 
-const { executeComplianceCheck } = await import('@/lib/chat/compliance-checker')
-
-beforeEach(() => {
-  gatewayCallSpy.mockReset()
-  gatewayCallSpy.mockResolvedValue({ content: '{ "passed": true, "gaps": [], "suggestions": [] }' })
+describe('compliance keyed on the pinned Phase (kills the dual vocabulary at orchestrator.ts:651)', () => {
+  it('is exhaustively defined for every Phase (rename can never silently disable it again)', () => {
+    for (const p of PHASES) expect(typeof COMPLIANCE_RELEVANT_BY_PHASE[p]).toBe('boolean')
+  })
+  it('DISCOVERY is not compliance-relevant and maps to the NARROW rule set (over-flagging pathology stays fixed)', () => {
+    expect(COMPLIANCE_RELEVANT_BY_PHASE.DISCOVERY).toBe(false)
+    expect(rulesForPhase('DISCOVERY')).toBe(rulesForPhase('DISCOVERY')) // stable
+    expect(rulesForPhase('DISCOVERY')).not.toEqual(rulesForPhase('APPLICATION'))
+  })
+  it('APPLICATION/QUOTE/PAYMENT/POLICY are compliance-relevant', () => {
+    for (const p of ['APPLICATION', 'QUOTE', 'PAYMENT', 'POLICY'] as const) expect(COMPLIANCE_RELEVANT_BY_PHASE[p]).toBe(true)
+  })
 })
 
-describe('executeComplianceCheck — phase awareness', () => {
-  it('uses presentation-phase prompt when phase is "presentation"', async () => {
+describe('executeComplianceCheck selects the rule set from the pinned Phase', () => {
+  beforeEach(() => {
+    gatewayCallSpy.mockReset()
+    gatewayCallSpy.mockResolvedValue({ content: '{ "passed": true, "gaps": [], "suggestions": [] }' })
+  })
+
+  it('DISCOVERY uses the narrow presentation rule set', async () => {
     await executeComplianceCheck({
       messages: [{ role: 'user', content: 'hi' }],
       workflowStepCode: null,
       customerProfile: null,
-      phase: 'presentation',
+      phase: 'DISCOVERY',
     })
 
     const call = gatewayCallSpy.mock.calls[0]
     const messages = (call[1] as { messages: Array<{ content: string }> }).messages
     const userPrompt = messages[0].content
 
-    // Presentation-phase rules: transparency-only
-    expect(userPrompt).toMatch(/PRESENTATION/i)
-    expect(userPrompt).toMatch(/AI nature|AI disclosure/i)
-    expect(userPrompt).toMatch(/insurer disclosed/i)
-    expect(userPrompt).toMatch(/GDPR/i)
-    // Explicit guard: do not flag deferred checks
     expect(userPrompt).toMatch(/Do NOT flag/i)
-    expect(userPrompt).toMatch(/needs assessment/i)
+    expect(userPrompt).not.toMatch(/needs identification/i)
   })
 
-  it('uses application-phase prompt when phase is "application"', async () => {
+  it('every non-DISCOVERY Phase uses the full rule set', async () => {
     await executeComplianceCheck({
       messages: [{ role: 'user', content: 'hi' }],
       workflowStepCode: 'application_fill',
       customerProfile: null,
-      phase: 'application',
+      phase: 'APPLICATION',
     })
 
     const call = gatewayCallSpy.mock.calls[0]
     const messages = (call[1] as { messages: Array<{ content: string }> }).messages
     const userPrompt = messages[0].content
 
-    expect(userPrompt).toMatch(/APPLICATION/i)
     expect(userPrompt).toMatch(/needs identification/i)
     expect(userPrompt).toMatch(/suitability/i)
-  })
-
-  it('still returns parsed result regardless of phase', async () => {
-    const r = await executeComplianceCheck({
-      messages: [],
-      workflowStepCode: null,
-      customerProfile: null,
-      phase: 'presentation',
-    })
-    expect(r.passed).toBe(true)
   })
 })

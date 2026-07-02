@@ -19,7 +19,6 @@ function makeIdentity(overrides: Partial<NonNullable<DebugTurn['identity']>> = {
       aiDisclosureAcknowledgedAt: null,
     },
     conversation: {
-      phase: 'presentation',
       productId: null,
       productCode: null,
       productName: null,
@@ -83,11 +82,10 @@ describe('diffIdentity', () => {
     expect(r.changes).toBe(2)
   })
 
-  it('flags a phase or candidate change in the conversation block', () => {
+  it('flags a product or candidate change in the conversation block', () => {
     const previous = makeIdentity()
     const current = makeIdentity({
       conversation: {
-        phase: 'application',
         productId: 'p-protect',
         productCode: 'protect',
         productName: 'Protect',
@@ -97,7 +95,7 @@ describe('diffIdentity', () => {
       },
     })
     const r = diffIdentity(current, previous)
-    expect(r.scalarDiffs.get('conversation.phase')).toEqual({ now: 'application', was: 'presentation' })
+    expect(r.scalarDiffs.get('conversation.productId')).toEqual({ now: 'p-protect', was: null })
     expect(r.scalarDiffs.has('conversation.productId')).toBe(true)
     expect(r.scalarDiffs.has('conversation.candidateProductId')).toBe(true)
     expect(r.changes).toBeGreaterThanOrEqual(3)

@@ -15,7 +15,6 @@ import type { TurnContextCustomer } from './turn-context'
 import type { RawCustomerInsight } from './context-loaders'
 import type { DerivedStateV3, ExposedActions } from '@/lib/engines/domain-types'
 import { calculateAge } from './age'
-import { getConversationPhase } from './phase'
 import { writeDebugEvent } from './debug-persistence'
 
 // ==============================================
@@ -148,7 +147,6 @@ export interface DebugIdentityPayload {
     aiDisclosureAcknowledgedAt: string | null
   }
   conversation: {
-    phase: 'presentation' | 'application' | 'post_sale'
     productId: string | null
     productCode: string | null
     productName: string | null
@@ -236,13 +234,11 @@ export interface BuildIdentityPayloadInput {
   customerId: string
   customer: TurnContextCustomer
   conversation: {
-    mode: string
     productId: string | null
     product: { code: string; name: unknown } | null
     candidateProductId: string | null
     candidateConfidence: number | null
     candidateSetAt: Date | null
-    application: { status: string } | null
   }
   insights: RawCustomerInsight[]
   now: Date
@@ -294,7 +290,6 @@ export function buildIdentityPayload(
         : null,
     },
     conversation: {
-      phase: getConversationPhase(input.conversation),
       productId: input.conversation.productId,
       productCode: input.conversation.product?.code ?? null,
       productName: extractLocalizedName(input.conversation.product?.name, input.customer.language),

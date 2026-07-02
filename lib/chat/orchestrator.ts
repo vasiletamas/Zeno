@@ -33,11 +33,10 @@ import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
 import { loadAllSections, loadStateGrounding, loadCustomerInsights, type WorkflowSessionData, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
 import { withDefaultDiscoveryTools } from './default-tools'
 import { loadTurnContext, type TurnContext } from './turn-context'
-import { getConversationPhase } from './phase'
 import { inferCandidate, hasAnyCategoryKeyword } from './candidate-inference'
 import { resolveAgent } from './agent-resolver'
 import { getActiveSkillPacks, mergeSkillPackSections, computeAllowedTools } from '@/lib/skills/skill-pack-loader'
-import { executeComplianceCheck, type ComplianceCheckResult } from './compliance-checker'
+import { executeComplianceCheck, COMPLIANCE_RELEVANT_BY_PHASE, type ComplianceCheckResult } from './compliance-checker'
 import { trackChatStarted } from '@/lib/analytics/events'
 import { estimateTokens, calculateMessageBudget } from '@/lib/chat/token-budget'
 import { compactMessages } from '@/lib/chat/compaction'
@@ -326,13 +325,11 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         customerId: state.customerId,
         customer: turnCtx.customer,
         conversation: {
-          mode: turnCtx.conversation.mode,
           productId: turnCtx.conversation.productId,
           product: turnCtx.conversation.product,
           candidateProductId: turnCtx.conversation.candidateProductId,
           candidateConfidence: turnCtx.conversation.candidateConfidence,
           candidateSetAt: turnCtx.conversation.candidateSetAt,
-          application: turnCtx.conversation.application,
         },
         insights: preloadedInsights,
         now: new Date(),
@@ -635,15 +632,13 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     : sections
 
   // --- Conditional compliance check ---
-  // Compliance is now triggered deterministically by the derived phase rather
-  // than by the LLM gate's complianceRelevant flag.
-  // Transitional trigger on the pinned Phase vocabulary (old CONSENT/
-  // QUESTIONNAIRE map to APPLICATION subphases, old CLOSING to PAYMENT/POLICY);
-  // A1.6 replaces this list with the typed COMPLIANCE_RELEVANT_BY_PHASE record.
+  // Compliance is triggered deterministically by the pinned derived Phase via
+  // the typed COMPLIANCE_RELEVANT_BY_PHASE record (exhaustive over Phase), not
+  // by the LLM gate's complianceRelevant flag or any second phase vocabulary.
   const complianceRelevant = exposure
-    ? ['APPLICATION', 'QUOTE', 'PAYMENT', 'POLICY'].includes(exposure.state.phase)
+    ? COMPLIANCE_RELEVANT_BY_PHASE[exposure.state.phase]
     : false
-  if (complianceRelevant) {
+  if (exposure && complianceRelevant) {
     // Use recent messages from turnCtx instead of querying DB again
     const complianceMessages: Message[] = turnCtx.recentMessages
       .slice(-10)
@@ -654,7 +649,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         messages: complianceMessages,
         workflowStepCode: state.workflowStepCode,
         customerProfile: null,
-        phase: getConversationPhase(turnCtx.conversation),
+        phase: exposure.state.phase,
       })
       state.complianceResult = complianceResult
       if (!complianceResult.passed && complianceResult.gaps.length > 0) {

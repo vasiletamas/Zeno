@@ -18,13 +18,11 @@ function makeCustomer(overrides: Partial<TurnContextCustomer> = {}): TurnContext
 }
 
 const baseConversation = {
-  mode: 'SALES',
   productId: null,
   product: null,
   candidateProductId: null,
   candidateConfidence: null,
   candidateSetAt: null,
-  application: null,
 } as const
 
 const baseArgs = {
@@ -82,7 +80,6 @@ describe('buildIdentityPayload', () => {
         aiDisclosureAcknowledgedAt: '2026-05-26T10:14:00.000Z',
       },
       conversation: {
-        phase: 'presentation',
         productId: null,
         productCode: null,
         productName: null,
@@ -101,20 +98,17 @@ describe('buildIdentityPayload', () => {
     })
   })
 
-  it('surfaces phase, candidate, and committed product in the conversation block', () => {
+  it('surfaces candidate and committed product in the conversation block', () => {
     const customer = makeCustomer()
     const conversation = {
-      mode: 'SALES',
       productId: 'p-protect',
       product: { code: 'protect', name: { ro: 'Protect', en: 'Protect' } },
       candidateProductId: 'p-protect',
       candidateConfidence: 70,
       candidateSetAt: new Date('2026-05-26T10:30:00Z'),
-      application: { status: 'OPEN' },
     }
     const payload = buildIdentityPayload({ ...baseArgs, customer, conversation, insights: [] })
     expect(payload.conversation).toEqual({
-      phase: 'application',
       productId: 'p-protect',
       productCode: 'protect',
       productName: 'Protect',

@@ -82,9 +82,6 @@ export function IdentitySection({ identity, previousIdentity }: Props) {
       </Group>
 
       <Group title="Conversation State">
-        <Row label="phase" path="conversation.phase" diff={diff}>
-          <PhaseBadge phase={identity.conversation.phase} />
-        </Row>
         <Row label="product" path="conversation.productId" diff={diff}>
           {identity.conversation.productId
             ? `✓ ${identity.conversation.productName ?? identity.conversation.productCode ?? identity.conversation.productId}`
@@ -164,19 +161,6 @@ function Row({
         )}
       </span>
     </div>
-  )
-}
-
-function PhaseBadge({ phase }: { phase: 'presentation' | 'application' | 'post_sale' }) {
-  const styles: Record<string, string> = {
-    presentation: 'bg-blue-100 text-blue-800',
-    application: 'bg-emerald-100 text-emerald-800',
-    post_sale: 'bg-purple-100 text-purple-800',
-  }
-  return (
-    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${styles[phase] ?? 'bg-gray-100 text-gray-800'}`}>
-      {phase}
-    </span>
   )
 }
 
