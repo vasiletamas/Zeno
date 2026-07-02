@@ -32,6 +32,12 @@ export interface DomainSnapshot {
     sessionTotal: number
   }
   application: { id: string; status: 'OPEN' | 'PAUSED' | 'REFERRED' | 'COMPLETED' | 'CANCELLED'; tier: string | null; level: string | null; addon: boolean | null; answeredCount: number; requiredCount: number; missingCodes: string[] } | null // full T5.D6 set (B4); the loader nulls CANCELLED pointers
+  /**
+   * B4.6 cross-conversation resume (T5.D4): the customer's live application
+   * ANYWHERE — present even when this conversation carries no pointer yet,
+   * so resume_application can be exposed in a fresh conversation.
+   */
+  resumableApplication: { id: string; status: 'OPEN' | 'PAUSED' | 'REFERRED' } | null
   quote: { id: string; status: string; premiumAnnual: number; validUntil: string; expired: boolean } | null // issued, unaccepted
   acceptedQuote: { id: string; acceptedAt: string | null } | null
   schedule: { exists: boolean; settled: boolean; nextDueAt: string | null; lastPaymentStatus: string | null } // Block D re-points; loader stubs exists:false

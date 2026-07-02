@@ -59,10 +59,12 @@ describe('main-chat agent constraints', () => {
     expect(mainChat?.systemPrompt).toMatch(/premiumRange/)
   })
 
-  it('requires passing tier/level/addon to start_application', () => {
+  it('routes tier/level/addon through select_coverage after set_application (B4)', () => {
     const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
-    expect(mainChat?.systemPrompt).toMatch(/tierCode.*levelCode.*includesAddon/i)
-    expect(mainChat?.systemPrompt).toMatch(/not.*re-?asked/i)
+    expect(mainChat?.systemPrompt).toMatch(/set_application/)
+    expect(mainChat?.systemPrompt).toMatch(/select_coverage/)
+    expect(mainChat?.systemPrompt).not.toMatch(/start_application/)
+    expect(mainChat?.systemPrompt).toMatch(/not re-?ask/i)
   })
   it('requires honest tool-error handling (no silent "not available")', () => {
     const mainChat = AGENTS.find((a) => a.slug === 'main-chat')

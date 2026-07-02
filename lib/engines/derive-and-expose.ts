@@ -71,7 +71,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.13.0' // 1.11.0: channel-verification commits exposed (B3.5); 1.12.0: request_document_upload + productDocuments gate (B3.7); 1.13.0: B4 lifecycle — set_application (no DNT pre-gate, T5.D1) + select_coverage via the pure application rules; set_answer/change_selection/switch_product/start_application retired; questionnaire DNT-gated in exposure; selection_incomplete is a generate_quote blocked-reason (#10)
+export const engineVersion = '1.14.0' // 1.12.0: request_document_upload + productDocuments gate (B3.7); 1.13.0: B4 lifecycle — set_application (no DNT pre-gate, T5.D1) + select_coverage via the pure application rules; legacy mutators retired; selection_incomplete is a generate_quote blocked-reason (#10); 1.14.0: resume_application exposed cross-conversation via the customer-scoped resumable fact, REFERRED answers with_underwriter (B4.6)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -127,7 +127,11 @@ export const ACTION_RULES: ActionRule[] = [
   // B4.2: lifecycle exposure comes from the pure application rules
   appRule('save_application_answer'),
   appRule('select_coverage'),
-  appRule('resume_application'),
+  // resume works CROSS-conversation (T5.D4): a fresh conversation carries no
+  // pointer, so the customer-scoped resumable fact drives exposure too.
+  { action: 'resume_application', kind: 'commit',
+    exposedWhen: (s) => appExposureFromSnapshot(s).available.includes('resume_application') || (s.resumableApplication !== null && s.resumableApplication.status !== 'REFERRED'),
+    blockedReason: (s) => ((s.application?.status ?? s.resumableApplication?.status) === 'REFERRED' ? { reason: 'with_underwriter' } : null) },
   appRule('cancel_application'),
   { action: 'check_bd_eligibility', kind: 'commit', exposedWhen: (s) => s.application !== null && s.application.addon === true },
   { action: 'generate_quote', kind: 'commit',

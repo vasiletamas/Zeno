@@ -36,6 +36,13 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   const application = conversation.activeApplicationId
     ? await db.application.findUnique({ where: { id: conversation.activeApplicationId } })
     : null
+  // B4.6: the customer's live application anywhere — feeds cross-
+  // conversation resume exposure even before this conversation points at it.
+  const resumable = await db.application.findFirst({
+    where: { customerId: conversation.customerId, status: { in: ['OPEN', 'PAUSED', 'REFERRED'] } },
+    orderBy: { updatedAt: 'desc' },
+    select: { id: true, status: true },
+  })
   let appState: DomainSnapshot['application'] = null
   if (application && application.status !== 'CANCELLED') {
     const baseCodes = (await resolveGroupCodes(application.productId, 'application', db)) ?? []
@@ -109,6 +116,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
       sessionTotal: sessionCounts.total,
     },
     application: appState,
+    resumableApplication: resumable ? { id: resumable.id, status: resumable.status as 'OPEN' | 'PAUSED' | 'REFERRED' } : null,
     quote: issued ? { id: issued.id, status: issued.status, premiumAnnual: issued.premiumAnnual, validUntil: issued.validUntil.toISOString(), expired: issued.validUntil.getTime() <= Date.now() } : null,
     acceptedQuote: accepted ? { id: accepted.id, acceptedAt: accepted.updatedAt.toISOString() } : null,
     schedule: { exists: false, settled: false, nextDueAt: null, lastPaymentStatus: null }, // Block D (PaymentSchedule) re-points
