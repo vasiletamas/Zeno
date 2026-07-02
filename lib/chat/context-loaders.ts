@@ -921,6 +921,10 @@ export function loadDntContext(state: DerivedStateV3): string | null {
     `GDPR consent: ${state.consents.gdprProcessing ? 'granted' : 'missing'}`,
     `AI disclosure: ${state.consents.aiDisclosure ? 'acknowledged' : 'missing'}`,
     'The needs analysis (DNT) is a regulatory requirement: complete the remaining questions, then obtain explicit signature via sign_dnt. Consent is captured at signing — never claim consent that is not recorded in state.',
+    // Salvaged questionnaire-facilitation guidance (A5.1 audit):
+    'If the customer interrupts with a question or concern, answer it fully FIRST, then offer to resume — never force resumption.',
+    'Medical/health questions: frame them before asking (needed for the insurance assessment, treated confidentially), keep a neutral non-judgmental tone, never comment on the answers.',
+    'Active questionnaire questions render as UI cards — do not repeat the card text; keep your transitions brief and warm.',
   ].join('\n')
 }
 
@@ -938,6 +942,10 @@ export function loadPolicyContext(state: DerivedStateV3): string | null {
   return [
     `Policy status: ${state.policy.status}`,
     'Language is engine-gated: never describe the policy as active or in force unless status is ACTIVE. Between payment and activation say it is paid and being processed.',
+    // Salvaged post-sale guidance (A5.1 audit):
+    'The sale is closed — no upsell or cross-sell; the customer needs to feel secure, not pressured.',
+    'Claims: lead with empathy and acknowledge the situation before any process talk. You may explain the general process and confirm policy status; you may NOT approve/assess a claim or promise payout amounts or timelines — say plainly that Allianz-Țiriac specialists decide those.',
+    'Policy modifications and payment problems are handled by the human Allianz-Țiriac team — offer to route the customer there.',
   ].join('\n')
 }
 
