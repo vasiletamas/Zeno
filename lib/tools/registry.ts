@@ -33,6 +33,7 @@ import { checkBdEligibility } from './handlers/bd-handlers'
 import { collectCustomerField } from './handlers/data-handlers'
 import { escalateToHuman } from './handlers/utility-handlers'
 import { initiatePayment } from './handlers/payment-handlers'
+import { resolveReferral, resolveWorkItem } from './handlers/operator-handlers'
 
 // ==============================================
 // INTERNAL STORAGE
@@ -947,6 +948,50 @@ registerTool('escalate_to_human', {
   allowedRoles: ALL_ROLES,
   kind: 'commit',
 }, escalateToHuman)
+
+// --- Operator queue (E2.4) ---
+// Never agent-exposed: no ACTION_RULES entry; the gateway's OPERATOR_TOOLS
+// actor gate (operator|system only) replaces exposure-based legality.
+
+registerTool('resolve_referral', {
+  description:
+    'Resolve an underwriting REFERRAL work item: approve restores the application and resumes quote generation; reject terminates the application and notifies the customer.',
+  parameters: {
+    type: 'object',
+    properties: {
+      workItemId: { type: 'string', description: 'The REFERRAL work item to resolve.' },
+      decision: { type: 'string', enum: ['approve', 'reject'], description: 'The underwriting decision.' },
+      note: { type: 'string', description: 'Underwriter note; on reject it is recorded as the underwriter reason on the application.' },
+    },
+    required: ['workItemId', 'decision'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ADMIN_OPERATOR,
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+}, resolveReferral)
+
+registerTool('resolve_work_item', {
+  description: 'Resolve or dismiss a generic work item (escalation, alert flag).',
+  parameters: {
+    type: 'object',
+    properties: {
+      workItemId: { type: 'string', description: 'The work item to close.' },
+      decision: { type: 'string', enum: ['resolve', 'dismiss'], description: 'resolve = handled; dismiss = no action needed.' },
+      note: { type: 'string', description: 'Optional resolution note.' },
+    },
+    required: ['workItemId', 'decision'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ADMIN_OPERATOR,
+  kind: 'commit',
+}, resolveWorkItem)
 
 registerTool('withdraw_consent', {
   description: 'Withdraw a previously granted consent (gdpr_processing, ai_disclosure, or marketing). Data is preserved; processing stops.',

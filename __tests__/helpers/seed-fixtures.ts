@@ -1,0 +1,66 @@
+/**
+ * Concrete cross-package seeding helpers (E2 erratum 5) — real-DB chains
+ * built on the same handlers the product uses, never mocked choreography.
+ */
+import { prisma } from '@/lib/db'
+import { resolveGroupCodes } from '@/lib/engines/question-groups'
+import { signDnt } from '@/lib/tools/handlers/dnt-handlers'
+import { createReferralWorkItem } from '@/lib/work-items/referral'
+import { seedDntFullyAnswered } from './dnt-fixtures'
+
+/**
+ * Customer with a signed Dnt (consents granted at signing) holding a
+ * REFERRED application with tier/level selected — the underwriter-queue
+ * entry state, plus its OPEN REFERRAL WorkItem.
+ */
+export async function seedReferredApplication() {
+  const { customerId, conversationId, ctx } = await seedDntFullyAnswered()
+  const signed = await signDnt({ confirmSignature: true, consent: { gdpr: true, aiDisclosure: true } }, ctx)
+  if (!signed.success) throw new Error(`fixture sign failed: ${signed.error}`)
+
+  const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: conversationId } })
+  const productId = conversation.productId
+  if (!productId) throw new Error('fixture conversation has no product')
+  const tier = await prisma.pricingTier.findFirstOrThrow({ where: { productId, isActive: true }, orderBy: { orderIndex: 'asc' } })
+  const level = await prisma.pricingLevel.findFirstOrThrow({ where: { tierId: tier.id, isActive: true }, orderBy: { orderIndex: 'asc' } })
+
+  // A real pre-referral application went through the full questionnaire —
+  // answer every application-phase question (resolved exactly like the
+  // snapshot loader: product groups + global groups) so an approved app
+  // derives straight back to QUOTE_GENERATION (missingCodes must be empty).
+  const groupCodes = (await resolveGroupCodes(productId, 'application')) ?? []
+  const appQuestions = groupCodes.length > 0
+    ? await prisma.question.findMany({ where: { group: { code: { in: groupCodes } } } })
+    : []
+  const valueFor = (code: string): string => {
+    if (code === 'PACKAGE_CHOICE') return tier.code
+    if (code === 'PREMIUM_LEVEL') return level.code
+    if (code === 'BD_ADDON_INTEREST') return 'false'
+    if (code === 'PAYMENT_FREQUENCY') return 'annual'
+    return 'true' // HEALTH_DECLARATION_CONFIRM and future booleans
+  }
+  await prisma.answer.createMany({
+    data: appQuestions.map((q) => ({ questionId: q.id, conversationId, value: valueFor(q.code ?? '') })),
+  })
+
+  const app = await prisma.application.create({
+    data: {
+      conversationId,
+      customerId,
+      productId,
+      tierId: tier.id,
+      levelId: level.id,
+      includesAddon: false,
+      status: 'REFERRED',
+      currentQuestionIndex: appQuestions.length,
+      totalQuestions: appQuestions.length,
+    },
+  })
+  const item = await createReferralWorkItem({
+    applicationId: app.id,
+    customerId,
+    conversationId,
+    reason: 'pending_external_check: cumulative sum at risk',
+  })
+  return { app, item, customerId, conversationId, ctx }
+}

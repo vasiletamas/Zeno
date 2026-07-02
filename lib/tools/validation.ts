@@ -144,6 +144,22 @@ const escalateToHumanSchema = z.object({
 }).strict()
 
 // ==============================================
+// OPERATOR QUEUE (E2.4)
+// ==============================================
+
+const resolveReferralSchema = z.object({
+  workItemId: z.string().min(1, 'Work item id is required'),
+  decision: z.enum(['approve', 'reject']),
+  note: z.string().optional(),
+}).strict()
+
+const resolveWorkItemSchema = z.object({
+  workItemId: z.string().min(1, 'Work item id is required'),
+  decision: z.enum(['resolve', 'dismiss']),
+  note: z.string().optional(),
+}).strict()
+
+// ==============================================
 // CONSENT
 // ==============================================
 
@@ -200,6 +216,10 @@ const toolSchemas: Record<string, ZodType> = {
 
   // Consent
   withdraw_consent: withdrawConsentSchema,
+
+  // Operator queue
+  resolve_referral: resolveReferralSchema,
+  resolve_work_item: resolveWorkItemSchema,
 }
 
 // ==============================================

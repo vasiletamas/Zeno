@@ -55,6 +55,14 @@ const ONE_SHOT = new Set(['sign_dnt', 'accept_quote', 'generate_quote', 'start_a
  */
 const REPLAY_EXEMPT = new Set(['open_dnt_session'])
 
+/**
+ * Operator commits (E2.4): resolved by back-office staff, never exposed to
+ * the customer-facing agent — they carry no ACTION_RULES entry, so exposure-
+ * based legality is REPLACED by the actor gate (operator|system only). The
+ * hygiene test excludes them from the registry↔ACTION_RULES parity check.
+ */
+export const OPERATOR_TOOLS = new Set(['resolve_referral', 'resolve_work_item'])
+
 export function resolveTargetRef(tool: string, args: Record<string, unknown>, state: DerivedStateV3, conversationId: string): string {
   // repeatable commits — addressed entity from ARGS (erratum 4)
   if (tool === 'collect_customer_field') return `field:${String(args.field ?? 'unknown')}`
@@ -62,6 +70,7 @@ export function resolveTargetRef(tool: string, args: Record<string, unknown>, st
   if (tool === 'save_application_answer') return `app_answer:${String(args.field ?? 'auto')}`
   if (tool === 'set_answer') return `question:${String(args.questionCode ?? 'unknown')}`
   if (tool === 'withdraw_consent') return `consent:${String(args.kind ?? 'unknown')}`
+  if (OPERATOR_TOOLS.has(tool)) return `work_item:${String(args.workItemId ?? 'unknown')}`
   // one-shot / entity-scoped commits — stable natural key
   if (tool === 'sign_dnt') return `dnt_session:${state.dnt.activeSessionId ?? 'none'}` // B2.6: customer-scoped renewals may recur per conversation
   if (tool === 'accept_quote' || tool === 'modify_quote') return `quote:${state.quote?.id ?? 'none'}`
@@ -154,6 +163,13 @@ export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
   const targetRef = resolveTargetRef(req.tool, req.args, pre.state, req.conversationId)
   const argsHash = materialArgsHash(req.tool, targetRef, req.args)
 
+  // Operator tools have no exposure rule — the server-resolved actor IS the
+  // legality check (E2.4), and it outranks replay: a bad actor never gets a
+  // replayed envelope. Ledgered like any other reject.
+  if (OPERATOR_TOOLS.has(req.tool) && req.actor !== 'operator' && req.actor !== 'system') {
+    return ledgeredReject(prisma, req, targetRef, argsHash, 'actor_not_permitted', pre.state.phase)
+  }
+
   // (2) idempotency replay detection FIRST — a replay answers even if the
   // action is now blocked (#8). Fast path outside the lock; re-checked inside
   // (erratum 2). State-guarded commits skip replay: legality answers them.
@@ -164,8 +180,8 @@ export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
     if (conflict) return ledgeredReject(prisma, req, targetRef, argsHash, 'already_applied', pre.state.phase)
   }
 
-  // (3) legality
-  if (!pre.actions.available.includes(req.tool)) {
+  // (3) legality — replaced by the actor gate above for operator tools
+  if (!OPERATOR_TOOLS.has(req.tool) && !pre.actions.available.includes(req.tool)) {
     const blocked = pre.actions.blocked.find((b) => b.action === req.tool)
     const reason = blocked?.reason ?? 'not_exposed'
     const envelope: CommitResult = { outcome: outcomeForBlocked(reason), reason, effects: [], needs: blocked?.params?.needs as string[] | undefined }
@@ -221,7 +237,7 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
       if (lockedConflict) return ledgeredReject(tx, req, targetRef, argsHash, 'already_applied', lockedConflict.phaseTo ?? 'DISCOVERY')
     }
     const lockedPre = deriveAndExpose(await loadDomainSnapshot(req.conversationId, tx))
-    if (!lockedPre.actions.available.includes(req.tool)) {
+    if (!OPERATOR_TOOLS.has(req.tool) && !lockedPre.actions.available.includes(req.tool)) {
       const blocked = lockedPre.actions.blocked.find((b) => b.action === req.tool)
       const reason = blocked?.reason ?? 'not_exposed'
       const envelope: CommitResult = { outcome: outcomeForBlocked(reason), reason, effects: [] }
