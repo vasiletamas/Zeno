@@ -26,6 +26,7 @@ export const resolveReferral: ToolHandler = async (args, context) => {
   const workItemId = args.workItemId as string
   const decision = args.decision as 'approve' | 'reject'
   const note = typeof args.note === 'string' ? args.note : undefined
+  const resolvedBy = typeof args.resolvedBy === 'string' ? args.resolvedBy : String(context.actor ?? 'operator')
   try {
     const item = await context.db.workItem.findUnique({ where: { id: workItemId } })
     if (!item || item.kind !== 'REFERRAL') return { success: false, error: `work_item_not_found: ${workItemId}` }
@@ -38,7 +39,7 @@ export const resolveReferral: ToolHandler = async (args, context) => {
       await context.db.application.update({ where: { id: refs.applicationId }, data: { status: 'COMPLETED' } })
       await context.db.workItem.update({
         where: { id: item.id },
-        data: { status: 'RESOLVED', resolutionCode: 'approved', resolution: note ?? null, resolvedBy: String(context.actor ?? 'operator'), resolvedAt: new Date() },
+        data: { status: 'RESOLVED', resolutionCode: 'approved', resolution: note ?? null, resolvedBy, resolvedAt: new Date() },
       })
       return { success: true, data: { workItemId: item.id, decision, refs }, message: 'Referral approved; quote generation resumes as a system commit.' }
     }
@@ -49,7 +50,7 @@ export const resolveReferral: ToolHandler = async (args, context) => {
     })
     await context.db.workItem.update({
       where: { id: item.id },
-      data: { status: 'RESOLVED', resolutionCode: 'rejected', resolution: note ?? null, resolvedBy: String(context.actor ?? 'operator'), resolvedAt: new Date() },
+      data: { status: 'RESOLVED', resolutionCode: 'rejected', resolution: note ?? null, resolvedBy, resolvedAt: new Date() },
     })
     return { success: true, data: { workItemId: item.id, decision, refs, terminal: true }, message: 'Referral rejected; application terminated with the underwriter reason.' }
   } catch (error) {
@@ -65,6 +66,7 @@ export const resolveWorkItem: ToolHandler = async (args, context) => {
   const workItemId = args.workItemId as string
   const decision = args.decision as 'resolve' | 'dismiss'
   const note = typeof args.note === 'string' ? args.note : undefined
+  const resolvedBy = typeof args.resolvedBy === 'string' ? args.resolvedBy : String(context.actor ?? 'operator')
   try {
     const item = await context.db.workItem.findUnique({ where: { id: workItemId } })
     if (!item) return { success: false, error: `work_item_not_found: ${workItemId}` }
@@ -72,7 +74,7 @@ export const resolveWorkItem: ToolHandler = async (args, context) => {
     const status = decision === 'dismiss' ? 'DISMISSED' : 'RESOLVED'
     await context.db.workItem.update({
       where: { id: item.id },
-      data: { status, resolutionCode: decision === 'dismiss' ? 'dismissed' : 'resolved', resolution: note ?? null, resolvedBy: String(context.actor ?? 'operator'), resolvedAt: new Date() },
+      data: { status, resolutionCode: decision === 'dismiss' ? 'dismissed' : 'resolved', resolution: note ?? null, resolvedBy, resolvedAt: new Date() },
     })
     return { success: true, data: { workItemId: item.id, status }, message: `Work item ${status.toLowerCase()}.` }
   } catch (error) {

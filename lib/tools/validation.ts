@@ -151,12 +151,14 @@ const resolveReferralSchema = z.object({
   workItemId: z.string().min(1, 'Work item id is required'),
   decision: z.enum(['approve', 'reject']),
   note: z.string().optional(),
+  resolvedBy: z.string().optional(),
 }).strict()
 
 const resolveWorkItemSchema = z.object({
   workItemId: z.string().min(1, 'Work item id is required'),
   decision: z.enum(['resolve', 'dismiss']),
   note: z.string().optional(),
+  resolvedBy: z.string().optional(),
 }).strict()
 
 // ==============================================

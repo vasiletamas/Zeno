@@ -30,4 +30,27 @@ export async function seedUsers(prisma: PrismaClient) {
   })
 
   console.log(`  Admin user seeded: ${adminEmail}`)
+
+  // E2 erratum 4: an OPERATOR account so the work-item queue is reachable
+  // from a real login, not only from tokens minted in tests.
+  const operatorEmail = process.env.OPERATOR_EMAIL || 'operator@zeno.ro'
+  const operatorPassword = process.env.OPERATOR_PASSWORD || 'operator123'
+  const operatorHash = await bcrypt.hash(operatorPassword, 12)
+
+  await prisma.user.upsert({
+    where: { email: operatorEmail },
+    update: {
+      passwordHash: operatorHash,
+      role: 'OPERATOR',
+      isActive: true,
+    },
+    create: {
+      email: operatorEmail,
+      passwordHash: operatorHash,
+      role: 'OPERATOR',
+      isActive: true,
+    },
+  })
+
+  console.log(`  Operator user seeded: ${operatorEmail}`)
 }

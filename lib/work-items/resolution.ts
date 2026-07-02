@@ -35,7 +35,7 @@ export async function resolveWorkItemDecision(input: {
   if (item.kind === 'REFERRAL' && (input.decision === 'approve' || input.decision === 'reject')) {
     const resolved = await executeCommit({
       tool: 'resolve_referral', actor: 'operator', conversationId, customerId,
-      args: { workItemId: input.workItemId, decision: input.decision, note: input.note },
+      args: { workItemId: input.workItemId, decision: input.decision, note: input.note, resolvedBy: input.resolvedBy },
       toolContext,
     })
     if (resolved.outcome !== 'applied') return resolved
@@ -59,7 +59,7 @@ export async function resolveWorkItemDecision(input: {
   if (input.decision === 'resolve' || input.decision === 'dismiss') {
     return executeCommit({
       tool: 'resolve_work_item', actor: 'operator', conversationId, customerId,
-      args: { workItemId: input.workItemId, decision: input.decision, note: input.note },
+      args: { workItemId: input.workItemId, decision: input.decision, note: input.note, resolvedBy: input.resolvedBy },
       toolContext,
     })
   }
