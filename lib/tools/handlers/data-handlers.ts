@@ -189,12 +189,8 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
       }
     }
 
-    // 5. All collected: update Customer.isAnonymous = false, return success
-    await context.db.customer.update({
-      where: { id: context.customerId },
-      data: { isAnonymous: false },
-    })
-
+    // 5. All collected. Identity tier is DERIVED (T4-R2) — collecting
+    // declared fields never flips isAnonymous (B0.ADD-1).
     return {
       success: true,
       data: {
