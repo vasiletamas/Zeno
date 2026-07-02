@@ -18,10 +18,38 @@ enum ConversationStatus {
   ABANDONED
 }
 
+// The T5.D6-ratified status vocabulary. REFERRED + CANCELLED joined in E2
+// (the referral queue needs them and E2 precedes C1/B4 in the execution
+// order); B4 owns the transition machine over this set.
 enum ApplicationStatus {
   OPEN
   PAUSED
+  REFERRED
   COMPLETED
+  CANCELLED
+}
+
+enum WorkItemKind {
+  REFERRAL
+  ESCALATION
+  DOCUMENT_REVIEW
+  GDPR_ERASURE
+  GDPR_EXPORT
+  ALERT_FLAG
+}
+
+enum WorkItemStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  DISMISSED
+}
+
+enum WorkItemPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
 }
 
 enum QuoteStatus {
@@ -380,6 +408,27 @@ model DntAnswer {
   question Question   @relation(fields: [questionId], references: [id])
 
   @@unique([sessionId, questionId])
+}
+
+// E2 (M5): the generic operator work queue. Operator decisions flow through
+// the commit gateway — free-form status edits never exist for this queue.
+model WorkItem {
+  id             String           @id @default(cuid())
+  kind           WorkItemKind
+  status         WorkItemStatus   @default(OPEN)
+  priority       WorkItemPriority @default(MEDIUM)
+  reason         String           @db.Text
+  refs           Json
+  payload        Json?
+  createdBy      String
+  resolution     String?          @db.Text
+  resolutionCode String?
+  resolvedBy     String?
+  resolvedAt     DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([status, kind, priority])
 }
 
 // B1: append-only consent ledger — the consent SSOT. No update path; the
