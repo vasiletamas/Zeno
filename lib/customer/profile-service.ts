@@ -81,6 +81,26 @@ export async function setVerifiedField(customerId: string, field: ProfileFieldNa
   return applyWrite(db, customerId, field, resolveVerifiedWrite(await existingRecord(db, customerId, field), { value, source, evidenceRef, at: new Date() }))
 }
 
+/**
+ * Identity facts for tier derivation (B3.2) — INTERNAL: cnp is decrypted so
+ * deriveIdentityTier can checksum it; never serialize these values outward
+ * (the snapshot stores only the derived tier + field presence/provenance).
+ * verifiedChannels reads consumed VerificationChallenge rows once B3.4
+ * lands the model; until then no channel can be verified.
+ */
+export async function getIdentityFacts(customerId: string, db: Db = prisma): Promise<{
+  fields: Partial<Record<'name' | 'cnp' | 'dateOfBirth' | 'email' | 'phone', { value: string; provenance: 'declared' | 'verified' | 'conflict' }>>
+  verifiedChannels: ('email' | 'sms')[]
+}> {
+  const rows = await db.customerProfileField.findMany({ where: { customerId } })
+  const fields: Record<string, { value: string; provenance: 'declared' | 'verified' | 'conflict' }> = {}
+  for (const r of rows) {
+    if (!['name', 'cnp', 'dateOfBirth', 'email', 'phone'].includes(r.field)) continue
+    fields[r.field] = { value: decodeFieldValue(r.field, r.value), provenance: r.provenance as 'declared' | 'verified' | 'conflict' }
+  }
+  return { fields, verifiedChannels: [] }
+}
+
 export async function getProfile(customerId: string) {
   const rows = await prisma.customerProfileField.findMany({ where: { customerId } })
   const fields: Record<string, { value: string; provenance: string; source: string; evidenceRef: string | null; conflictValue: string | null; conflictSource: string | null; recordedAt: Date }> = {}

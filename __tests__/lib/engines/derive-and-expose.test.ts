@@ -20,9 +20,15 @@ describe('deriveAndExpose — exposure over the FULL snapshot (contradiction #12
     expect(r.actions.available).not.toContain('generate_quote')
     expect(r.actions.blocked).toContainEqual(expect.objectContaining({ action: 'generate_quote', reason: 'requires_consent' }))
   })
-  it('generate_quote available in APPLICATION/QUOTE_GENERATION with consent', () => {
-    const r = deriveAndExpose(makeSnapshot({ application: doneApp, dnt: validDnt, consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true } }))
+  it('generate_quote available in APPLICATION/QUOTE_GENERATION with consent and declared cnp-or-dob (#1 row, B3.2)', () => {
+    const identity = { tier: 'anonymous' as const, fields: { dateOfBirth: { provenance: 'declared' as const } }, verifiedChannels: [] as ('email' | 'sms')[] }
+    const r = deriveAndExpose(makeSnapshot({ application: doneApp, dnt: validDnt, identity, consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true } }))
     expect(r.actions.available).toContain('generate_quote')
+  })
+  it('generate_quote blocked requires_identity with declared:cnp_or_dateOfBirth when neither is declared (#1 row, B3.2)', () => {
+    const r = deriveAndExpose(makeSnapshot({ application: doneApp, dnt: validDnt, consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true } }))
+    expect(r.actions.available).not.toContain('generate_quote')
+    expect(r.actions.blocked).toContainEqual(expect.objectContaining({ action: 'generate_quote', reason: 'requires_identity', params: { needs: ['declared:cnp_or_dateOfBirth'] } }))
   })
   it('sign_dnt blocked with dnt_session_incomplete while the ACTIVE session has pending questions (B2)', () => {
     const s = makeSnapshot({ application: { ...doneApp, status: 'OPEN', missingCodes: ['Q1'] }, dnt: { ...validDnt, signed: false, valid: false, latest: null, activeSessionId: 'sess-1', sessionType: 'NEW', sessionAnswered: 2, sessionTotal: 10 } })

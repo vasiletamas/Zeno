@@ -40,7 +40,7 @@ const dntRule = (action: string, kind: 'read' | 'commit'): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.9.0' // 1.7.0: DNT read surface + open_dnt_session via #12 predicates (B2.4); 1.8.0: write_dnt_answer exposed on active session (B2.5); 1.9.0: sign_dnt session-scoped, legacy answer tool retired, DNT slice aggregate-only (B2.6)
+export const engineVersion = '1.10.0' // 1.8.0: write_dnt_answer exposed on active session (B2.5); 1.9.0: sign_dnt session-scoped, legacy answer tool retired, DNT slice aggregate-only (B2.6); 1.10.0: #1 identity rows land — generate_quote needs declared cnp-or-dob, accept_quote verified_channel, initiate_payment + product docs; tier derived from the provenance store (B3.2)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }

@@ -4,6 +4,8 @@ import { resolveGroupCodes } from '@/lib/engines/question-groups'
 import { shouldShowQuestion } from '@/lib/engines/questionnaire-engine'
 import { getOpenCircuitTools } from '@/lib/tools/circuit-state'
 import { deriveConsents, type ConsentEventLike } from '@/lib/customer/consent'
+import { getIdentityFacts } from '@/lib/customer/profile-service'
+import { deriveIdentityTier } from '@/lib/engines/identity-rules'
 import type { DomainSnapshot } from './domain-types'
 
 // Widened for the A2 gateway: the interactive-transaction handle lacks
@@ -17,6 +19,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   // the pure deriveConsents (latest event per kind wins).
   const consentEvents = await db.consentEvent.findMany({ where: { customerId: conversation.customerId }, orderBy: { createdAt: 'asc' } })
   const consents = deriveConsents(consentEvents as unknown as ConsentEventLike[])
+  const identityFacts = await getIdentityFacts(conversation.customerId, db)
   const activeProductId = conversation.productId ?? conversation.candidateProductId ?? null
   const prod = activeProductId ? await db.product.findUnique({ where: { id: activeProductId } }) : null
   const application = await db.application.findUnique({ where: { conversationId } })
@@ -72,7 +75,14 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     conversationId, customerId: conversation.customerId,
     product: prod ? { id: prod.id, code: prod.code, insuranceType: prod.insuranceType } : null,
     candidateProductId: conversation.candidateProductId,
-    identity: { tier: customer.isAnonymous ? 'anonymous' : 'declared', fields: {} }, // B0 provenance store replaces fields
+    identity: {
+      // B3.2: tier DERIVED from the provenance store (+ verified channels),
+      // never stored; the snapshot carries presence/provenance only — raw
+      // values (decrypted cnp) stay inside getIdentityFacts.
+      tier: deriveIdentityTier(identityFacts),
+      fields: Object.fromEntries(Object.entries(identityFacts.fields).map(([k, v]) => [k, { provenance: v.provenance }])),
+      verifiedChannels: identityFacts.verifiedChannels,
+    },
     consents,
     dnt: {
       signed: latestDnt !== null && latestDnt.status !== 'WITHDRAWN', valid: dntValid, validUntil: latestDnt?.validUntil.toISOString() ?? null, coversProductTypes: dntValid ? latestDnt!.productTypesCovered : [], answeredCount: sessionCounts.answered, totalCount: sessionCounts.total, sessionActive: activeDntSession !== null,

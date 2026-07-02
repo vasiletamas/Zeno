@@ -15,7 +15,7 @@ describe('T13.D8 hybrid state surface', () => {
     const soon = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString() // 10 days out
     const r = deriveAndExpose(makeSnapshot({
       dnt: { signed: true, valid: true, validUntil: soon, coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0 },
-      identity: { tier: 'declared', fields: { email: { provenance: 'conflict' } } },
+      identity: { tier: 'declared', fields: { email: { provenance: 'conflict' } }, verifiedChannels: [] },
     }))
     expect(r.state.flagsForReview).toContain('dnt_expiring')
     expect(r.state.flagsForReview).toContain('identity_conflict:email')

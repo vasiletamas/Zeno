@@ -4,6 +4,7 @@
  */
 import { prisma } from '@/lib/db'
 import { resolveGroupCodes } from '@/lib/engines/question-groups'
+import { setDeclaredField } from '@/lib/customer/profile-service'
 import { signDnt } from '@/lib/tools/handlers/dnt-handlers'
 import { createReferralWorkItem } from '@/lib/work-items/referral'
 import { seedDntFullyAnswered } from './dnt-fixtures'
@@ -17,6 +18,9 @@ export async function seedReferredApplication() {
   const { customerId, conversationId, ctx } = await seedDntFullyAnswered()
   const signed = await signDnt({ confirmSignature: true, consent: { gdpr: true, aiDisclosure: true } }, ctx)
   if (!signed.success) throw new Error(`fixture sign failed: ${signed.error}`)
+  // #1 identity row (B3.2): generate_quote needs a declared cnp-or-dob — a
+  // real pre-referral applicant declared these on the way to the quote.
+  await setDeclaredField(customerId, 'dateOfBirth', '1990-01-01', 'fixture')
 
   const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: conversationId } })
   const productId = conversation.productId
