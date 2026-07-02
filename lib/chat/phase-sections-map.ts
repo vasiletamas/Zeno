@@ -1,17 +1,24 @@
 import type { Phase, AppSubphase, DerivedStateV3, ExposedActions } from '@/lib/engines/domain-types'
 
-const ALWAYS = ['agentIdentity', 'constraints', 'stateGrounding', 'catalogOverview', 'situationalBriefing', 'workflowInstructions']
+// TARGET map (A4.3, T10.D4). Every removal from the A1 content-preserving map
+// carries its 'retired because X' note in
+// docs/superpowers/notes/2026-06-zeno-prompt-section-inventory.md:
+// workflowInstructions retired (dead machine, row 14); coachingBriefing off
+// the QUOTE surfaces (row 7); productContext/complianceGuidance off
+// PAYMENT/POLICY, replaced by the dedicated per-state sections (rows 6, 9 —
+// the compliance CHECKER still runs there).
+const ALWAYS = ['agentIdentity', 'constraints', 'stateGrounding', 'catalogOverview', 'situationalBriefing']
 const BY_PHASE: Record<Phase, string[]> = {
-  DISCOVERY: ['capabilityManifest', 'customerContext', 'customerMemory', 'agentKnowledge', 'productContext', 'coachingBriefing'], // old DISCOVERY ∪ old SELECTION
+  DISCOVERY: ['capabilityManifest', 'customerContext', 'customerMemory', 'agentKnowledge', 'productContext', 'coachingBriefing'],
   APPLICATION: [], // subphase-driven
-  QUOTE: ['productContext', 'coachingBriefing', 'complianceGuidance'], // old QUOTE set
-  PAYMENT: ['productContext', 'complianceGuidance'], // old CLOSING set until A4 adds paymentContext
-  POLICY: ['productContext', 'complianceGuidance'], // old CLOSING set until A4 adds policyContext
+  QUOTE: ['productContext', 'complianceGuidance'],
+  PAYMENT: ['paymentContext'],
+  POLICY: ['policyContext'],
 }
 const BY_SUBPHASE: Record<AppSubphase, string[]> = {
-  DNT: ['complianceGuidance'], // heir of old CONSENT
+  DNT: ['dntContext', 'complianceGuidance'],
   QUESTIONNAIRE: ['questionnaireContext', 'complianceGuidance'],
-  QUOTE_GENERATION: ['productContext', 'coachingBriefing', 'complianceGuidance'], // old QUOTE (ready-to-generate)
+  QUOTE_GENERATION: ['productContext', 'complianceGuidance'],
 }
 export function getRequiredSectionsFor(phase: Phase, subphase: AppSubphase | null): string[] {
   const extras = phase === 'APPLICATION' && subphase ? BY_SUBPHASE[subphase] : BY_PHASE[phase]

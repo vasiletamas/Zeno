@@ -21,6 +21,20 @@ describe('getRequiredSectionsFor (A1 content-preserving mapping)', () => {
       expect(getRequiredSectionsFor(p, p === 'APPLICATION' ? sub : null)).toContain('situationalBriefing')
     }
   })
+  it('TARGET map: APPLICATION/DNT injects dntContext; PAYMENT injects paymentContext and NO coaching; POLICY injects policyContext', () => {
+    expect(getRequiredSectionsFor('APPLICATION', 'DNT')).toEqual(expect.arrayContaining(['dntContext', 'complianceGuidance']))
+    const pay = getRequiredSectionsFor('PAYMENT', null)
+    expect(pay).toContain('paymentContext')
+    expect(pay).not.toContain('coachingBriefing')
+    expect(getRequiredSectionsFor('POLICY', null)).toContain('policyContext')
+  })
+  it('workflowInstructions is no longer always included (dead workflow machine — see inventory)', () => {
+    expect(getRequiredSectionsFor('DISCOVERY', null)).not.toContain('workflowInstructions')
+  })
+  it('coaching is retired from the QUOTE surfaces (inventory row 7)', () => {
+    expect(getRequiredSectionsFor('QUOTE', null)).not.toContain('coachingBriefing')
+    expect(getRequiredSectionsFor('APPLICATION', 'QUOTE_GENERATION')).not.toContain('coachingBriefing')
+  })
 })
 
 describe('formatDerivedBriefing (new vocabulary)', () => {
