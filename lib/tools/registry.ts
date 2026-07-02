@@ -16,7 +16,7 @@ import { shapeProductInfo, type RawProduct } from './shape-product-info'
 import { calculateAge } from '@/lib/chat/age'
 
 // --- Handler imports ---
-import { getDntState, getDntQuestions, getDntNextQuestion, saveDntAnswer, signDnt } from './handlers/dnt-handlers'
+import { getDntState, getDntQuestions, getDntNextQuestion, openDntSession, writeDntAnswer, saveDntAnswer, signDnt } from './handlers/dnt-handlers'
 import { startApplication, saveApplicationAnswer, resumeApplication, cancelApplication } from './handlers/application-handlers'
 import { changeSelection } from './handlers/change-selection-handlers'
 import { setAnswer } from './handlers/set-answer-handlers'
@@ -621,6 +621,36 @@ registerTool('get_dnt_next_question', {
   sideEffects: false,
   kind: 'read',
 }, getDntNextQuestion)
+
+registerTool('open_dnt_session', {
+  description: 'Open a DNT questionnaire session for the product in focus. The engine decides NEW vs UPDATE from the customer\'s DNT history; UPDATE pre-fills prior answers for review.',
+  parameters: { type: 'object', properties: {}, additionalProperties: false },
+  executionMode: 'blocking',
+  customerVisible: true,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+}, openDntSession)
+
+registerTool('write_dnt_answer', {
+  description: 'Write or change one answer of the ACTIVE DNT session by question code. Changing an answer never cascades.',
+  parameters: {
+    type: 'object',
+    properties: {
+      questionCode: { type: 'string', description: 'The DNT question code (e.g. DNT_OCCUPATION).' },
+      value: { type: 'string', description: 'The answer value.' },
+    },
+    required: ['questionCode', 'value'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'save',
+  kind: 'commit',
+}, writeDntAnswer)
 
 registerTool('save_dnt_answer', {
   description: 'Save an answer to the current DNT question.',

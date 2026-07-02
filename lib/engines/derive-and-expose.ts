@@ -40,7 +40,7 @@ const dntRule = (action: string, kind: 'read' | 'commit'): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.7.0' // 1.5.0: gdpr-withdrawn halt rule in exposure (B1.3); 1.6.0: withdraw_consent exposed on any ledger history (B1.4); 1.7.0: DNT read surface + open_dnt_session via #12 predicates, check_dnt_status/start_dnt_questionnaire retired (B2.4)
+export const engineVersion = '1.8.0' // 1.6.0: withdraw_consent exposed on any ledger history (B1.4); 1.7.0: DNT read surface + open_dnt_session via #12 predicates (B2.4); 1.8.0: write_dnt_answer exposed on active session (B2.5)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -75,6 +75,7 @@ export const ACTION_RULES: ActionRule[] = [
   dntRule('get_dnt_questions', 'read'),
   dntRule('get_dnt_next_question', 'read'),
   dntRule('open_dnt_session', 'commit'),
+  dntRule('write_dnt_answer', 'commit'),
   { action: 'get_quote_details', kind: 'read', exposedWhen: (s) => s.quote !== null || s.acceptedQuote !== null },
   { action: 'escalate_to_human', kind: 'commit', exposedWhen: always },
   { action: 'set_candidate_product', kind: 'commit', exposedWhen: always },

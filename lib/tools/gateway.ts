@@ -47,10 +47,19 @@ export interface CommitRequest {
  */
 const ONE_SHOT = new Set(['sign_dnt', 'accept_quote', 'generate_quote', 'start_application'])
 
+/**
+ * State-guarded commits (B2.5): duplicates are answered by the ENGINE with a
+ * precise reason (e.g. dnt_session_already_active + the live session id),
+ * never by replaying a stale applied envelope — the session may have moved
+ * or closed since the original apply, so a replay would lie about state.
+ */
+const REPLAY_EXEMPT = new Set(['open_dnt_session'])
+
 export function resolveTargetRef(tool: string, args: Record<string, unknown>, state: DerivedStateV3, conversationId: string): string {
   // repeatable commits — addressed entity from ARGS (erratum 4)
   if (tool === 'collect_customer_field') return `field:${String(args.field ?? 'unknown')}`
   if (tool === 'save_dnt_answer') return `dnt_answer:${String(args.questionId ?? 'auto')}`
+  if (tool === 'write_dnt_answer') return `dnt_answer:${String(args.questionCode ?? 'unknown')}`
   if (tool === 'save_application_answer') return `app_answer:${String(args.field ?? 'auto')}`
   if (tool === 'set_answer') return `question:${String(args.questionCode ?? 'unknown')}`
   if (tool === 'withdraw_consent') return `consent:${String(args.kind ?? 'unknown')}`
@@ -147,8 +156,8 @@ export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
 
   // (2) idempotency replay detection FIRST — a replay answers even if the
   // action is now blocked (#8). Fast path outside the lock; re-checked inside
-  // (erratum 2).
-  const prior = await findFreshApplied(prisma, req.conversationId, req.tool, { argsHash })
+  // (erratum 2). State-guarded commits skip replay: legality answers them.
+  const prior = REPLAY_EXEMPT.has(req.tool) ? null : await findFreshApplied(prisma, req.conversationId, req.tool, { argsHash })
   if (prior) return writeReplayRow(prisma, req, prior)
   if (ONE_SHOT.has(req.tool)) {
     const conflict = await findFreshApplied(prisma, req.conversationId, req.tool, { targetRef })
@@ -205,7 +214,7 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${req.conversationId}))::text`
     // Replay re-check INSIDE the lock (erratum 2): two genuinely concurrent
     // identical commits both pass the pre-lock check; the loser replays here.
-    const lockedPrior = await findFreshApplied(tx, req.conversationId, req.tool, { argsHash })
+    const lockedPrior = REPLAY_EXEMPT.has(req.tool) ? null : await findFreshApplied(tx, req.conversationId, req.tool, { argsHash })
     if (lockedPrior) return writeReplayRow(tx, req, lockedPrior)
     if (ONE_SHOT.has(req.tool)) {
       const lockedConflict = await findFreshApplied(tx, req.conversationId, req.tool, { targetRef })

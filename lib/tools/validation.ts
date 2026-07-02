@@ -53,6 +53,13 @@ const getDntStateSchema = z.object({}).strict()
 const getDntQuestionsSchema = z.object({}).strict()
 const getDntNextQuestionSchema = z.object({}).strict()
 
+const openDntSessionSchema = z.object({}).strict()
+
+const writeDntAnswerSchema = z.object({
+  questionCode: z.string().min(1, 'Question code is required'),
+  value: z.string().min(1, 'Answer value is required'),
+}).strict()
+
 const saveDntAnswerSchema = z.object({
   questionId: z.string().optional(),
   answer: z.string().min(1, 'Answer is required'),
@@ -168,6 +175,8 @@ const toolSchemas: Record<string, ZodType> = {
   get_dnt_state: getDntStateSchema,
   get_dnt_questions: getDntQuestionsSchema,
   get_dnt_next_question: getDntNextQuestionSchema,
+  open_dnt_session: openDntSessionSchema,
+  write_dnt_answer: writeDntAnswerSchema,
   save_dnt_answer: saveDntAnswerSchema,
   sign_dnt: signDntSchema,
 

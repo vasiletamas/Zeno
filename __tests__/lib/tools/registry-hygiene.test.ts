@@ -11,10 +11,8 @@ describe('registry hygiene', () => {
     expect(src).not.toMatch(/REGISTER ALL 25 TOOLS/)
   })
   it('every non-internal registered tool has an exposure rule, and every rule names a registered tool', () => {
-    // Mid-B2 bridge: these actions have engine rules ahead of their tool
-    // registration (open_dnt_session/write_dnt_answer land in B2.5). Shrinks
-    // back to [] at the package boundary.
-    const PENDING_REGISTRATION = ['open_dnt_session']
+    // B2.5 registered the session commits — nothing pending.
+    const PENDING_REGISTRATION: string[] = []
     const registered = getRegisteredToolNames().filter((n) => getToolDefinition(n)?.kind !== 'internal')
     const ruled = ACTION_RULES.map((r) => r.action).filter((a) => !PENDING_REGISTRATION.includes(a))
     expect([...registered].sort()).toEqual([...ruled].sort())
