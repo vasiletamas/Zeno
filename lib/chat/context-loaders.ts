@@ -20,6 +20,7 @@ import { findContextHit, type ContextHit } from '@/lib/insights/context-hits'
 import { logInfo } from '@/lib/errors/logger'
 import { calculateAge } from './age'
 import type { PromptSections } from './prompt-builder'
+import type { DerivedStateV3 } from '@/lib/engines/domain-types'
 
 // ==============================================
 // CACHES
@@ -909,6 +910,38 @@ export async function loadAgentKnowledge(
 }
 
 // ==============================================
+// PER-(PHASE,SUBPHASE) SECTIONS (A4.2 — pure renderers from DerivedStateV3)
+// ==============================================
+
+export function loadDntContext(state: DerivedStateV3): string | null {
+  if (state.phase !== 'APPLICATION' || state.subphase !== 'DNT') return null
+  return [
+    `DNT progress: ${state.dnt.answeredCount}/${state.dnt.totalCount}`,
+    `DNT signed: ${state.dnt.signed ? 'yes (valid until ' + state.dnt.validUntil + ')' : 'no'}`,
+    `GDPR consent: ${state.consents.gdprProcessing ? 'granted' : 'missing'}`,
+    `AI disclosure: ${state.consents.aiDisclosure ? 'acknowledged' : 'missing'}`,
+    'The needs analysis (DNT) is a regulatory requirement: complete the remaining questions, then obtain explicit signature via sign_dnt. Consent is captured at signing — never claim consent that is not recorded in state.',
+  ].join('\n')
+}
+
+export function loadPaymentContext(state: DerivedStateV3): string | null {
+  if (state.phase !== 'PAYMENT') return null
+  return [
+    `Schedule: ${state.schedule.exists ? 'active' : 'none'}; next due: ${state.schedule.nextDueAt ?? 'n/a'}`,
+    `Last payment status: ${state.schedule.lastPaymentStatus ?? 'none'}`,
+    'The sale is closed — no selling, no upgrades. Focus on completing or recovering the payment. If a payment failed, state the failure factually and offer the retry action exposed by the engine.',
+  ].join('\n')
+}
+
+export function loadPolicyContext(state: DerivedStateV3): string | null {
+  if (state.phase !== 'POLICY' || !state.policy) return null
+  return [
+    `Policy status: ${state.policy.status}`,
+    'Language is engine-gated: never describe the policy as active or in force unless status is ACTIVE. Between payment and activation say it is paid and being processed.',
+  ].join('\n')
+}
+
+// ==============================================
 // CONVENIENCE: LOAD ALL SECTIONS
 // ==============================================
 
@@ -989,5 +1022,10 @@ export async function loadAllSections(params: {
     questionnaireContext,
     productContext,
     catalogOverview,
+    // Rendered from the derived state after the gate resolves (A4.2) — the
+    // orchestrator patches these alongside situationalBriefing.
+    dntContext: null,
+    paymentContext: null,
+    policyContext: null,
   }
 }

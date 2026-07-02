@@ -37,6 +37,9 @@ export interface PromptSections {
   questionnaireContext: string | null
   productContext: string | null
   catalogOverview: string | null
+  dntContext: string | null
+  paymentContext: string | null
+  policyContext: string | null
 }
 
 export interface GateSelection {
@@ -86,6 +89,9 @@ const SECTION_REGISTRY: SectionConfig[] = [
   { key: 'customerContext',     priority: 13, layer: 'dynamic',     alwaysInclude: false, prefix: '=== CUSTOMER PROFILE ===' },
   { key: 'workflowInstructions',priority: 14, layer: 'dynamic',     alwaysInclude: true,  prefix: '=== ACTIVE WORKFLOW ===' },
   { key: 'questionnaireContext', priority: 15, layer: 'dynamic',     alwaysInclude: false, prefix: '=== ACTIVE QUESTIONNAIRE ===' },
+  { key: 'dntContext',          priority: 16, layer: 'dynamic',     alwaysInclude: false, prefix: '=== NEEDS ANALYSIS (DNT) ===' },
+  { key: 'paymentContext',      priority: 17, layer: 'dynamic',     alwaysInclude: false, prefix: '=== PAYMENT ===' },
+  { key: 'policyContext',       priority: 18, layer: 'dynamic',     alwaysInclude: false, prefix: '=== POLICY ===' },
 ]
 
 // Pre-sorted by priority at module load

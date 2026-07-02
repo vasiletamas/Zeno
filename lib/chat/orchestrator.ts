@@ -30,7 +30,7 @@ import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { deriveAndExpose, engineVersion } from '@/lib/engines/derive-and-expose'
 import type { DeriveAndExposeResult } from '@/lib/engines/domain-types'
 import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
-import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, type WorkflowSessionData, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
+import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, loadDntContext, loadPaymentContext, loadPolicyContext, type WorkflowSessionData, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
 import { buildTurnTools, DEGRADED_FLOOR } from './turn-tools'
 import { shouldRefreshExposure, formatRoundRefreshMessage } from './round-refresh'
 import { loadTurnContext, type TurnContext } from './turn-context'
@@ -564,6 +564,9 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         questionnaireContext: null,
         productContext: null,
         catalogOverview: null,
+        dntContext: null,
+        paymentContext: null,
+        policyContext: null,
       }
     }
 
@@ -590,6 +593,11 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // Patch capabilityManifest from the exposure set (A3.1 erratum 3 — same
   // patch-after-gate pattern as the briefing, keeping gate ∥ context intact).
   sections.capabilityManifest = loadCapabilityManifest(exposure?.actions.available ?? [...DEGRADED_FLOOR])
+
+  // Per-(phase,subphase) sections rendered from the derived state (A4.2).
+  sections.dntContext = exposure ? loadDntContext(exposure.state) : null
+  sections.paymentContext = exposure ? loadPaymentContext(exposure.state) : null
+  sections.policyContext = exposure ? loadPolicyContext(exposure.state) : null
 
   // --- Skill pack loading and merging ---
   // Gate-driven skill-pack recommendations are gone; workflow/pack-driven packs

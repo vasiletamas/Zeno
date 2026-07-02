@@ -30,6 +30,9 @@ function makeSections(
     questionnaireContext: 'Q5: What is your annual income?',
     productContext: 'Protect Standard I: 190 RON/year.',
     catalogOverview: 'These are the ONLY products: - [LIFE] Protect — life cover.',
+    dntContext: null,
+    paymentContext: null,
+    policyContext: null,
     ...overrides,
   }
 }
