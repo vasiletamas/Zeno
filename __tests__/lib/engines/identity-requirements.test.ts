@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { deriveAndExpose } from '@/lib/engines/derive-and-expose'
 import { checkIdentityRequirement, IDENTITY_REQUIREMENTS } from '@/lib/engines/identity-requirements'
+import { listCommitTools } from '@/lib/tools/registry'
 import { makeSnapshot } from './snapshot-fixtures'
 
 describe('identity-requirements mechanism (contradiction #1)', () => {
@@ -8,6 +9,16 @@ describe('identity-requirements mechanism (contradiction #1)', () => {
     expect(Object.keys(IDENTITY_REQUIREMENTS).sort()).toEqual(
       ['accept_quote', 'generate_quote', 'initiate_payment', 'sign_dnt', 'start_application'],
     )
+  })
+  it('pins the ratified rows (ADD-1, erratum-4a encoding)', () => {
+    expect(IDENTITY_REQUIREMENTS.generate_quote).toEqual({ minTier: 'anonymous', anyDeclaredOf: ['cnp', 'dateOfBirth'] })
+    expect(IDENTITY_REQUIREMENTS.accept_quote).toEqual({ minTier: 'verified_channel' })
+    // documents ride initiate_payment until D3 lands ensure_payment_session
+    expect(IDENTITY_REQUIREMENTS.initiate_payment).toEqual({ minTier: 'verified_channel', productDocuments: true })
+  })
+  it('every key is a registered commit tool (ADD-1)', () => {
+    const commits = new Set(listCommitTools())
+    for (const k of Object.keys(IDENTITY_REQUIREMENTS)) expect(commits.has(k), k).toBe(true)
   })
   it('checkIdentityRequirement reports the missing needs payload', () => {
     const r = checkIdentityRequirement(

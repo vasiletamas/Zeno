@@ -87,6 +87,23 @@ export function adaptAction(action: UIAction): ToolCall | null {
         arguments: {},
       }
 
+    // ── Identity verification (B3.ADD-2) ──
+    case 'otp_submit':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'confirm_channel_verification',
+        arguments: { code: String(action.payload.code ?? '') },
+      }
+
+    case 'document_uploaded':
+      // The pipeline already ran server-side in the upload route; the GUI
+      // event refreshes the derived state so exposure sees the validated doc.
+      return {
+        id: `action_${Date.now()}`,
+        name: 'get_current_state',
+        arguments: {},
+      }
+
     // ── Data collection ──
     case 'submit_field':
       return {

@@ -13,6 +13,8 @@ import {
 } from '@/lib/engines/questionnaire-engine'
 import { resolveGroupCodes, resolveActiveProductId } from '@/lib/engines/question-groups'
 import { hasValidDnt } from '@/lib/customer/dnt-lookup'
+import { getIdentityFacts } from '@/lib/customer/profile-service'
+import { deriveIdentityTier } from '@/lib/engines/identity-rules'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackProductSelected } from '@/lib/analytics/events'
 import { bumpInsightOnAnswer } from './insight-bump'
@@ -105,6 +107,10 @@ export const startApplication: ToolHandler = async (args, context) => {
     const lang = context.language ?? 'ro'
     const q = result.question
     const text = q.text as { en: string; ro: string }
+    // ADD-3 (T4-R6, G6): soft verification offer — a FLAG for the copy
+    // layer, never a wall; the funnel continues either way.
+    const facts = await getIdentityFacts(context.customerId, context.db)
+    const verificationOffer = deriveIdentityTier(facts) !== 'verified_channel'
     return {
       success: true,
       data: {
@@ -112,6 +118,7 @@ export const startApplication: ToolHandler = async (args, context) => {
         applicationId: application.id,
         currentQuestion: { id: q.id, code: q.code, text: text[lang], helpText: q.helpText ? (q.helpText as { en: string; ro: string })[lang] : null, type: q.type, options: q.options },
         progress: result.progress,
+        ...(verificationOffer ? { verificationOffer: true } : {}),
       },
       message: 'Application started.',
       uiAction: { type: 'show_question', payload: { question: { id: q.id, code: q.code, text: q.text as { en: string; ro: string }, helpText: q.helpText as { en: string; ro: string } | null, type: q.type, options: q.options }, progress: result.progress, groupType: 'application' } as unknown as Record<string, unknown> },

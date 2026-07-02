@@ -72,6 +72,11 @@ export function getRegisteredToolNames(): string[] {
   return Array.from(definitions.keys()).sort()
 }
 
+/** Registered commit tools — the key space of the #1 identity table (ADD-1). */
+export function listCommitTools(): string[] {
+  return getRegisteredToolNames().filter((n) => definitions.get(n)?.kind === 'commit')
+}
+
 const toolsCache = new LRUCache<string, LLMToolDefinition[]>(5, 5 * 60 * 1000) // 5 min TTL
 
 /**
