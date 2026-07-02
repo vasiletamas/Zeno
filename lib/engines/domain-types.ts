@@ -1,0 +1,67 @@
+export const PHASES = ['DISCOVERY', 'APPLICATION', 'QUOTE', 'PAYMENT', 'POLICY'] as const
+export type Phase = (typeof PHASES)[number]
+export const APP_SUBPHASES = ['DNT', 'QUESTIONNAIRE', 'QUOTE_GENERATION'] as const
+export type AppSubphase = (typeof APP_SUBPHASES)[number]
+export const IDENTITY_TIERS = ['anonymous', 'declared', 'verified_channel'] as const
+export type IdentityTier = (typeof IDENTITY_TIERS)[number]
+export const COMMIT_OUTCOMES = ['applied', 'rejected', 'referred', 'pending', 'unavailable', 'requires_confirmation', 'requires_identity', 'requires_consent', 'requires_disclosures'] as const
+export type CommitOutcome = (typeof COMMIT_OUTCOMES)[number]
+export const COMMIT_EFFECTS = ['advance_phase', 're_rating', 'cascade_invalidate', 'cascade_expand', 'questions_removed', 'eligibility_recheck', 'terminal'] as const
+export type CommitEffect = (typeof COMMIT_EFFECTS)[number]
+export const REASON_CODES = ['no_product_in_focus', 'no_open_application', 'application_already_open', 'application_paused', 'requires_consent', 'dnt_not_signed', 'dnt_incomplete', 'dnt_expired', 'questionnaire_incomplete', 'selection_incomplete', 'quote_already_issued', 'no_issued_quote', 'quote_expired', 'quote_already_accepted', 'requires_confirmation', 'requires_identity', 'requires_disclosures', 'already_applied', 'stale_confirm_token', 'invalid_args', 'handler_rejected', 'temporarily_unavailable', 'degraded_mode', 'no_policy', 'payment_not_pending', 'permission_denied', 'not_exposed'] as const
+export type ReasonCode = (typeof REASON_CODES)[number]
+
+export type CommitActor = 'agent' | 'gui' | 'system' | 'operator'
+export type Provenance = 'declared' | 'verified' | 'conflict'
+
+export interface DomainSnapshot {
+  conversationId: string
+  customerId: string
+  product: { id: string; code: string; insuranceType: string } | null // committed > candidate
+  candidateProductId: string | null
+  identity: { tier: IdentityTier; fields: Record<string, { provenance: Provenance } | undefined> }
+  consents: { gdprProcessing: boolean; aiDisclosure: boolean; marketing: boolean } // from ConsentEvent once A2.8 lands
+  dnt: { signed: boolean; valid: boolean; validUntil: string | null; coversProductTypes: string[]; answeredCount: number; totalCount: number; sessionActive: boolean }
+  application: { id: string; status: 'OPEN' | 'PAUSED' | 'COMPLETED'; tier: string | null; level: string | null; addon: boolean | null; answeredCount: number; requiredCount: number; missingCodes: string[] } | null
+  quote: { id: string; status: string; premiumAnnual: number; validUntil: string; expired: boolean } | null // issued, unaccepted
+  acceptedQuote: { id: string; acceptedAt: string | null } | null
+  schedule: { exists: boolean; settled: boolean; nextDueAt: string | null; lastPaymentStatus: string | null } // Block D re-points; loader stubs exists:false
+  policy: { id: string; status: string } | null
+  eligibility: { verdict: 'eligible' | 'ineligible' | 'unknown' } // engine lands per contradiction #9 (other block)
+  suitability: { verdict: 'suitable' | 'conditionally_suitable' | 'unsuitable' | 'unknown' } // M7 (other block)
+  openItems: Array<{ kind: string; refId: string }>
+  circuit: { openTools: string[] } // M10 input to exposure
+  answers: Record<string, string>
+}
+
+export interface DerivedStateV3 {
+  phase: Phase
+  subphase: AppSubphase | null
+  product: DomainSnapshot['product']
+  selection: { tier: string | null; level: string | null; addon: boolean | null }
+  identity: DomainSnapshot['identity']
+  consents: DomainSnapshot['consents']
+  dnt: DomainSnapshot['dnt']
+  application: DomainSnapshot['application']
+  quote: DomainSnapshot['quote']
+  schedule: DomainSnapshot['schedule']
+  policy: DomainSnapshot['policy']
+  eligibility: DomainSnapshot['eligibility']
+  suitability: DomainSnapshot['suitability']
+  openItems: DomainSnapshot['openItems']
+  nextBestAction: string // MUST only name actions present in ExposedActions.available
+}
+
+export interface BlockedAction { action: string; reason: ReasonCode; params?: Record<string, unknown> }
+export interface ExposedActions { available: string[]; blocked: BlockedAction[] }
+export interface DeriveAndExposeResult { state: DerivedStateV3; actions: ExposedActions }
+
+export interface CommitResult {
+  outcome: CommitOutcome
+  reason?: ReasonCode
+  effects: CommitEffect[]
+  phaseDelta?: { from: Phase; to: Phase }
+  data?: unknown
+  confirmToken?: string
+  needs?: string[]
+}
