@@ -1,5 +1,6 @@
 import type { DomainSnapshot, Phase, AppSubphase } from './domain-types'
 import type { BlockedAction, DeriveAndExposeResult, DerivedStateV3, ReasonCode } from './domain-types'
+import { checkIdentityRequirement, IDENTITY_REQUIREMENTS, type IdentityRequirementsTable } from './identity-requirements'
 
 /**
  * Engine version stamp carried in every per-turn legality snapshot
@@ -7,7 +8,7 @@ import type { BlockedAction, DeriveAndExposeResult, DerivedStateV3, ReasonCode }
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.0.0'
+export const engineVersion = '1.1.0' // 1.1.0: identity-requirements gate in exposure (A3.6)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -71,15 +72,27 @@ export const ACTION_RULES: ActionRule[] = [
 
 const NEXT_BEST_PRIORITY = ['initiate_payment', 'accept_quote', 'generate_quote', 'save_application_answer', 'sign_dnt', 'save_dnt_answer', 'start_dnt_questionnaire', 'start_application', 'set_candidate_product', 'list_products']
 
-export function deriveAndExpose(s: DomainSnapshot): DeriveAndExposeResult {
+export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequirements?: IdentityRequirementsTable }): DeriveAndExposeResult {
   const d = derivePhase(s)
+  const identityTable = config?.identityRequirements ?? IDENTITY_REQUIREMENTS
   const available: string[] = []
   const blocked: BlockedAction[] = []
   for (const rule of ACTION_RULES) {
     if (rule.action !== 'escalate_to_human' && s.circuit.openTools.includes(rule.action)) {
       blocked.push({ action: rule.action, reason: 'temporarily_unavailable' }); continue
     }
-    if (rule.exposedWhen(s, d)) { available.push(rule.action); continue }
+    if (rule.exposedWhen(s, d)) {
+      // identity gate (A3.6, contradiction #1): an otherwise-exposed commit
+      // with an unmet identity requirement is blocked with a needs payload.
+      if (rule.kind === 'commit') {
+        const idCheck = checkIdentityRequirement(identityTable, rule.action, s.identity)
+        if (!idCheck.ok) {
+          blocked.push({ action: rule.action, reason: 'requires_identity', params: { needs: idCheck.needs } })
+          continue
+        }
+      }
+      available.push(rule.action); continue
+    }
     const why = rule.blockedReason?.(s, d)
     if (why) blocked.push({ action: rule.action, reason: why.reason, params: why.params })
   }
