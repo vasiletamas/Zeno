@@ -1,0 +1,102 @@
+/**
+ * profile-service — the ONLY read/write path for profile facts (M1).
+ *
+ * Facts live in CustomerProfileField with provenance; a few fields are
+ * mirrored onto legacy Customer columns so existing consumers keep working.
+ * cnp is stored as the AES-GCM JSON envelope and masked on read.
+ */
+import { prisma } from '@/lib/db'
+import { Prisma } from '@/lib/generated/prisma/client'
+import { encrypt, decrypt, maskCnp } from '@/lib/security/encryption'
+import { resolveDeclaredWrite, resolveVerifiedWrite, type FieldRecord } from '@/lib/engines/provenance-rules'
+
+export type ProfileFieldName = 'name' | 'cnp' | 'dateOfBirth' | 'declaredAge' | 'email' | 'phone' | 'address'
+
+export type ProfileWriteResult =
+  | { outcome: 'applied'; provenance: FieldRecord['provenance']; mirrorConflict?: string }
+  | { outcome: 'rejected'; reason: 'field_verified_immutable' }
+
+type Db = Pick<typeof prisma, 'customerProfileField' | 'customer'>
+
+const MIRROR: Partial<Record<ProfileFieldName, (v: string) => Record<string, unknown>>> = {
+  email: v => ({ email: v }),
+  phone: v => ({ phone: v.replace(/[\s-]/g, '') }),
+  name: v => ({ name: v }),
+  dateOfBirth: v => ({ dateOfBirth: new Date(v) }),
+  cnp: v => { const e = encrypt(v); return { cnpEncrypted: e.encrypted, cnpIv: e.iv, cnpTag: e.tag } },
+}
+
+export const encodeFieldValue = (f: ProfileFieldName | string, v: string) =>
+  f === 'cnp' ? JSON.stringify(encrypt(v)) : v
+export const decodeFieldValue = (f: ProfileFieldName | string, v: string) => {
+  if (f !== 'cnp') return v
+  const e = JSON.parse(v) as { encrypted: string; iv: string; tag: string }
+  return decrypt(e.encrypted, e.iv, e.tag)
+}
+
+const isUniqueViolation = (e: unknown): boolean =>
+  e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002'
+
+async function applyWrite(
+  db: Db,
+  customerId: string,
+  field: ProfileFieldName,
+  decision: ReturnType<typeof resolveDeclaredWrite>,
+): Promise<ProfileWriteResult> {
+  if (decision.action === 'reject') return { outcome: 'rejected', reason: decision.reason }
+  if (decision.action === 'write') {
+    const n = decision.next
+    await db.customerProfileField.upsert({
+      where: { customerId_field: { customerId, field } },
+      create: { customerId, field, value: encodeFieldValue(field, n.value), provenance: n.provenance, source: n.source, evidenceRef: n.evidenceRef, conflictValue: n.conflictValue, conflictSource: n.conflictSource, recordedAt: n.recordedAt },
+      update: { value: encodeFieldValue(field, n.value), provenance: n.provenance, source: n.source, evidenceRef: n.evidenceRef, conflictValue: n.conflictValue, conflictSource: n.conflictSource, recordedAt: n.recordedAt },
+    })
+    if (MIRROR[field]) {
+      try {
+        await db.customer.update({ where: { id: customerId }, data: MIRROR[field]!(n.value) })
+      } catch (e) {
+        // B0 erratum 3: a declared email/phone already mirrored on another
+        // Customer (@unique) is the returning-customer case — keep the
+        // provenance row, skip the mirror, surface the collision so the
+        // caller can offer the T4.D4 verified-claim path.
+        if (!isUniqueViolation(e)) throw e
+        return { outcome: 'applied', provenance: n.provenance, mirrorConflict: `${field}_in_use` }
+      }
+    }
+    return { outcome: 'applied', provenance: n.provenance }
+  }
+  return { outcome: 'applied', provenance: 'declared' }
+}
+
+async function existingRecord(db: Db, customerId: string, field: ProfileFieldName): Promise<FieldRecord | null> {
+  const r = await db.customerProfileField.findUnique({ where: { customerId_field: { customerId, field } } })
+  return r ? ({ ...r, value: decodeFieldValue(field, r.value) } as FieldRecord) : null
+}
+
+export async function setDeclaredField(customerId: string, field: ProfileFieldName, value: string, source: string, db: Db = prisma): Promise<ProfileWriteResult> {
+  return applyWrite(db, customerId, field, resolveDeclaredWrite(await existingRecord(db, customerId, field), { value, source, at: new Date() }))
+}
+
+export async function setVerifiedField(customerId: string, field: ProfileFieldName, value: string, source: string, evidenceRef: string, db: Db = prisma): Promise<ProfileWriteResult> {
+  return applyWrite(db, customerId, field, resolveVerifiedWrite(await existingRecord(db, customerId, field), { value, source, evidenceRef, at: new Date() }))
+}
+
+export async function getProfile(customerId: string) {
+  const rows = await prisma.customerProfileField.findMany({ where: { customerId } })
+  const fields: Record<string, { value: string; provenance: string; source: string; evidenceRef: string | null; conflictValue: string | null; conflictSource: string | null; recordedAt: Date }> = {}
+  for (const r of rows) fields[r.field] = { ...r, value: r.field === 'cnp' ? maskCnp(decodeFieldValue('cnp', r.value)) : r.value }
+  return { customerId, fields, conflicts: rows.filter(r => r.provenance === 'conflict').map(r => r.field) }
+}
+
+export async function getAge(customerId: string, now = new Date()): Promise<number | null> {
+  const dob = await existingRecord(prisma, customerId, 'dateOfBirth')
+  if (dob) {
+    const d = new Date(dob.value)
+    let a = now.getFullYear() - d.getFullYear()
+    const m = now.getMonth() - d.getMonth()
+    if (m < 0 || (m === 0 && now.getDate() < d.getDate())) a--
+    return a
+  }
+  const decl = await existingRecord(prisma, customerId, 'declaredAge')
+  return decl ? Number(decl.value) : null
+}
