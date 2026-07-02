@@ -112,6 +112,12 @@ export interface ToolContext {
    * every CommitLedger row. Defaults to 'agent' when absent.
    */
   actor?: CommitActor
+  /**
+   * The current round's exposure set (A3.2): when present, the executor
+   * hard-rejects any tool not in it (escalate_to_human excepted — the floor).
+   * The orchestrator refreshes this after every applied commit round.
+   */
+  exposedTools?: string[]
   product?: {
     id: string
     code: string

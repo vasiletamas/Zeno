@@ -791,6 +791,9 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // Server-resolved commit actor (A2.9): every LLM tool-loop call is the
   // agent's; the synthetic branch below overrides per-call with 'gui'.
   toolContext.actor = 'agent'
+  // Executor exposure wall (A3.2): same set as the LLM tool list; on derive
+  // failure both fall back to the ONE degraded floor (erratum 4).
+  toolContext.exposedTools = exposure?.actions.available ?? [...DEGRADED_FLOOR]
   // The per-turn tool list IS the exposure set (A3.1). On derive failure the
   // model gets the explicit degraded floor — reads + escape hatch.
   let tools: LLMToolDefinition[] = exposure ? buildTurnTools(exposure.actions) : getToolsForLLM([...DEGRADED_FLOOR])

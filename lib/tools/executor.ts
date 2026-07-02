@@ -6,6 +6,7 @@
  */
 
 import type { ToolContext, ToolResult, UserRole } from './types'
+import type { CommitResult } from '@/lib/engines/domain-types'
 import { getToolHandler, getToolDefinition } from './registry'
 import { validateToolArgs } from './validation'
 import { checkPermission } from './permissions'
@@ -85,6 +86,15 @@ export async function executeTool(
       success: false,
       error: permission.reason ?? `Permission denied for "${name}".`,
     }
+  }
+
+  // 3a-0. Exposure wall (A3.2, defense in depth): the orchestrator already
+  // limits the LLM surface to the exposure set; this rejects anything that
+  // slips past it (hallucinated calls, stale clients). escalate_to_human is
+  // the unconditional floor.
+  if (context.exposedTools && name !== 'escalate_to_human' && !context.exposedTools.includes(name)) {
+    const envelope: CommitResult = { outcome: 'rejected', reason: 'not_exposed', effects: [] }
+    return { success: false, envelope, error: 'not_exposed' }
   }
 
   // 3a. Commits are gateway-owned (A2.9): legality, confirm tokens, replay,
