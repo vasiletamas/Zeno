@@ -72,7 +72,7 @@ async function main() {
   const codes = (await resolveGroupCodes(product.id, 'dnt', prisma)) ?? []
   const answerAll = async (conversationId: string, ctx: ToolContext) => {
     for (let i = 0; i < 100; i++) {
-      const next = await getNextQuestion(codes, conversationId)
+      const next = await getNextQuestion(codes, { kind: 'conversation', conversationId: conversationId })
       if (!next) break
       const q = next.question as { id: string; type: string; options: unknown; validationRules?: unknown; code?: string | null }
       let answer = 'da'

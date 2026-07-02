@@ -53,7 +53,7 @@ export const switchProduct: ToolHandler = async (args, context) => {
     if (application) {
       // Reset selection (invalid for the new product) and recompute totals.
       const codes = await resolveGroupCodes(ref.id, 'application')
-      const progress = await calculateProgress(codes, context.conversationId)
+      const progress = await calculateProgress(codes, { kind: 'conversation', conversationId: context.conversationId })
 
       await context.db.application.update({
         where: { conversationId: context.conversationId },

@@ -30,7 +30,7 @@ export const checkDntStatus: ToolHandler = async (_args, context) => {
 
     // Calculate progress across all DNT groups
     const codes = await dntGroupCodes(context)
-    const progress = await calculateProgress(codes, conversationId)
+    const progress = await calculateProgress(codes, { kind: 'conversation', conversationId: conversationId })
 
     // Read signing state from Conversation
     const conv = await context.db.conversation.findUnique({
@@ -70,7 +70,7 @@ export const checkDntStatus: ToolHandler = async (_args, context) => {
 export const startDntQuestionnaire: ToolHandler = async (_args, context) => {
   try {
     const codes = await dntGroupCodes(context)
-    const result = await getNextQuestion(codes, context.conversationId)
+    const result = await getNextQuestion(codes, { kind: 'conversation', conversationId: context.conversationId })
 
     if (!result) {
       return {
@@ -140,7 +140,7 @@ export const saveDntAnswer: ToolHandler = async (args, context) => {
       if (!q) return { success: false, error: 'Question not found.' }
       questionMeta = { type: q.type, options: q.options, validationRules: q.validationRules }
     } else {
-      const next = await getNextQuestion(codes, context.conversationId)
+      const next = await getNextQuestion(codes, { kind: 'conversation', conversationId: context.conversationId })
       if (!next) {
         return { success: false, error: 'All DNT questions have already been answered.' }
       }
@@ -210,7 +210,7 @@ export const saveDntAnswer: ToolHandler = async (args, context) => {
     }
 
     // Get next question
-    const nextResult = await getNextQuestion(codes, context.conversationId)
+    const nextResult = await getNextQuestion(codes, { kind: 'conversation', conversationId: context.conversationId })
 
     if (!nextResult) {
       return {
@@ -289,7 +289,7 @@ export const signDnt: ToolHandler = async (args, context) => {
 
     // Verify all DNT questions answered
     const codes = await dntGroupCodes(context)
-    const progress = await calculateProgress(codes, context.conversationId)
+    const progress = await calculateProgress(codes, { kind: 'conversation', conversationId: context.conversationId })
     if (progress.percentage < 100) {
       return {
         success: false,

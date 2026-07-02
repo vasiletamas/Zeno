@@ -378,17 +378,33 @@ function fuzzyMatchOption(
 // ==========================================
 
 /**
+ * Where a questionnaire's answers live (T3.D6 generalization, B2.3):
+ * conversation-scoped Answer rows (legacy + application flow until B4) or
+ * session-scoped DntAnswer rows. B4 adds the application scope.
+ */
+export type AnswerScope =
+  | { kind: 'conversation'; conversationId: string }
+  | { kind: 'dntSession'; sessionId: string }
+
+async function loadScopedAnswers(scope: AnswerScope, questionIds: string[]): Promise<Map<string, string>> {
+  const rows = scope.kind === 'conversation'
+    ? await prisma.answer.findMany({ where: { conversationId: scope.conversationId, questionId: { in: questionIds } } })
+    : await prisma.dntAnswer.findMany({ where: { sessionId: scope.sessionId, questionId: { in: questionIds } } })
+  return new Map(rows.map(a => [a.questionId, a.value]))
+}
+
+/**
  * Find the next unanswered, visible question across the given groups.
  *
  * 1. Load all questions for the group codes, ordered by group.orderIndex then question.orderIndex
- * 2. Load all answers for the conversationId
+ * 2. Load all answers in the given scope
  * 3. Build answersMap (questionId -> value)
  * 4. Iterate: first visible + unanswered question is returned
  * 5. Progress: count visible answered / visible total
  */
 export async function getNextQuestion(
   groupCodes: string[],
-  conversationId: string,
+  scope: AnswerScope,
 ): Promise<{ question: QuestionData; progress: { answered: number; total: number } } | null> {
   // Load all question groups matching the codes
   const groups = await prisma.questionGroup.findMany({
@@ -418,20 +434,9 @@ export async function getNextQuestion(
     return a.orderIndex - b.orderIndex
   })
 
-  // Load answers for this conversation
+  // Load answers in the given scope
   const questionIds = questions.map(q => q.id)
-  const answers = await prisma.answer.findMany({
-    where: {
-      conversationId,
-      questionId: { in: questionIds },
-    },
-  })
-
-  // Build answers map
-  const answersMap = new Map<string, string>()
-  for (const a of answers) {
-    answersMap.set(a.questionId, a.value)
-  }
+  const answersMap = await loadScopedAnswers(scope, questionIds)
 
   // Find visible questions and next unanswered
   let nextQuestion: QuestionData | null = null
@@ -484,7 +489,7 @@ export async function getNextQuestion(
  */
 export async function calculateProgress(
   groupCodes: string[],
-  conversationId: string,
+  scope: AnswerScope,
 ): Promise<{ answered: number; total: number; percentage: number }> {
   // Load groups
   const groups = await prisma.questionGroup.findMany({
@@ -503,19 +508,9 @@ export async function calculateProgress(
 
   if (questions.length === 0) return { answered: 0, total: 0, percentage: 0 }
 
-  // Load answers
+  // Load answers in the given scope
   const questionIds = questions.map(q => q.id)
-  const answers = await prisma.answer.findMany({
-    where: {
-      conversationId,
-      questionId: { in: questionIds },
-    },
-  })
-
-  const answersMap = new Map<string, string>()
-  for (const a of answers) {
-    answersMap.set(a.questionId, a.value)
-  }
+  const answersMap = await loadScopedAnswers(scope, questionIds)
 
   // Count visible and answered
   let total = 0

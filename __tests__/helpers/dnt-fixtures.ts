@@ -33,7 +33,7 @@ export async function seedDntFullyAnswered() {
   const codes = (await resolveGroupCodes(product.id, 'dnt', prisma)) ?? []
   let answerCount = 0
   for (let i = 0; i < 100; i++) {
-    const next = await getNextQuestion(codes, conversation.id)
+    const next = await getNextQuestion(codes, { kind: 'conversation', conversationId: conversation.id })
     if (!next) break
     const r = await saveDntAnswer({ questionId: next.question.id, answer: answerFor(next.question) }, ctx)
     if (!r.success) throw new Error(`dnt fixture could not answer ${next.question.code ?? next.question.id}: ${r.error}`)

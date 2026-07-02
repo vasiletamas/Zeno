@@ -496,7 +496,7 @@ export const modifyQuote: ToolHandler = async (_args, context) => {
     }
 
     // Get next question
-    const nextResult = await getNextQuestion(['application'], context.conversationId)
+    const nextResult = await getNextQuestion(['application'], { kind: 'conversation', conversationId: context.conversationId })
 
     const lang = context.language ?? 'ro'
     let nextQuestionData: Record<string, unknown> | null = null

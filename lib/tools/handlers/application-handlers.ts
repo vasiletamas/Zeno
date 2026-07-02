@@ -66,7 +66,7 @@ export const startApplication: ToolHandler = async (args, context) => {
     }
 
     const codes = await resolveGroupCodes(productId, 'application')
-    const progress = await calculateProgress(codes, context.conversationId)
+    const progress = await calculateProgress(codes, { kind: 'conversation', conversationId: context.conversationId })
 
     const application = await context.db.application.create({
       data: {
@@ -101,7 +101,7 @@ export const startApplication: ToolHandler = async (args, context) => {
       await context.db.conversation.update({ where: { id: context.conversationId }, data: { productId } })
     }
 
-    const result = await getNextQuestion(codes, context.conversationId)
+    const result = await getNextQuestion(codes, { kind: 'conversation', conversationId: context.conversationId })
     if (!result) return { success: false, error: 'No application questions configured.' }
 
     const lang = context.language ?? 'ro'
@@ -148,7 +148,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
     const activeGroupType = 'application'
 
     // Get current question
-    const currentResult = await getNextQuestion(activeGroupCodes, context.conversationId)
+    const currentResult = await getNextQuestion(activeGroupCodes, { kind: 'conversation', conversationId: context.conversationId })
     if (!currentResult) {
       return {
         success: true,
@@ -326,7 +326,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
     }
 
     // Get next question
-    const nextResult = await getNextQuestion(activeGroupCodes, context.conversationId)
+    const nextResult = await getNextQuestion(activeGroupCodes, { kind: 'conversation', conversationId: context.conversationId })
 
     if (!nextResult) {
       // Mark application as COMPLETED
@@ -416,7 +416,7 @@ export const resumeApplication: ToolHandler = async (_args, context) => {
     })
 
     // Get next question
-    const nextResult = await getNextQuestion(await appGroupCodes(context), context.conversationId)
+    const nextResult = await getNextQuestion(await appGroupCodes(context), { kind: 'conversation', conversationId: context.conversationId })
 
     if (!nextResult) {
       return {
