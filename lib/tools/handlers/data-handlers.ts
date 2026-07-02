@@ -6,6 +6,7 @@
  */
 
 import { setDeclaredField, getProfile, type ProfileFieldName } from '@/lib/customer/profile-service'
+import { validateCnpChecksum, cnpMatchesDob } from '@/lib/engines/cnp-validation'
 import type { ToolHandler } from '@/lib/tools/types'
 
 // ─────────────────────────────────────────────
@@ -144,6 +145,19 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
     const KNOWN_FIELDS: ProfileFieldName[] = ['name', 'cnp', 'dateOfBirth', 'declaredAge', 'email', 'phone', 'address']
     if (!KNOWN_FIELDS.includes(field as ProfileFieldName)) {
       return { success: false, error: `Unknown field: ${field}` }
+    }
+
+    // B3.3: deterministic CNP validation — the LLM is never the validator
+    // (T4-R3). Checksum first, then consistency with an already-declared DOB.
+    if (field === 'cnp') {
+      if (!validateCnpChecksum(trimmedValue)) {
+        return { success: false, error: 'cnp_checksum_invalid: the CNP control digit does not match — ask the customer to re-check the 13 digits.' }
+      }
+      const stored = await getProfile(context.customerId)
+      const dob = stored.fields.dateOfBirth?.value
+      if (dob && cnpMatchesDob(trimmedValue, new Date(dob)) === false) {
+        return { success: false, error: `cnp_dob_mismatch: the CNP encodes a different birth date than the declared ${dob} — ask the customer which one is correct.` }
+      }
     }
 
     // 2. Write through the SSOT service (declared provenance, mirrors handled there)
