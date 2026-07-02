@@ -1,11 +1,11 @@
 /**
  * Profile Handlers
  *
- * get_customer_profile. Profile facts live in the CustomerProfileField
- * provenance store (B0); until B0.4 re-backs this handler with the
- * profile-service, `fields` is returned empty.
+ * get_customer_profile — re-backed by the B0 provenance store: profile
+ * facts with provenance, surfaced conflicts, and a history summary.
  */
 
+import { getProfile } from '@/lib/customer/profile-service'
 import type { ToolHandler } from '@/lib/tools/types'
 
 // ─────────────────────────────────────────────
@@ -21,6 +21,8 @@ export const getCustomerProfile: ToolHandler = async (_args, context) => {
     if (!customer) {
       return { success: false, error: 'Customer not found.' }
     }
+
+    const profile = await getProfile(context.customerId)
 
     // Load recent conversations
     const conversations = await context.db.conversation.findMany({
@@ -60,7 +62,8 @@ export const getCustomerProfile: ToolHandler = async (_args, context) => {
           dateOfBirth: customer.dateOfBirth?.toISOString() ?? null,
           language: customer.language,
           isAnonymous: customer.isAnonymous,
-          fields: {},
+          fields: profile.fields as unknown as Record<string, unknown>,
+          conflicts: profile.conflicts,
         },
         recentConversations: conversations as unknown as Record<string, unknown>[],
         policies: policies as unknown as Record<string, unknown>[],

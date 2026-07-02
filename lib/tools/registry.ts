@@ -331,8 +331,8 @@ const getProductInfoHandler: ToolHandler = async (
     }
 
     // Resolve the customer's age (best-effort) to trim age-banded coverages.
-    // Any failure here just means we return all age bands. B0.4 re-routes
-    // this through profile-service getAge (DOB → declaredAge precedence).
+    // Any failure here just means we return all age bands. Reads the
+    // dateOfBirth mirror column, which the B0 profile-service maintains.
     let age: number | undefined
     try {
       const customer = await prisma.customer.findUnique({

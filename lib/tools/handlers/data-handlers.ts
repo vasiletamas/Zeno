@@ -5,7 +5,7 @@
  * then returns a uiAction for the next needed field (or success when done).
  */
 
-import { encrypt } from '@/lib/security/encryption'
+import { setDeclaredField, getProfile, type ProfileFieldName } from '@/lib/customer/profile-service'
 import type { ToolHandler } from '@/lib/tools/types'
 
 // ─────────────────────────────────────────────
@@ -141,74 +141,25 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
 
     const trimmedValue = value.trim()
 
-    // 2. Save to Customer record — map field name to Customer model field
-    const updateData: Record<string, unknown> = {}
+    const KNOWN_FIELDS: ProfileFieldName[] = ['name', 'cnp', 'dateOfBirth', 'declaredAge', 'email', 'phone', 'address']
+    if (!KNOWN_FIELDS.includes(field as ProfileFieldName)) {
+      return { success: false, error: `Unknown field: ${field}` }
+    }
 
-    switch (field) {
-      case 'name':
-        updateData.name = trimmedValue
-        break
-      case 'cnp': {
-        const { encrypted, iv, tag } = encrypt(trimmedValue)
-        updateData.cnpEncrypted = encrypted
-        updateData.cnpIv = iv
-        updateData.cnpTag = tag
-        break
+    // 2. Write through the SSOT service (declared provenance, mirrors handled there)
+    const w = await setDeclaredField(context.customerId, field as ProfileFieldName, trimmedValue, 'collect_customer_field')
+    if (w.outcome === 'rejected') {
+      return {
+        success: false,
+        error: 'Cannot overwrite a verified value (field_verified_immutable). A document or operator override is required.',
       }
-      case 'email':
-        updateData.email = trimmedValue
-        break
-      case 'phone':
-        updateData.phone = trimmedValue.replace(/[\s-]/g, '')
-        break
-      case 'dateOfBirth':
-        updateData.dateOfBirth = new Date(trimmedValue)
-        break
-      case 'address':
-        // Expect JSON or plain string; store as JSON
-        try {
-          updateData.address = JSON.parse(trimmedValue)
-        } catch {
-          updateData.address = { raw: trimmedValue }
-        }
-        break
-      default:
-        return { success: false, error: `Unknown field: ${field}` }
     }
 
-    await context.db.customer.update({
-      where: { id: context.customerId },
-      data: updateData,
-    })
-
-    // 3. Determine next needed field
-    const customer = await context.db.customer.findUnique({
-      where: { id: context.customerId },
-      select: {
-        name: true,
-        cnpEncrypted: true,
-        dateOfBirth: true,
-        email: true,
-        phone: true,
-      },
-    })
-
-    if (!customer) {
-      return { success: false, error: 'Customer not found.' }
-    }
-
-    // Find the first field that is still null in the ordered list
-    // Map 'cnp' to cnpEncrypted for the check (cnp field is now encrypted)
-    const fieldMap: Record<CollectableField, unknown> = {
-      name: customer.name,
-      cnp: customer.cnpEncrypted,
-      dateOfBirth: customer.dateOfBirth,
-      email: customer.email,
-      phone: customer.phone,
-    }
+    // 3. Determine next needed field from the provenance store
+    const profile = await getProfile(context.customerId)
     let nextField: CollectableField | null = null
     for (const f of FIELD_ORDER) {
-      if (fieldMap[f] === null || fieldMap[f] === undefined) {
+      if (!(f in profile.fields)) {
         nextField = f
         break
       }
@@ -222,6 +173,7 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
         data: {
           fieldSaved: field,
           nextField,
+          ...(w.mirrorConflict ? { mirrorConflict: w.mirrorConflict } : {}),
         },
         message: `${field} saved. Please provide ${nextField}.`,
         uiAction: {
@@ -248,6 +200,7 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
       data: {
         fieldSaved: field,
         allFieldsCollected: true,
+        ...(w.mirrorConflict ? { mirrorConflict: w.mirrorConflict } : {}),
       },
       message: 'All customer information collected successfully.',
     }
