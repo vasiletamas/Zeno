@@ -19,6 +19,8 @@ vi.mock('@/lib/db', () => ({
       findUnique: (...a: unknown[]) => appFindUniqueSpy(...a),
       create: (...a: unknown[]) => appCreateSpy(...a),
     },
+    // B2.1: negative stamp cases fall through to the Dnt aggregate — none here.
+    dnt: { findFirst: () => Promise.resolve(null) },
   },
 }))
 vi.mock('@/lib/engines/questionnaire-engine', () => ({

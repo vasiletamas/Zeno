@@ -12,6 +12,7 @@ import {
   calculateProgress,
 } from '@/lib/engines/questionnaire-engine'
 import { resolveGroupCodes, resolveActiveProductId } from '@/lib/engines/question-groups'
+import { hasValidDnt } from '@/lib/customer/dnt-lookup'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackProductSelected } from '@/lib/analytics/events'
 import { bumpInsightOnAnswer } from './insight-bump'
@@ -35,7 +36,10 @@ export const startApplication: ToolHandler = async (args, context) => {
       where: { id: context.conversationId },
       select: { dntSignedAt: true, dntValidUntil: true, productId: true, candidateProductId: true },
     })
-    const dntValid = !!conv?.dntSignedAt && (!conv.dntValidUntil || conv.dntValidUntil > new Date())
+    // DNT gate: legacy conversation stamps short-circuit until B2.6 drops
+    // them; the customer-scoped Dnt aggregate is the forward truth.
+    const legacyStampValid = !!conv?.dntSignedAt && (!conv.dntValidUntil || conv.dntValidUntil > new Date())
+    const dntValid = legacyStampValid || (await hasValidDnt(context.customerId, 'LIFE', context.db))
     if (!dntValid) return { success: false, error: 'DNT must be signed before starting an application.' }
 
     const existing = await context.db.application.findUnique({ where: { conversationId: context.conversationId } })

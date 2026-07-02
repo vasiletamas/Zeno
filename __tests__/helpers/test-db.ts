@@ -10,6 +10,9 @@ import { seedQuestions } from '@/prisma/seeds/seed-questions'
  * SimulationConversation via their references into this set).
  */
 export const DOMAIN_TABLES: string[] = [
+  'DntAnswer',
+  'Dnt',
+  'DntSession',
   'ConsentEvent',
   'CustomerProfileField',
   'CommitLedger',

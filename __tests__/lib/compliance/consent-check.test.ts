@@ -3,12 +3,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const questionFindFirstSpy = vi.fn()
 const answerFindUniqueSpy = vi.fn()
 const convFindUniqueSpy = vi.fn()
+// B2.1: negative stamp cases fall through to the Dnt aggregate — none here.
+const dntFindFirstSpy = vi.fn().mockResolvedValue(null)
 
 vi.mock('@/lib/db', () => ({
   prisma: {
     question: { findFirst: (...a: unknown[]) => questionFindFirstSpy(...a) },
     answer: { findUnique: (...a: unknown[]) => answerFindUniqueSpy(...a) },
     conversation: { findUnique: (...a: unknown[]) => convFindUniqueSpy(...a) },
+    dnt: { findFirst: (...a: unknown[]) => dntFindFirstSpy(...a) },
   },
 }))
 

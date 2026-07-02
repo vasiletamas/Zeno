@@ -16,6 +16,13 @@ async function main() {
   try {
     console.log('Starting seed...')
 
+    // B2: at most one ACTIVE DntSession per customer. Prisma cannot express a
+    // partial unique index and this repo bootstraps via `db push` (no
+    // migrations), so the constraint lives here, idempotently.
+    await prisma.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "DntSession_one_active_per_customer" ON "DntSession"("customerId") WHERE "status" = 'ACTIVE'`,
+    )
+
     await seedProduct(prisma)
     await seedQuestions(prisma)
     await seedObjections(prisma)

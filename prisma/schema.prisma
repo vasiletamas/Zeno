@@ -99,7 +99,7 @@ model Product {
   code                    String   @unique
   name                    Json
   description             Json
-  insuranceType           String
+  insuranceType           ProductType
   subType                 String
   eligibility             Json
   features                String[]
@@ -122,6 +122,7 @@ model Product {
 
   pricingTiers        PricingTier[]
   addons              Addon[]
+  dntSessions         DntSession[]
   questionGroups      QuestionGroup[]
   objectionStrategies ObjectionStrategy[]
   conversations          Conversation[] @relation("ConversationProduct")
@@ -287,6 +288,8 @@ model Customer {
   insights          CustomerInsight[]
   profileFields     CustomerProfileField[]
   consentEvents     ConsentEvent[]
+  dnts              Dnt[]
+  dntSessions       DntSession[]
 }
 
 enum ConsentKind {
@@ -298,6 +301,85 @@ enum ConsentKind {
 enum ConsentAction {
   granted
   withdrawn
+}
+
+// B2: the product-type vocabulary is PINNED to the catalog reality — new
+// members join when real products do.
+enum ProductType {
+  LIFE
+}
+
+enum DntStatus {
+  ACTIVE
+  EXPIRED
+  SUPERSEDED
+  WITHDRAWN
+}
+
+enum DntSessionType {
+  NEW
+  UPDATE
+}
+
+enum DntSessionStatus {
+  ACTIVE
+  FINISHED
+  SIGNED
+  CANCELLED
+}
+
+// B2: the customer-scoped DNT aggregate. Consent evidence lives in
+// ConsentEvent (#2), NOT duplicated here.
+model Dnt {
+  id                  String        @id @default(cuid())
+  customerId          String
+  signedAt            DateTime
+  validUntil          DateTime
+  productTypesCovered ProductType[]
+  status              DntStatus     @default(ACTIVE)
+  sourceSessionId     String        @unique
+  supersededById      String?
+  createdAt           DateTime      @default(now())
+
+  customer      Customer   @relation(fields: [customerId], references: [id])
+  sourceSession DntSession @relation(fields: [sourceSessionId], references: [id])
+
+  @@index([customerId, status])
+}
+
+// Working questionnaire session. At most ONE ACTIVE session per customer —
+// enforced by a partial unique index applied in the seed bootstrap
+// (CREATE UNIQUE INDEX ... WHERE status = 'ACTIVE'; Prisma cannot express it).
+model DntSession {
+  id                   String           @id @default(cuid())
+  customerId           String
+  productId            String
+  type                 DntSessionType
+  status               DntSessionStatus @default(ACTIVE)
+  baseDntId            String?
+  originConversationId String?
+  startedAt            DateTime         @default(now())
+  finishedAt           DateTime?
+
+  customer Customer    @relation(fields: [customerId], references: [id])
+  product  Product     @relation(fields: [productId], references: [id])
+  answers  DntAnswer[]
+  dnt      Dnt?
+
+  @@index([customerId, status])
+}
+
+model DntAnswer {
+  id         String   @id @default(cuid())
+  sessionId  String
+  questionId String
+  value      String
+  answeredAt DateTime @default(now())
+
+  session  DntSession @relation(fields: [sessionId], references: [id])
+  question Question   @relation(fields: [questionId], references: [id])
+
+  @@unique([sessionId, questionId])
 }
 
 // B1: append-only consent ledger — the consent SSOT. No update path; the
@@ -443,6 +525,7 @@ model Question {
   parentQuestion Question?     @relation("questionBranching", fields: [parentQuestionId], references: [id])
   childQuestions Question[]    @relation("questionBranching")
   answers        Answer[]
+  dntAnswers     DntAnswer[]
 
   @@index([groupId, orderIndex])
 }

@@ -6,6 +6,7 @@
  */
 
 import { prisma } from '@/lib/db'
+import { hasValidDnt } from '@/lib/customer/dnt-lookup'
 
 const REQUIRED_CONSENT_CODES = [
   'DNT_CONSULTATION_CONSENT',
@@ -45,13 +46,14 @@ export async function verifyConsents(conversationId: string): Promise<{
     }
   }
 
-  // 2. Check the DNT is signed and still valid (persisted on Conversation)
+  // 2. Check the DNT is signed and still valid: legacy conversation stamps
+  // short-circuit until B2.6 drops them; the Dnt aggregate is forward truth.
   const conv = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { dntSignedAt: true, dntValidUntil: true },
+    select: { customerId: true, dntSignedAt: true, dntValidUntil: true },
   })
-  const dntValid =
-    !!conv?.dntSignedAt && (!conv.dntValidUntil || conv.dntValidUntil > new Date())
+  const legacyStampValid = !!conv?.dntSignedAt && (!conv.dntValidUntil || conv.dntValidUntil > new Date())
+  const dntValid = legacyStampValid || (conv ? await hasValidDnt(conv.customerId, 'LIFE', prisma) : false)
   if (!dntValid) {
     missing.push('DNT_SIGNATURE')
   }
