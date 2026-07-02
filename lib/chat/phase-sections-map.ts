@@ -31,6 +31,10 @@ export function formatDerivedBriefing(state: DerivedStateV3, actions: ExposedAct
   if (state.product) lines.push(`Product: ${state.product.code}`)
   if (state.selection.tier) lines.push(`Selection: tier ${state.selection.tier}${state.selection.level ? ', level ' + state.selection.level : ''}${state.selection.addon ? ', add-on included' : ''}`)
   if (state.application && state.application.missingCodes.length > 0) lines.push(`Remaining questions: ${state.application.missingCodes.slice(0, 5).join(', ')}${state.application.missingCodes.length > 5 ? ', …' : ''}`)
+  // Sub-stage facts (A4.4): one load-bearing number per stage.
+  if (state.phase === 'APPLICATION' && state.subphase === 'DNT') lines.push(`DNT remaining: ${state.dnt.totalCount - state.dnt.answeredCount}`)
+  if (state.phase === 'QUOTE' && state.quote) lines.push(`Quote valid until: ${state.quote.validUntil.slice(0, 10)}`)
+  if (state.phase === 'PAYMENT') lines.push(`Payment status: ${state.schedule.lastPaymentStatus ?? 'pending'}`)
   if (state.flagsForReview.length > 0) lines.push(`Flags for review: ${state.flagsForReview.join(', ')}`)
   lines.push(`Available actions: ${actions.available.join(', ')}`)
   if (actions.blocked.length > 0) {
