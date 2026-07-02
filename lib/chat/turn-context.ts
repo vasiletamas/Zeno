@@ -19,7 +19,6 @@ export interface TurnContextConversation {
   productId: string | null
   product: { id: string; code: string; name: unknown } | null
   candidateProductId: string | null
-  candidateConfidence: number | null
   candidateSetAt: Date | null
   application: {
     status: string
@@ -122,7 +121,6 @@ export async function loadTurnContext(
     productId: rawConversation.productId,
     product: rawConversation.product,
     candidateProductId: rawConversation.candidateProductId,
-    candidateConfidence: rawConversation.candidateConfidence,
     candidateSetAt: rawConversation.candidateSetAt,
     application: rawConversation.activeApplicationId
       ? ((await prisma.application.findUnique({

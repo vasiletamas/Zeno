@@ -283,12 +283,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           where: { id: state.conversationId },
           data: {
             candidateProductId: guess.productId,
-            candidateConfidence: guess.confidence,
             candidateSetAt: new Date(),
           },
         })
         turnCtx.conversation.candidateProductId = guess.productId
-        turnCtx.conversation.candidateConfidence = guess.confidence
         turnCtx.conversation.candidateSetAt = new Date()
       }
     } catch (err) {
@@ -322,7 +320,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           productId: turnCtx.conversation.productId,
           product: turnCtx.conversation.product,
           candidateProductId: turnCtx.conversation.candidateProductId,
-          candidateConfidence: turnCtx.conversation.candidateConfidence,
           candidateSetAt: turnCtx.conversation.candidateSetAt,
         },
         insights: preloadedInsights,

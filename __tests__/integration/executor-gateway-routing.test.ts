@@ -11,7 +11,7 @@ describe.skipIf(!process.env.DATABASE_URL)('executor routes commits through the 
     const customer = await prisma.customer.create({ data: { isAnonymous: true, language: 'ro' } })
     const conv = await prisma.conversation.create({ data: { customerId: customer.id } })
     const ctx = { customerId: customer.id, conversationId: conv.id, language: 'ro', db: prisma } as unknown as ToolContext
-    const r = await executeTool('set_candidate_product', { productId: product.id, confidence: 80 }, ctx, 'CUSTOMER')
+    const r = await executeTool('set_candidate_product', { productId: product.id }, ctx, 'CUSTOMER')
     expect(r.success).toBe(true)
     expect(r.envelope?.outcome).toBe('applied')
     expect(await prisma.commitLedger.count({ where: { conversationId: conv.id, tool: 'set_candidate_product' } })).toBe(1)

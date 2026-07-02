@@ -542,7 +542,7 @@ model Conversation {
   customerId          String
   productId           String?
   candidateProductId  String?
-  candidateConfidence Int?
+  candidateAddonIds   String[]  @default([]) // B4.ADD-1: soft addon interest, replaces the confidence pseudo-metric
   candidateSetAt      DateTime?
   activeApplicationId String? // T5.D4 channel pointer to the customer-scoped application (B4.1)
   status              ConversationStatus @default(ACTIVE)

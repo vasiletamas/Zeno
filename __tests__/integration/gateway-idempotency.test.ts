@@ -18,8 +18,8 @@ describe.skipIf(!process.env.DATABASE_URL)('gateway idempotency (#8 replay-first
 
   it('double-submit of the same commit applies once and replays the ORIGINAL outcome', async () => {
     const { product, conv, customer, ctx } = await fixture()
-    const r1 = await executeCommit({ tool: 'set_candidate_product', args: { productId: product.id, confidence: 80 }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
-    const r2 = await executeCommit({ tool: 'set_candidate_product', args: { productId: product.id, confidence: 80 }, actor: 'gui', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
+    const r1 = await executeCommit({ tool: 'set_candidate_product', args: { productId: product.id }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
+    const r2 = await executeCommit({ tool: 'set_candidate_product', args: { productId: product.id }, actor: 'gui', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
     expect(r1.outcome).toBe('applied')
     expect(r2).toEqual(r1) // original envelope, verbatim
     const rows = await prisma.commitLedger.findMany({ where: { conversationId: conv.id, tool: 'set_candidate_product' }, orderBy: { createdAt: 'asc' } })

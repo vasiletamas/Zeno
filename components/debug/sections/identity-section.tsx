@@ -70,7 +70,7 @@ export function IdentitySection({ identity, previousIdentity }: Props) {
         </Row>
         <Row label="candidate" path="conversation.candidateProductId" diff={diff}>
           {identity.conversation.candidateProductId
-            ? `${identity.conversation.candidateProductId.slice(0, 8)}… (conf ${identity.conversation.candidateConfidence ?? '?'})`
+            ? `${identity.conversation.candidateProductId.slice(0, 8)}…`
             : '—'}
         </Row>
         {identity.conversation.candidateSetAt && (

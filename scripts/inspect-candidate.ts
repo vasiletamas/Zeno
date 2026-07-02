@@ -15,7 +15,7 @@ async function main() {
       messageCount: true,
       productId: true,
       candidateProductId: true,
-      candidateConfidence: true,
+      candidateAddonIds: true,
       candidateSetAt: true,
     },
   })

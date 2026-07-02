@@ -20,7 +20,6 @@ const baseConversation = {
   productId: null,
   product: null,
   candidateProductId: null,
-  candidateConfidence: null,
   candidateSetAt: null,
 } as const
 
@@ -81,7 +80,6 @@ describe('buildIdentityPayload', () => {
         productCode: null,
         productName: null,
         candidateProductId: null,
-        candidateConfidence: null,
         candidateSetAt: null,
       },
       memory: [
@@ -101,7 +99,6 @@ describe('buildIdentityPayload', () => {
       productId: 'p-protect',
       product: { code: 'protect', name: { ro: 'Protect', en: 'Protect' } },
       candidateProductId: 'p-protect',
-      candidateConfidence: 70,
       candidateSetAt: new Date('2026-05-26T10:30:00Z'),
     }
     const payload = buildIdentityPayload({ ...baseArgs, customer, conversation, insights: [] })
@@ -110,7 +107,6 @@ describe('buildIdentityPayload', () => {
       productCode: 'protect',
       productName: 'Protect',
       candidateProductId: 'p-protect',
-      candidateConfidence: 70,
       candidateSetAt: '2026-05-26T10:30:00.000Z',
     })
   })

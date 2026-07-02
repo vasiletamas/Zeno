@@ -12,7 +12,7 @@ async function main() {
     where: { id: convId },
     select: {
       candidateProductId: true,
-      candidateConfidence: true,
+      candidateAddonIds: true,
       productId: true,
       mode: true,
       messages: {
@@ -29,7 +29,7 @@ async function main() {
 
   console.log(
     'candidate:', conv.candidateProductId,
-    '· conf:', conv.candidateConfidence,
+    '· addons:', conv.candidateAddonIds,
     '· product:', conv.productId,
     '· mode:', conv.mode,
   )

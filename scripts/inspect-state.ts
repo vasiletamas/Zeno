@@ -29,8 +29,7 @@ async function main() {
         productId: conv.productId,
         product: conv.product?.code ?? null,
         candidateProductId: conv.candidateProductId,
-        candidateConfidence: conv.candidateConfidence,
-        candidateSetAt: conv.candidateSetAt,
+                candidateSetAt: conv.candidateSetAt,
         mode: conv.mode,
         application: application
           ? {

@@ -22,7 +22,6 @@ function makeIdentity(overrides: Partial<NonNullable<DebugTurn['identity']>> = {
       productCode: null,
       productName: null,
       candidateProductId: null,
-      candidateConfidence: null,
       candidateSetAt: null,
     },
     memory: [],
@@ -89,7 +88,6 @@ describe('diffIdentity', () => {
         productCode: 'protect',
         productName: 'Protect',
         candidateProductId: 'p-protect',
-        candidateConfidence: 70,
         candidateSetAt: '2026-05-26T10:30:00.000Z',
       },
     })

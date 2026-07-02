@@ -147,7 +147,6 @@ export interface DebugIdentityPayload {
     productCode: string | null
     productName: string | null
     candidateProductId: string | null
-    candidateConfidence: number | null
     candidateSetAt: string | null
   }
   memory: DebugIdentityMemoryEntry[]
@@ -233,7 +232,6 @@ export interface BuildIdentityPayloadInput {
     productId: string | null
     product: { code: string; name: unknown } | null
     candidateProductId: string | null
-    candidateConfidence: number | null
     candidateSetAt: Date | null
   }
   insights: RawCustomerInsight[]
@@ -289,7 +287,6 @@ export function buildIdentityPayload(
       productCode: input.conversation.product?.code ?? null,
       productName: extractLocalizedName(input.conversation.product?.name, input.customer.language),
       candidateProductId: input.conversation.candidateProductId,
-      candidateConfidence: input.conversation.candidateConfidence,
       candidateSetAt: input.conversation.candidateSetAt
         ? input.conversation.candidateSetAt.toISOString()
         : null,

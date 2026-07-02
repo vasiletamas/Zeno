@@ -10,13 +10,11 @@ import { resolveProductRef, listAvailableProductRefs } from '@/lib/tools/resolve
 
 export const setCandidateProduct: ToolHandler = async (args, context) => {
   const productId = args.productId as string
-  const confidence = args.confidence as number
+  // B4.ADD-1: soft addon interest replaces the confidence pseudo-metric
+  const addonIds = Array.isArray(args.addonIds) ? (args.addonIds as string[]) : []
 
   if (typeof productId !== 'string' || !productId) {
     return { success: false, error: 'productId is required.' }
-  }
-  if (typeof confidence !== 'number' || confidence < 0 || confidence > 100) {
-    return { success: false, error: 'confidence must be an integer 0-100.' }
   }
 
   try {
@@ -42,7 +40,7 @@ export const setCandidateProduct: ToolHandler = async (args, context) => {
 
     const current = await context.db.conversation.findUnique({
       where: { id: context.conversationId },
-      select: { candidateProductId: true, candidateConfidence: true },
+      select: { candidateProductId: true, candidateAddonIds: true },
     })
 
     const productLabel =
@@ -52,16 +50,16 @@ export const setCandidateProduct: ToolHandler = async (args, context) => {
 
     if (
       current?.candidateProductId === ref.id &&
-      current?.candidateConfidence === confidence
+      JSON.stringify(current?.candidateAddonIds ?? []) === JSON.stringify(addonIds)
     ) {
       return {
         success: true,
-        data: { candidateProductId: ref.id, candidateConfidence: confidence, unchanged: true },
-        message: `Candidate already set to ${productLabel} (confidence ${confidence}). No change.`,
+        data: { candidateProductId: ref.id, candidateAddonIds: addonIds, unchanged: true },
+        message: `Candidate already set to ${productLabel}. No change.`,
         confirmation: {
           category: 'lifecycle',
           label: 'Candidate product set',
-          value: `${productLabel} (confidence ${confidence})`,
+          value: productLabel,
           timestamp: new Date().toISOString(),
         },
       }
@@ -71,19 +69,19 @@ export const setCandidateProduct: ToolHandler = async (args, context) => {
       where: { id: context.conversationId },
       data: {
         candidateProductId: ref.id,
-        candidateConfidence: confidence,
+        candidateAddonIds: addonIds,
         candidateSetAt: new Date(),
       },
     })
 
     return {
       success: true,
-      data: { candidateProductId: ref.id, candidateConfidence: confidence },
-      message: `Candidate product set to ${productLabel} with confidence ${confidence}.`,
+      data: { candidateProductId: ref.id, candidateAddonIds: addonIds },
+      message: `Candidate product set to ${productLabel}${addonIds.length ? ` (addon interest: ${addonIds.join(', ')})` : ''}.`,
       confirmation: {
         category: 'lifecycle',
         label: 'Candidate product set',
-        value: `${productLabel} (confidence ${confidence})`,
+        value: productLabel,
         timestamp: new Date().toISOString(),
       },
     }

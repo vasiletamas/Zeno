@@ -45,6 +45,13 @@ const getObjectionStrategySchema = z.object({
 
 const getCustomerProfileSchema = z.object({}).strict()
 
+// B4.ADD-1: confidence is GONE (strict rejection); addonIds is the soft
+// addon-interest binding.
+const setCandidateProductSchema = z.object({
+  productId: z.string().min(1, 'productId is required'),
+  addonIds: z.array(z.string()).optional(),
+}).strict()
+
 // ==============================================
 // DNT TOOL SCHEMAS
 // ==============================================
@@ -206,6 +213,9 @@ const toolSchemas: Record<string, ZodType> = {
 
   // Profile
   get_customer_profile: getCustomerProfileSchema,
+
+  // Candidate (B4.ADD-1)
+  set_candidate_product: setCandidateProductSchema,
 
   // DNT
   get_dnt_state: getDntStateSchema,

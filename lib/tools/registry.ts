@@ -504,14 +504,13 @@ registerTool('set_candidate_product', {
         description:
           "Product ID to set as the candidate (cuid from list_products, NOT the display name or code).",
       },
-      confidence: {
-        type: 'integer',
-        minimum: 0,
-        maximum: 100,
-        description: 'Your confidence (0-100) that the customer is converging on this product.',
+      addonIds: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional add-on codes the customer showed interest in (soft binding, like the candidate itself).',
       },
     },
-    required: ['productId', 'confidence'],
+    required: ['productId'],
     additionalProperties: false,
   },
   executionMode: 'blocking',
