@@ -13,9 +13,7 @@ import { setDeclaredField, setVerifiedField, getProfile, getAge } from '@/lib/cu
 import { claimAndMerge } from '@/lib/customer/claim-merge'
 import { loadDerivedConsents } from '@/lib/customer/consent-service'
 import { executeCommit } from '@/lib/tools/gateway'
-import { resolveGroupCodes } from '@/lib/engines/question-groups'
-import { getNextQuestion } from '@/lib/engines/questionnaire-engine'
-import { saveDntAnswer } from '@/lib/tools/handlers/dnt-handlers'
+import { openDntSession, writeDntAnswer, getDntNextQuestion } from '@/lib/tools/handlers/dnt-handlers'
 import type { ToolContext } from '@/lib/tools/types'
 
 let failures = 0
@@ -69,24 +67,24 @@ async function main() {
 
   // ---- consent leg (B1.6): grant via sign → withdraw → halt → re-grant ----
   const product = await prisma.product.findFirstOrThrow({ where: { code: 'protect' } })
-  const codes = (await resolveGroupCodes(product.id, 'dnt', prisma)) ?? []
-  const answerAll = async (conversationId: string, ctx: ToolContext) => {
+  const answerAll = async (_conversationId: string, ctx: ToolContext) => {
+    // B2 session flow: open a session, then write answers by question code.
+    const opened = await openDntSession({}, ctx)
+    if (!opened.success) throw new Error(`consent leg could not open a DNT session: ${opened.error}`)
     for (let i = 0; i < 100; i++) {
-      const next = await getNextQuestion(codes, { kind: 'conversation', conversationId: conversationId })
-      if (!next) break
-      const q = next.question as { id: string; type: string; options: unknown; validationRules?: unknown; code?: string | null }
+      const n = await getDntNextQuestion({}, ctx)
+      if (!n.success) throw new Error(`consent leg: get_dnt_next_question failed: ${n.error}`)
+      const d = n.data as { complete: boolean; question: { code: string | null; type: string; options: unknown } | null }
+      if (d.complete || !d.question?.code) break
       let answer = 'da'
-      if (q.code === 'DNT_CNP') answer = '1980418089861'
-      else if (q.type === 'NUMBER') answer = '0'
-      else if (Array.isArray(q.options) && q.options[0]) {
-        const first = q.options[0] as { value?: unknown; label?: unknown } | string
+      if (d.question.code === 'DNT_CNP') answer = '1980418089861'
+      else if (d.question.type === 'NUMBER') answer = '0'
+      else if (Array.isArray(d.question.options) && d.question.options[0]) {
+        const first = d.question.options[0] as { value?: unknown; label?: unknown } | string
         answer = typeof first === 'string' ? first : String(first.value ?? first.label ?? 'da')
-      } else if (q.type === 'OPEN_ENDED') {
-        const rules = (q.validationRules ?? {}) as { minLength?: number }
-        if (rules.minLength) answer = 'x'.repeat(rules.minLength)
       }
-      const r = await saveDntAnswer({ questionId: q.id, answer }, ctx)
-      if (!r.success) throw new Error(`consent leg could not answer ${q.code ?? q.id}: ${r.error}`)
+      const w = await writeDntAnswer({ questionCode: d.question.code, value: answer }, ctx)
+      if (!w.success) throw new Error(`consent leg could not answer ${d.question.code}: ${w.error}`)
     }
   }
   const signViaGateway = async (customerId: string, conversationId: string, ctx: ToolContext) => {

@@ -40,7 +40,7 @@ const dntRule = (action: string, kind: 'read' | 'commit'): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.8.0' // 1.6.0: withdraw_consent exposed on any ledger history (B1.4); 1.7.0: DNT read surface + open_dnt_session via #12 predicates (B2.4); 1.8.0: write_dnt_answer exposed on active session (B2.5)
+export const engineVersion = '1.9.0' // 1.7.0: DNT read surface + open_dnt_session via #12 predicates (B2.4); 1.8.0: write_dnt_answer exposed on active session (B2.5); 1.9.0: sign_dnt session-scoped, legacy answer tool retired, DNT slice aggregate-only (B2.6)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -82,9 +82,7 @@ export const ACTION_RULES: ActionRule[] = [
   { action: 'switch_product', kind: 'commit', exposedWhen: (s) => s.product !== null },
   { action: 'collect_customer_field', kind: 'commit', exposedWhen: always },
   { action: 'withdraw_consent', kind: 'commit', exposedWhen: (s) => s.consents.hasAnyEvents },
-  { action: 'save_dnt_answer', kind: 'commit', exposedWhen: (s) => s.product !== null && !s.dnt.signed && s.dnt.totalCount > 0 && s.dnt.answeredCount < s.dnt.totalCount },
-  { action: 'sign_dnt', kind: 'commit', exposedWhen: (s) => s.product !== null && !s.dnt.signed && s.dnt.totalCount > 0 && s.dnt.answeredCount >= s.dnt.totalCount,
-    blockedReason: (s) => (s.product !== null && !s.dnt.signed && s.dnt.answeredCount < s.dnt.totalCount ? { reason: 'dnt_incomplete', params: { answered: s.dnt.answeredCount, total: s.dnt.totalCount } } : null) },
+  dntRule('sign_dnt', 'commit'),
   { action: 'start_application', kind: 'commit', exposedWhen: (s) => s.product !== null && s.dnt.valid && s.application === null,
     blockedReason: (s) => (s.application !== null ? { reason: 'application_already_open' } : s.product !== null && !s.dnt.valid ? { reason: s.dnt.signed ? 'dnt_expired' : 'dnt_not_signed' } : null) },
   { action: 'save_application_answer', kind: 'commit', exposedWhen: (s) => s.application?.status === 'OPEN' && s.application.missingCodes.length > 0 },
@@ -101,7 +99,7 @@ export const ACTION_RULES: ActionRule[] = [
   { action: 'initiate_payment', kind: 'commit', exposedWhen: (s) => s.policy !== null && s.policy.status === 'PENDING_SUBMISSION' },
 ]
 
-const NEXT_BEST_PRIORITY = ['initiate_payment', 'accept_quote', 'generate_quote', 'save_application_answer', 'sign_dnt', 'save_dnt_answer', 'open_dnt_session', 'start_application', 'set_candidate_product', 'list_products']
+const NEXT_BEST_PRIORITY = ['initiate_payment', 'accept_quote', 'generate_quote', 'save_application_answer', 'sign_dnt', 'write_dnt_answer', 'open_dnt_session', 'start_application', 'set_candidate_product', 'list_products']
 
 export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequirements?: IdentityRequirementsTable }): DeriveAndExposeResult {
   const d = derivePhase(s)

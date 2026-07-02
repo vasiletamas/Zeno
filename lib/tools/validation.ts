@@ -60,11 +60,6 @@ const writeDntAnswerSchema = z.object({
   value: z.string().min(1, 'Answer value is required'),
 }).strict()
 
-const saveDntAnswerSchema = z.object({
-  questionId: z.string().optional(),
-  answer: z.string().min(1, 'Answer is required'),
-}).strict()
-
 // The gateway owns two-step confirmation (A2 erratum 1): confirm-class keys
 // are stripped before validation and the ceremony flag is injected server-
 // side. Since B1.5 the customer's consent decision is a MATERIAL argument —
@@ -177,7 +172,6 @@ const toolSchemas: Record<string, ZodType> = {
   get_dnt_next_question: getDntNextQuestionSchema,
   open_dnt_session: openDntSessionSchema,
   write_dnt_answer: writeDntAnswerSchema,
-  save_dnt_answer: saveDntAnswerSchema,
   sign_dnt: signDntSchema,
 
   // Application

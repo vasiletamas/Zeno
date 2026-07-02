@@ -34,12 +34,10 @@ export const startApplication: ToolHandler = async (args, context) => {
 
     const conv = await context.db.conversation.findUnique({
       where: { id: context.conversationId },
-      select: { dntSignedAt: true, dntValidUntil: true, productId: true, candidateProductId: true },
+      select: { productId: true, candidateProductId: true },
     })
-    // DNT gate: legacy conversation stamps short-circuit until B2.6 drops
-    // them; the customer-scoped Dnt aggregate is the forward truth.
-    const legacyStampValid = !!conv?.dntSignedAt && (!conv.dntValidUntil || conv.dntValidUntil > new Date())
-    const dntValid = legacyStampValid || (await hasValidDnt(context.customerId, 'LIFE', context.db))
+    // DNT gate (B2.6): the customer-scoped Dnt aggregate is the only truth.
+    const dntValid = await hasValidDnt(context.customerId, 'LIFE', context.db)
     if (!dntValid) return { success: false, error: 'DNT must be signed before starting an application.' }
 
     const existing = await context.db.application.findUnique({ where: { conversationId: context.conversationId } })

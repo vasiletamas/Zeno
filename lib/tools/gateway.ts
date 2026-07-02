@@ -21,7 +21,7 @@ import { issueConfirmToken, verifyConfirmToken, confirmSecret } from './confirm-
 import { TimeoutError, CircuitOpenError } from '@/lib/errors/types'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { deriveAndExpose } from '@/lib/engines/derive-and-expose'
-import type { CommitActor, CommitEffect, CommitResult, DerivedStateV3, ReasonCode } from '@/lib/engines/domain-types'
+import { REASON_CODES, type CommitActor, type CommitEffect, type CommitResult, type DerivedStateV3, type ReasonCode } from '@/lib/engines/domain-types'
 import type { ToolContext, ToolResult } from './types'
 
 type Db = typeof prisma | Prisma.TransactionClient
@@ -58,12 +58,12 @@ const REPLAY_EXEMPT = new Set(['open_dnt_session'])
 export function resolveTargetRef(tool: string, args: Record<string, unknown>, state: DerivedStateV3, conversationId: string): string {
   // repeatable commits — addressed entity from ARGS (erratum 4)
   if (tool === 'collect_customer_field') return `field:${String(args.field ?? 'unknown')}`
-  if (tool === 'save_dnt_answer') return `dnt_answer:${String(args.questionId ?? 'auto')}`
   if (tool === 'write_dnt_answer') return `dnt_answer:${String(args.questionCode ?? 'unknown')}`
   if (tool === 'save_application_answer') return `app_answer:${String(args.field ?? 'auto')}`
   if (tool === 'set_answer') return `question:${String(args.questionCode ?? 'unknown')}`
   if (tool === 'withdraw_consent') return `consent:${String(args.kind ?? 'unknown')}`
   // one-shot / entity-scoped commits — stable natural key
+  if (tool === 'sign_dnt') return `dnt_session:${state.dnt.activeSessionId ?? 'none'}` // B2.6: customer-scoped renewals may recur per conversation
   if (tool === 'accept_quote' || tool === 'modify_quote') return `quote:${state.quote?.id ?? 'none'}`
   if (tool === 'generate_quote') return `application:${state.application?.id ?? 'none'}`
   if (tool === 'initiate_payment') return `policy:${state.policy?.id ?? 'none'}`
@@ -237,9 +237,15 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
       effects.push('advance_phase')
       phaseDelta = { from: lockedPre.state.phase, to: post.state.phase }
     }
+    // Handlers may speak reason codes: an error message prefixed
+    // '<reason_code>: ...' maps to that code (and its outcome class) instead
+    // of the generic handler_rejected (B2.6 — e.g. requires_consent,
+    // dnt_session_incomplete).
+    const errPrefix = typeof handlerResult.error === 'string' ? handlerResult.error.split(':')[0].trim() : ''
+    const spokenReason = (REASON_CODES as readonly string[]).includes(errPrefix) ? (errPrefix as ReasonCode) : null
     const envelope: CommitResult = handlerResult.success
       ? { outcome: 'applied', effects, phaseDelta, data: { ...handlerResult.data, _uiAction: handlerResult.uiAction, _confirmation: handlerResult.confirmation, _message: handlerResult.message } }
-      : { outcome: 'rejected', reason: 'handler_rejected', effects: [], data: { error: handlerResult.error } }
+      : { outcome: spokenReason ? outcomeForBlocked(spokenReason) : 'rejected', reason: spokenReason ?? 'handler_rejected', effects: [], data: { error: handlerResult.error } }
     await writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, post.state.phase)
     return envelope
   })

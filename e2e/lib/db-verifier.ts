@@ -136,17 +136,20 @@ export async function verifyHappyPath(
     ),
   )
 
-  // 4. Conversation.dntSignedAt is set
+  // 4. Customer holds a signed Dnt (B2: customer-scoped aggregate)
   const convDnt = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { dntSignedAt: true },
+    select: { customerId: true },
   })
+  const signedDnt = convDnt
+    ? await prisma.dnt.findFirst({ where: { customerId: convDnt.customerId, status: 'ACTIVE' } })
+    : null
   checks.push(
     check(
-      'Conversation.dntSignedAt is set',
+      'Customer has an ACTIVE Dnt',
       'non-null',
-      convDnt?.dntSignedAt ?? null,
-      convDnt?.dntSignedAt != null,
+      signedDnt?.signedAt ?? null,
+      signedDnt != null,
     ),
   )
 
@@ -662,17 +665,20 @@ export async function verifyDntPauseResume(
     ),
   )
 
-  // 5. DNT signed (Conversation.dntSignedAt)
+  // 5. DNT signed (customer-scoped Dnt aggregate, B2)
   const convDntResume = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { dntSignedAt: true },
+    select: { customerId: true },
   })
+  const signedDntResume = convDntResume
+    ? await prisma.dnt.findFirst({ where: { customerId: convDntResume.customerId, status: 'ACTIVE' } })
+    : null
   checks.push(
     check(
-      'DNT signed (Conversation.dntSignedAt)',
+      'Customer has an ACTIVE Dnt',
       'non-null',
-      convDntResume?.dntSignedAt ?? null,
-      convDntResume?.dntSignedAt != null,
+      signedDntResume?.signedAt ?? null,
+      signedDntResume != null,
     ),
   )
 

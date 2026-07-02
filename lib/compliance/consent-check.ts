@@ -2,7 +2,8 @@
  * Consent Verification
  *
  * Checks that required GDPR / DNT consents exist before quote generation.
- * Verifies answer records for consent questions and DNT signing metadata.
+ * B2.6: consent answers come from the signed Dnt's source-session DntAnswers;
+ * validity comes from the customer-scoped Dnt aggregate.
  */
 
 import { prisma } from '@/lib/db'
@@ -20,40 +21,29 @@ export async function verifyConsents(conversationId: string): Promise<{
 }> {
   const missing: string[] = []
 
-  // 1. Check that answers exist for each required consent question code
-  for (const code of REQUIRED_CONSENT_CODES) {
-    const question = await prisma.question.findFirst({
-      where: { code },
-    })
-
-    if (!question) {
-      // Question doesn't exist in DB — treat as missing
-      missing.push(code)
-      continue
-    }
-
-    const answer = await prisma.answer.findUnique({
-      where: {
-        questionId_conversationId: {
-          questionId: question.id,
-          conversationId,
-        },
-      },
-    })
-
-    if (!answer) {
-      missing.push(code)
-    }
-  }
-
-  // 2. Check the DNT is signed and still valid: legacy conversation stamps
-  // short-circuit until B2.6 drops them; the Dnt aggregate is forward truth.
   const conv = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { customerId: true, dntSignedAt: true, dntValidUntil: true },
+    select: { customerId: true },
   })
-  const legacyStampValid = !!conv?.dntSignedAt && (!conv.dntValidUntil || conv.dntValidUntil > new Date())
-  const dntValid = legacyStampValid || (conv ? await hasValidDnt(conv.customerId, 'LIFE', prisma) : false)
+
+  // 1. Check that answers exist for each required consent question code in
+  // the signed Dnt's source session (B2: DntAnswer store)
+  const signedDnt = conv
+    ? await prisma.dnt.findFirst({
+        where: { customerId: conv.customerId, status: 'ACTIVE' },
+        orderBy: { signedAt: 'desc' },
+        include: { sourceSession: { include: { answers: { include: { question: { select: { code: true } } } } } } },
+      })
+    : null
+  const answeredCodes = new Set(
+    (signedDnt?.sourceSession.answers ?? []).map((a) => a.question.code).filter((c): c is string => c !== null),
+  )
+  for (const code of REQUIRED_CONSENT_CODES) {
+    if (!answeredCodes.has(code)) missing.push(code)
+  }
+
+  // 2. Check the DNT is signed and still valid (customer-scoped aggregate)
+  const dntValid = conv ? await hasValidDnt(conv.customerId, 'LIFE', prisma) : false
   if (!dntValid) {
     missing.push('DNT_SIGNATURE')
   }

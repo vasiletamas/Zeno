@@ -24,11 +24,14 @@ describe('deriveAndExpose — exposure over the FULL snapshot (contradiction #12
     const r = deriveAndExpose(makeSnapshot({ application: doneApp, dnt: validDnt, consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true } }))
     expect(r.actions.available).toContain('generate_quote')
   })
-  it('sign_dnt blocked with dnt_incomplete while DNT answers are missing', () => {
-    const s = makeSnapshot({ application: { ...doneApp, status: 'OPEN', missingCodes: ['Q1'] }, dnt: { ...validDnt, signed: false, valid: false, answeredCount: 2 } })
+  it('sign_dnt blocked with dnt_session_incomplete while the ACTIVE session has pending questions (B2)', () => {
+    const s = makeSnapshot({ application: { ...doneApp, status: 'OPEN', missingCodes: ['Q1'] }, dnt: { ...validDnt, signed: false, valid: false, latest: null, activeSessionId: 'sess-1', sessionType: 'NEW', sessionAnswered: 2, sessionTotal: 10 } })
     const r = deriveAndExpose(s)
     expect(r.actions.available).not.toContain('sign_dnt')
-    expect(r.actions.blocked).toContainEqual(expect.objectContaining({ action: 'sign_dnt', reason: 'dnt_incomplete' }))
+    expect(r.actions.blocked).toContainEqual(expect.objectContaining({ action: 'sign_dnt', reason: 'dnt_session_incomplete' }))
+    // finished session flips it to available
+    const done = deriveAndExpose(makeSnapshot({ dnt: { ...validDnt, signed: false, valid: false, latest: null, activeSessionId: 'sess-1', sessionType: 'NEW', sessionAnswered: 10, sessionTotal: 10 } }))
+    expect(done.actions.available).toContain('sign_dnt')
   })
   it('a circuit-open tool moves to blocked temporarily_unavailable (M10)', () => {
     const r = deriveAndExpose(makeSnapshot({ circuit: { openTools: ['list_products'] } }))

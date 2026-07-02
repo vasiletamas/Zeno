@@ -3,7 +3,7 @@
  *
  * Reads: get_dnt_state, get_dnt_questions, get_dnt_next_question (B2.4 —
  * the pinned #7 surface; session details are absorbed into get_dnt_state).
- * Commits: save_dnt_answer (legacy until B2.5), sign_dnt.
+ * Commits: open_dnt_session, write_dnt_answer, sign_dnt (session-scoped).
  */
 
 import {
@@ -13,7 +13,7 @@ import {
 } from '@/lib/engines/questionnaire-engine'
 import { resolveGroupCodes, resolveActiveProductId } from '@/lib/engines/question-groups'
 import { shouldShowQuestion } from '@/lib/engines/questionnaire-engine'
-import { isDntValidFor, isExpiringOrExpired, decideSessionType, type DntFact } from '@/lib/engines/dnt-rules'
+import { isDntValidFor, isExpiringOrExpired, decideSessionType, computeCoverage, DNT_VALIDITY_DAYS, type DntFact } from '@/lib/engines/dnt-rules'
 import { appendConsentEvents } from '@/lib/customer/consent-service'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackDntCompleted } from '@/lib/analytics/events'
@@ -307,153 +307,7 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
 }
 
 // ─────────────────────────────────────────────
-// save_dnt_answer
-// ─────────────────────────────────────────────
-
-export const saveDntAnswer: ToolHandler = async (args, context) => {
-  const answer = args.answer as string
-  const questionIdArg = args.questionId as string | undefined
-
-  try {
-    const codes = await dntGroupCodes(context)
-
-    // Resolve current question
-    let questionId = questionIdArg
-    let questionMeta: { type: string; options: unknown; validationRules: unknown } | null = null
-
-    if (questionId) {
-      const q = await context.db.question.findUnique({ where: { id: questionId } })
-      if (!q) return { success: false, error: 'Question not found.' }
-      questionMeta = { type: q.type, options: q.options, validationRules: q.validationRules }
-    } else {
-      const next = await getNextQuestion(codes, { kind: 'conversation', conversationId: context.conversationId })
-      if (!next) {
-        return { success: false, error: 'All DNT questions have already been answered.' }
-      }
-      questionId = next.question.id
-      questionMeta = {
-        type: next.question.type,
-        options: next.question.options,
-        validationRules: next.question.validationRules,
-      }
-    }
-
-    // Validate
-    const validation = validateAnswer(questionMeta, answer)
-    if (!validation.valid) {
-      return { success: false, error: validation.error ?? 'Invalid answer.' }
-    }
-
-    // Refetch question with group + insightKey (needed for insight bump)
-    const questionWithGroup = await context.db.question.findUnique({
-      where: { id: questionId! },
-      include: { group: true },
-    })
-
-    // Capture pre-existing insight (if any)
-    const priorInsight = questionWithGroup?.insightKey
-      ? await context.db.customerInsight.findUnique({
-          where: {
-            customerId_key: { customerId: context.customerId, key: questionWithGroup.insightKey },
-          },
-        })
-      : null
-
-    // Upsert answer
-    await context.db.answer.upsert({
-      where: {
-        questionId_conversationId: {
-          questionId: questionId!,
-          conversationId: context.conversationId,
-        },
-      },
-      create: {
-        questionId: questionId!,
-        conversationId: context.conversationId,
-        value: validation.normalizedValue,
-      },
-      update: {
-        value: validation.normalizedValue,
-        answeredAt: new Date(),
-      },
-    })
-
-    // Bump insight + write compliance log (DNT v1 has no insightKeys, so this no-ops)
-    if (questionWithGroup?.insightKey) {
-      await bumpInsightOnAnswer({
-        customerId: context.customerId,
-        conversationId: context.conversationId,
-        question: {
-          id: questionWithGroup.id,
-          code: questionWithGroup.code,
-          insightKey: questionWithGroup.insightKey,
-          group: { code: questionWithGroup.group.code },
-        },
-        answerValue: validation.normalizedValue,
-        previousInsightValue: priorInsight?.value,
-        previousInsightCategory: priorInsight?.category,
-      })
-    }
-
-    // Get next question
-    const nextResult = await getNextQuestion(codes, { kind: 'conversation', conversationId: context.conversationId })
-
-    if (!nextResult) {
-      return {
-        success: true,
-        data: {
-          answerSaved: true,
-          isComplete: true,
-          needsSignature: true,
-        },
-        message: 'All DNT questions answered. Ready for signature.',
-      }
-    }
-
-    const lang = context.language ?? 'ro'
-    const nq = nextResult.question
-    const nqText = nq.text as { en: string; ro: string }
-
-    return {
-      success: true,
-      data: {
-        answerSaved: true,
-        isComplete: false,
-        nextQuestion: {
-          id: nq.id,
-          code: nq.code,
-          text: nqText[lang],
-          helpText: nq.helpText ? (nq.helpText as { en: string; ro: string })[lang] : null,
-          type: nq.type,
-          options: nq.options,
-          groupCode: nq.groupCode,
-        },
-        progress: nextResult.progress,
-      },
-      message: `Answer saved. ${nextResult.progress.total - nextResult.progress.answered} questions remaining.`,
-      uiAction: {
-        type: 'show_question',
-        payload: {
-          question: {
-            id: nq.id,
-            code: nq.code,
-            text: nq.text as { en: string; ro: string },
-            helpText: nq.helpText as { en: string; ro: string } | null,
-            type: nq.type,
-            options: nq.options,
-          },
-          progress: nextResult.progress,
-          groupType: 'dnt',
-        } as unknown as Record<string, unknown>,
-      },
-    }
-  } catch (error) {
-    return { success: false, error: String(error) }
-  }
-}
-
-// ─────────────────────────────────────────────
-// sign_dnt
+// sign_dnt (B2.6 — session-scoped; creates the customer Dnt aggregate)
 // ─────────────────────────────────────────────
 
 export const signDnt: ToolHandler = async (args, context) => {
@@ -465,7 +319,7 @@ export const signDnt: ToolHandler = async (args, context) => {
       return { success: false, error: 'Signature confirmation is required.' }
     }
     // B1.5 (contradiction #2): sign_dnt is the sole consent-capturing commit.
-    // Refusal never destroys progress — the session stays signable.
+    // Refusal never destroys progress — the session stays ACTIVE and signable.
     if (!consent?.gdpr || !consent?.aiDisclosure) {
       return {
         success: false,
@@ -473,34 +327,71 @@ export const signDnt: ToolHandler = async (args, context) => {
       }
     }
 
-    // Verify all DNT questions answered
-    const codes = await dntGroupCodes(context)
-    const progress = await calculateProgress(codes, { kind: 'conversation', conversationId: context.conversationId })
-    if (progress.percentage < 100) {
+    const session = await context.db.dntSession.findFirst({
+      where: { customerId: context.customerId, status: 'ACTIVE' },
+    })
+    if (!session) {
+      return { success: false, error: 'no_active_dnt_session: open_dnt_session first.' }
+    }
+
+    // Sign-time completeness over the SESSION scope with visibility
+    // recomputation — answers hidden by the current answer set are excluded
+    // (T3.D6 sign-time exclusion).
+    const codes = await resolveGroupCodes(session.productId, 'dnt')
+    const { next, progress } = await sessionNextQuestion(context.db, codes, session.id)
+    if (next !== null || progress.total === 0) {
       return {
         success: false,
-        error: `Cannot sign: ${progress.total - progress.answered} question(s) still need answers.`,
+        error: `dnt_session_incomplete: ${progress.total - progress.answered} question(s) still need answers.`,
       }
     }
 
+    const product = await context.db.product.findUniqueOrThrow({ where: { id: session.productId }, select: { insuranceType: true } })
     const now = new Date()
-    const validUntil = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000)
+    const validUntil = new Date(now.getTime() + DNT_VALIDITY_DAYS * 86400e3)
 
-    // Signature stamp + consent events land on the SAME client: under the
-    // gateway this is the commit transaction, so the pair is atomic.
-    await context.db.conversation.update({
-      where: { id: context.conversationId },
-      data: { dntSignedAt: now, dntValidUntil: validUntil },
+    // All writes ride context.db — under the gateway this is the commit
+    // transaction, so Dnt creation, supersession, session transition, and
+    // consent events are atomic.
+    const priorActive = await context.db.dnt.findFirst({
+      where: { customerId: context.customerId, status: 'ACTIVE' },
+      orderBy: { signedAt: 'desc' },
     })
-    await appendConsentEvents(
-      context.customerId,
-      [
-        { kind: 'gdpr_processing', action: 'granted', scope: 'insurance_sales' },
-        { kind: 'ai_disclosure', action: 'granted' },
-      ],
-      undefined,
-      context.db,
-    )
+    const dnt = await context.db.dnt.create({
+      data: {
+        customerId: context.customerId,
+        signedAt: now,
+        validUntil,
+        productTypesCovered: computeCoverage(product.insuranceType as 'LIFE'),
+        sourceSessionId: session.id,
+      },
+    })
+    if (priorActive) {
+      await context.db.dnt.update({ where: { id: priorActive.id }, data: { status: 'SUPERSEDED', supersededById: dnt.id } })
+    }
+    await context.db.dntSession.update({
+      where: { id: session.id },
+      data: { status: 'SIGNED', finishedAt: now },
+    })
+
+    // Consent capture (B1): gdpr + ai granted; the marketing preference is a
+    // CUSTOMER-level fact — lift it out of the session answers so it never
+    // stays trapped there (T3 divergence kill).
+    const consentEvents: { kind: 'gdpr_processing' | 'ai_disclosure' | 'marketing'; action: 'granted' | 'withdrawn'; scope?: string }[] = [
+      { kind: 'gdpr_processing', action: 'granted', scope: 'insurance_sales' },
+      { kind: 'ai_disclosure', action: 'granted' },
+    ]
+    const marketingQuestion = await context.db.question.findFirst({ where: { code: 'DNT_MARKETING_CONSENT' } })
+    if (marketingQuestion) {
+      const marketingAnswer = await context.db.dntAnswer.findUnique({
+        where: { sessionId_questionId: { sessionId: session.id, questionId: marketingQuestion.id } },
+      })
+      if (marketingAnswer) {
+        const yes = ['true', 'yes', 'da', 'yes_all'].includes(marketingAnswer.value.toLowerCase())
+        consentEvents.push({ kind: 'marketing', action: yes ? 'granted' : 'withdrawn' })
+      }
+    }
+    await appendConsentEvents(context.customerId, consentEvents, undefined, context.db)
 
     trackDntCompleted(context.customerId)
 
@@ -508,9 +399,12 @@ export const signDnt: ToolHandler = async (args, context) => {
       success: true,
       data: {
         signed: true,
+        dntId: dnt.id,
         signedAt: now.toISOString(),
         validUntil: validUntil.toISOString(),
-        consentsRecorded: ['gdpr_processing', 'ai_disclosure'],
+        productTypesCovered: dnt.productTypesCovered,
+        supersededDntId: priorActive?.id ?? null,
+        consentsRecorded: consentEvents.map((e) => e.kind),
       },
       message: 'DNT successfully signed. Customer can now proceed with insurance applications.',
     }

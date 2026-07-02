@@ -12,12 +12,9 @@ import type { DerivedConsents } from '@/lib/customer/consent'
 const HALT_EXEMPT = new Set([
   'withdraw_consent',
   'escalate_to_human',
-  // the re-grant path: reach + complete + sign a DNT questionnaire.
-  // B2 renames the session commits; the legacy save_dnt_answer stays
-  // exempt until B2.5/B2.6 finish the retirement.
+  // the re-grant path: reach + complete + sign a DNT questionnaire
   'open_dnt_session',
   'write_dnt_answer',
-  'save_dnt_answer',
   'sign_dnt',
 ])
 

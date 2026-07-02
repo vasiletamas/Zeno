@@ -431,8 +431,6 @@ model Conversation {
   candidateProductId  String?
   candidateConfidence Int?
   candidateSetAt      DateTime?
-  dntSignedAt         DateTime?
-  dntValidUntil       DateTime?
   status              ConversationStatus @default(ACTIVE)
   channel             String             @default("web")
   language            String             @default("ro")

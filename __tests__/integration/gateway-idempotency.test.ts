@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { prisma } from '@/lib/db'
 import { resetFunnelTables, ensureTestProduct } from '@/__tests__/helpers/test-db'
 import { executeCommit } from '@/lib/tools/gateway'
-import { resolveGroupCodes } from '@/lib/engines/question-groups'
+import { answerAllDntQuestions } from '@/__tests__/helpers/dnt-fixtures'
 import type { ToolContext } from '@/lib/tools/types'
 
 async function fixture(productOnConversation = false) {
@@ -26,21 +26,25 @@ describe.skipIf(!process.env.DATABASE_URL)('gateway idempotency (#8 replay-first
     expect(rows.map((r) => r.idempotencyDisposition)).toEqual(['fresh', 'replay'])
   })
 
-  it('one-shot conflict rule: sign_dnt resubmit with different material args after success → rejected(already_applied), no second fresh apply', async () => {
-    const { product, conv, customer, ctx } = await fixture(true)
-    const codes = await resolveGroupCodes(product.id, 'dnt')
-    const questions = await prisma.question.findMany({ where: { group: { code: { in: codes } } }, select: { id: true } })
-    await prisma.answer.createMany({ data: questions.map((q) => ({ questionId: q.id, conversationId: conv.id, value: 'da' })) })
+  it('sign_dnt after success: later resubmits are engine-rejected against the post-sign state — never a second fresh apply', async () => {
+    const { conv, customer, ctx } = await fixture(true)
+    const opened = await executeCommit({ tool: 'open_dnt_session', args: {}, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
+    expect(opened.outcome).toBe('applied')
+    await answerAllDntQuestions(customer.id, conv.id)
     const consent = { gdpr: true, aiDisclosure: true }
     const first = await executeCommit({ tool: 'sign_dnt', args: { consent }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
     expect(first.outcome).toBe('requires_confirmation')
     const applied = await executeCommit({ tool: 'sign_dnt', args: { consent, confirmToken: first.confirmToken }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
     expect(applied.outcome).toBe('applied')
-    // consent is a MATERIAL arg (B1.5, not confirm-class): different material
-    // args, same stable targetRef → strict conflict rule.
+    // LATER resubmits (any args) see the post-sign state: the session is
+    // SIGNED, targetRef re-resolves to dnt_session:none, so the engine
+    // rejects — a stale applied envelope is never replayed across a state
+    // change. (A true concurrent double-submit still replays via the
+    // in-lock argsHash re-check, pinned by the double-submit test above.)
+    const resubmitSame = await executeCommit({ tool: 'sign_dnt', args: { consent, confirmToken: first.confirmToken }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
+    expect(resubmitSame.outcome).toBe('rejected')
     const resubmit = await executeCommit({ tool: 'sign_dnt', args: { consent: { gdpr: true, aiDisclosure: false } }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
     expect(resubmit.outcome).toBe('rejected')
-    expect(resubmit.reason).toBe('already_applied')
     const freshApplied = await prisma.commitLedger.count({ where: { conversationId: conv.id, tool: 'sign_dnt', outcome: 'applied', idempotencyDisposition: 'fresh' } })
     expect(freshApplied).toBe(1)
   })

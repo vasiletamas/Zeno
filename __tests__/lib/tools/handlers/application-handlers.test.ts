@@ -17,6 +17,8 @@ vi.mock('@/lib/db', () => ({
     pricingLevel: { findFirst: (...a: unknown[]) => prismaPricingLevelFindFirstSpy(...a) },
     question: { findFirst: (...a: unknown[]) => prismaQuestionFindFirstSpy(...a) },
     answer: { upsert: (...a: unknown[]) => prismaAnswerUpsertSpy(...a) },
+    // B2.6: the DNT gate reads the customer-scoped Dnt aggregate.
+    dnt: { findFirst: () => Promise.resolve({ id: 'dnt-1', status: 'ACTIVE', signedAt: new Date(), validUntil: new Date(Date.now() + 3600e3), productTypesCovered: ['LIFE'] }) },
   },
 }))
 vi.mock('@/lib/engines/questionnaire-engine', () => ({ getNextQuestion: vi.fn(), validateAnswer: vi.fn(), checkForFlags: vi.fn(), calculateProgress: vi.fn() }))
@@ -32,7 +34,7 @@ const CONTEXT = {
   db: (await import('@/lib/db')).prisma, conversationId: 'conv-1', customerId: 'cust-1', language: 'ro' as const } as unknown as Parameters<typeof startApplication>[1]
 
 function mockHappyPathPreamble() {
-  prismaConversationFindUniqueSpy.mockResolvedValueOnce({ id: 'conv-1', dntSignedAt: new Date('2026-01-01'), dntValidUntil: null, productId: 'prod-1', candidateProductId: null })
+  prismaConversationFindUniqueSpy.mockResolvedValueOnce({ id: 'conv-1', productId: 'prod-1', candidateProductId: null })
   prismaApplicationFindUniqueSpy.mockResolvedValueOnce(null)
   vi.mocked(resolveGroupCodes).mockResolvedValueOnce(['application_basic'])
   vi.mocked(calculateProgress).mockResolvedValueOnce({ answered: 0, total: 10, percentage: 0 })

@@ -6,7 +6,7 @@
  * (b) stall with a free-floating "câți ani ai?" instead of advancing.
  *
  * After the fix Zeno should, once the customer converges and agrees, DRIVE the
- * sequence start_dnt_questionnaire → save_dnt_answer → ... This script drives
+ * sequence open_dnt_session → write_dnt_answer → ... This script drives
  * an opening to convergence, then answers each subsequent question with a
  * VALID value picked from what the agent actually asked (so the questionnaire
  * can progress — a naive "da" fails the enum consent questions).
@@ -15,7 +15,7 @@
  *   CEREMONY : any assistant turn asks the customer to "confirm the product".
  *   ADVANCED : ≥1 answer saved for a dnt-phase question (or an application /
  *              signed DNT exists) — proves the agent started AND advanced the
- *              questionnaire by calling save_dnt_answer, not just looping.
+ *              questionnaire by calling write_dnt_answer, not just looping.
  *
  * PASS for a trial = ADVANCED && !CEREMONY.
  * Live LLM. Usage: npx tsx scripts/verify-advance-flow.ts [trials=2]
@@ -39,7 +39,7 @@ const OPENING = [
   'cel mai mult ma intereseaza accesul la tratament in strainatate',
   'da',
   'standard nivelul 1 cred ca e cel mai potrivit',
-  'da', // readiness → should trigger start_dnt_questionnaire
+  'da', // readiness → should trigger open_dnt_session
 ]
 const MAX_FOLLOWUP = 10
 
@@ -71,9 +71,10 @@ async function lastAssistant(conversationId: string): Promise<string> {
   return m?.content ?? ''
 }
 
-async function dntAnswerCount(conversationId: string): Promise<number> {
-  return prisma.answer.count({
-    where: { conversationId, question: { group: { phase: 'dnt' } } },
+async function dntAnswerCount(customerId: string): Promise<number> {
+  // B2: DNT answers are session-scoped (DntAnswer), customer-owned
+  return prisma.dntAnswer.count({
+    where: { session: { customerId } },
   })
 }
 
@@ -96,7 +97,7 @@ async function trial(n: number): Promise<{ advanced: boolean; ceremony: boolean 
 
   // Drive the questionnaire with valid, question-aware answers.
   for (let i = 0; i < MAX_FOLLOWUP; i++) {
-    if ((await dntAnswerCount(conv.id)) > 0) break // advanced — goal met
+    if ((await dntAnswerCount(customer.id)) > 0) break // advanced — goal met
     const ans = pickAnswer(await lastAssistant(conv.id))
     await send(ans)
   }
@@ -106,15 +107,16 @@ async function trial(n: number): Promise<{ advanced: boolean; ceremony: boolean 
     orderBy: { createdAt: 'asc' },
     select: { content: true },
   })
-  const dntAnswers = await dntAnswerCount(conv.id)
+  const dntAnswers = await dntAnswerCount(customer.id)
   const application = await prisma.application.findUnique({ where: { conversationId: conv.id } })
   const state = await prisma.conversation.findUnique({
     where: { id: conv.id },
-    select: { candidateProductId: true, productId: true, dntSignedAt: true },
+    select: { candidateProductId: true, productId: true },
   })
+  const signedDnt = await prisma.dnt.findFirst({ where: { customerId: customer.id } })
 
   const ceremony = msgs.some((m) => CEREMONY.test(m.content))
-  const advanced = dntAnswers > 0 || application != null || state?.dntSignedAt != null
+  const advanced = dntAnswers > 0 || application != null || signedDnt != null
 
   console.log(`\n──── trial ${n} ────`)
   msgs.forEach((m, i) => {
@@ -122,7 +124,7 @@ async function trial(n: number): Promise<{ advanced: boolean; ceremony: boolean 
     console.log(`[turn ${i + 1}]${flag} ${m.content.replace(/\n+/g, ' ⏎ ').slice(0, 240)}`)
   })
   console.log(
-    `  → candidate=${state?.candidateProductId ? 'set' : 'none'} · committed=${state?.productId ? 'set' : 'none'} · dntAnswers=${dntAnswers} · application=${application ? 'yes' : 'no'} · dntSigned=${state?.dntSignedAt ? 'yes' : 'no'}`,
+    `  → candidate=${state?.candidateProductId ? 'set' : 'none'} · committed=${state?.productId ? 'set' : 'none'} · dntAnswers=${dntAnswers} · application=${application ? 'yes' : 'no'} · dntSigned=${signedDnt ? 'yes' : 'no'}`,
   )
   console.log(`  → ADVANCED=${advanced} · CEREMONY=${ceremony} · ${advanced && !ceremony ? 'PASS' : 'FAIL'}`)
   return { advanced, ceremony }

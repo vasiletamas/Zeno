@@ -54,10 +54,17 @@ export function adaptAction(action: UIAction): ToolCall | null {
     // ── Question answering (routes by groupType) ──
     case 'answer_question': {
       const groupType = action.payload.groupType as string
-      const toolName = groupType === 'dnt' ? 'save_dnt_answer' : 'save_application_answer'
+      if (groupType === 'dnt') {
+        // B2: session-scoped answering is keyed by question CODE
+        return {
+          id: `action_${Date.now()}`,
+          name: 'write_dnt_answer',
+          arguments: { questionCode: String(action.payload.questionCode ?? action.payload.code ?? ''), value: String(action.payload.answer) },
+        }
+      }
       return {
         id: `action_${Date.now()}`,
-        name: toolName,
+        name: 'save_application_answer',
         arguments: { answer: String(action.payload.answer) },
       }
     }
@@ -110,8 +117,11 @@ export function adaptAction(action: UIAction): ToolCall | null {
     case 'answer_dnt':
       return {
         id: `action_${Date.now()}`,
-        name: 'save_dnt_answer',
-        arguments: action.payload,
+        name: 'write_dnt_answer',
+        arguments: {
+          questionCode: String(action.payload.questionCode ?? action.payload.code ?? ''),
+          value: String(action.payload.value ?? action.payload.answer ?? ''),
+        },
       }
 
     case 'sign_dnt':

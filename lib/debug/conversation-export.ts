@@ -16,8 +16,6 @@ export interface ConversationExportMeta {
   status: string
   language: string
   mode: string
-  dntSignedAt: string | null
-  dntValidUntil: string | null
   startedAt: string
   createdAt: string
 }

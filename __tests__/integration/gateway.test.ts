@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { prisma } from '@/lib/db'
 import { resetFunnelTables, ensureTestProduct } from '@/__tests__/helpers/test-db'
 import { executeCommit } from '@/lib/tools/gateway'
-import { resolveGroupCodes } from '@/lib/engines/question-groups'
+import { answerAllDntQuestions } from '@/__tests__/helpers/dnt-fixtures'
 import type { ToolContext } from '@/lib/tools/types'
 
 async function fixture() {
@@ -13,13 +13,12 @@ async function fixture() {
   return { product, customer, conv, ctx }
 }
 
-// Makes sign_dnt legal with REAL rows (A2 erratum 7): answer every dnt-phase
-// question for the product via the question-group engine.
-async function answerAllDntQuestions(productId: string, conversationId: string): Promise<number> {
-  const codes = await resolveGroupCodes(productId, 'dnt')
-  const questions = await prisma.question.findMany({ where: { group: { code: { in: codes } } }, select: { id: true } })
-  await prisma.answer.createMany({ data: questions.map((q) => ({ questionId: q.id, conversationId, value: 'da' })) })
-  return questions.length
+// Makes sign_dnt legal with REAL rows (A2 erratum 7 / B2 session flow):
+// open a session through the gateway, then answer every visible question.
+async function openAndAnswerAll(customerId: string, conversationId: string, ctx: ToolContext): Promise<number> {
+  const opened = await executeCommit({ tool: 'open_dnt_session', args: {}, actor: 'agent', conversationId, customerId, toolContext: ctx })
+  if (opened.outcome !== 'applied') throw new Error(`fixture open failed: ${opened.reason}`)
+  return answerAllDntQuestions(customerId, conversationId)
 }
 
 describe.skipIf(!process.env.DATABASE_URL)('commit gateway — pinned #8 order', () => {
@@ -35,8 +34,8 @@ describe.skipIf(!process.env.DATABASE_URL)('commit gateway — pinned #8 order',
   })
 
   it('requires_confirmation (ledgered) on first sign_dnt; the confirmed resubmit carries the same material consent + token and applies', async () => {
-    const { product, conv, customer, ctx } = await fixture()
-    const total = await answerAllDntQuestions(product.id, conv.id)
+    const { conv, customer, ctx } = await fixture()
+    const total = await openAndAnswerAll(customer.id, conv.id, ctx)
     expect(total).toBeGreaterThan(0) // seeded dnt-phase questions must exist for this fixture
     const consent = { gdpr: true, aiDisclosure: true }
     const first = await executeCommit({ tool: 'sign_dnt', args: { consent }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
@@ -51,16 +50,18 @@ describe.skipIf(!process.env.DATABASE_URL)('commit gateway — pinned #8 order',
     const rows = await prisma.commitLedger.findMany({ where: { conversationId: conv.id, tool: 'sign_dnt' }, orderBy: { createdAt: 'asc' } })
     expect(rows.map((r) => r.outcome)).toEqual(['requires_confirmation', 'applied'])
     expect(rows.at(-1)?.phaseFrom).toBeTruthy()
-    const after = await prisma.conversation.findUnique({ where: { id: conv.id } })
-    expect(after?.dntSignedAt).not.toBeNull()
+    const dnt = await prisma.dnt.findFirst({ where: { customerId: customer.id, status: 'ACTIVE' } })
+    expect(dnt).not.toBeNull()
   })
 
-  it('sign_dnt with unanswered DNT questions is engine-blocked dnt_incomplete — still ledgered', async () => {
+  it('sign_dnt with an unanswered session is engine-blocked dnt_session_incomplete — still ledgered', async () => {
     const { conv, customer, ctx } = await fixture()
-    const r = await executeCommit({ tool: 'sign_dnt', args: {}, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
+    const opened = await executeCommit({ tool: 'open_dnt_session', args: {}, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
+    expect(opened.outcome).toBe('applied')
+    const r = await executeCommit({ tool: 'sign_dnt', args: { consent: { gdpr: true, aiDisclosure: true } }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
     expect(r.outcome).toBe('rejected')
-    expect(r.reason).toBe('dnt_incomplete')
+    expect(r.reason).toBe('dnt_session_incomplete')
     const row = await prisma.commitLedger.findFirst({ where: { conversationId: conv.id, tool: 'sign_dnt' } })
-    expect(row?.reasonCode).toBe('dnt_incomplete')
+    expect(row?.reasonCode).toBe('dnt_session_incomplete')
   })
 })

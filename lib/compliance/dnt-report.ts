@@ -102,7 +102,23 @@ export async function generateDntReport(policyId: string): Promise<Buffer> {
   const { customer, product, quote } = policy
   const application = quote?.application
   const conversation = application?.conversation
-  const answers = conversation?.answers ?? []
+  // B2.6: DNT answers live on the signed Dnt's source session (customer-
+  // scoped); conversation-scoped Answer rows carry the application answers.
+  const signedDnt = await prisma.dnt.findFirst({
+    where: { customerId: customer.id, status: 'ACTIVE' },
+    orderBy: { signedAt: 'desc' },
+    include: {
+      sourceSession: {
+        include: {
+          answers: {
+            include: { question: { include: { group: true } } },
+            orderBy: { answeredAt: 'asc' },
+          },
+        },
+      },
+    },
+  })
+  const answers = [...(signedDnt?.sourceSession.answers ?? []), ...(conversation?.answers ?? [])]
   // Decrypt CNP for masked display
   let maskedCnp = '-'
   if (customer.cnpEncrypted && customer.cnpIv && customer.cnpTag) {
@@ -402,18 +418,14 @@ export async function generateDntReport(policyId: string): Promise<Buffer> {
   doc.setFontSize(10)
   doc.setFont('helvetica', 'normal')
 
-  const dntSignedAt = conversation?.dntSignedAt
-    ? formatDate(new Date(conversation.dntSignedAt))
-    : '-'
+  const dntSignedLabel = signedDnt ? formatDate(signedDnt.signedAt) : '-'
 
-  const validityDate = conversation?.dntValidUntil
-    ? new Date(conversation.dntValidUntil)
-    : null
+  const validityDate = signedDnt?.validUntil ?? null
 
   const confirmLines = [
     `Clientul a confirmat semnatura electronica: Da`,
     `Consimtamant GDPR: Da`,
-    `Data semnarii: ${dntSignedAt}`,
+    `Data semnarii: ${dntSignedLabel}`,
     `Valabilitate: ${validityDate ? formatDate(validityDate) : '-'}`,
   ]
   for (const line of confirmLines) {

@@ -42,8 +42,6 @@ export async function GET(
         status: true,
         language: true,
         mode: true,
-        dntSignedAt: true,
-        dntValidUntil: true,
         startedAt: true,
         createdAt: true,
       },
@@ -74,8 +72,6 @@ export async function GET(
       status: String(conversation.status),
       language: conversation.language,
       mode: conversation.mode,
-      dntSignedAt: isoOrNull(conversation.dntSignedAt),
-      dntValidUntil: isoOrNull(conversation.dntValidUntil),
       startedAt: conversation.startedAt.toISOString(),
       createdAt: conversation.createdAt.toISOString(),
     }

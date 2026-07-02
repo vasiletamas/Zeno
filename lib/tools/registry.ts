@@ -16,7 +16,7 @@ import { shapeProductInfo, type RawProduct } from './shape-product-info'
 import { calculateAge } from '@/lib/chat/age'
 
 // --- Handler imports ---
-import { getDntState, getDntQuestions, getDntNextQuestion, openDntSession, writeDntAnswer, saveDntAnswer, signDnt } from './handlers/dnt-handlers'
+import { getDntState, getDntQuestions, getDntNextQuestion, openDntSession, writeDntAnswer, signDnt } from './handlers/dnt-handlers'
 import { startApplication, saveApplicationAnswer, resumeApplication, cancelApplication } from './handlers/application-handlers'
 import { changeSelection } from './handlers/change-selection-handlers'
 import { setAnswer } from './handlers/set-answer-handlers'
@@ -651,25 +651,6 @@ registerTool('write_dnt_answer', {
   sideEffect: 'save',
   kind: 'commit',
 }, writeDntAnswer)
-
-registerTool('save_dnt_answer', {
-  description: 'Save an answer to the current DNT question.',
-  parameters: {
-    type: 'object',
-    properties: {
-      questionId: { type: 'string', description: 'Question ID (optional, auto-resolved).' },
-      answer: { type: 'string', description: 'The customer\'s answer.' },
-    },
-    required: ['answer'],
-    additionalProperties: false,
-  },
-  executionMode: 'blocking',
-  customerVisible: false,
-  statusMessage: null,
-  allowedRoles: ALL_ROLES,
-  sideEffect: 'save',
-  kind: 'commit',
-}, saveDntAnswer)
 
 registerTool('sign_dnt', {
   description: 'Sign the completed DNT document. Signing is the consent-capturing step: pass the customer\'s explicit GDPR-processing consent and AI-disclosure acknowledgment.',

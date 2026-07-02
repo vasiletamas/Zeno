@@ -53,13 +53,9 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     }
     return { total, answered }
   }
-  const dntGroupCodes = prod ? ((await resolveGroupCodes(prod.id, 'dnt', db)) ?? []) : []
-  const dntQuestions = dntGroupCodes.length > 0 ? await db.question.findMany({ where: { group: { code: { in: dntGroupCodes } } }, select: { id: true, parentQuestionId: true, showWhenValue: true } }) : []
-  const dntAnswerRows = dntQuestions.length > 0 ? await db.answer.findMany({ where: { conversationId, questionId: { in: dntQuestions.map((q) => q.id) } }, select: { questionId: true, value: true } }) : []
-  const legacyCounts = countVisible(dntQuestions, new Map(dntAnswerRows.map((a) => [a.questionId, a.value])))
-  const dntValid = conversation.dntSignedAt != null && conversation.dntValidUntil != null && conversation.dntValidUntil.getTime() > Date.now()
-  // aggregate facts (B2)
+  // aggregate facts (B2.6 — the Dnt aggregate is the ONLY validity source)
   const latestDnt = await db.dnt.findFirst({ where: { customerId: conversation.customerId }, orderBy: { signedAt: 'desc' } })
+  const dntValid = latestDnt !== null && latestDnt.status === 'ACTIVE' && latestDnt.validUntil.getTime() > Date.now() && (!prod || latestDnt.productTypesCovered.includes(prod.insuranceType))
   const activeDntSession = await db.dntSession.findFirst({ where: { customerId: conversation.customerId, status: 'ACTIVE' } })
   let sessionCounts = { total: 0, answered: 0 }
   if (activeDntSession) {
@@ -79,7 +75,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     identity: { tier: customer.isAnonymous ? 'anonymous' : 'declared', fields: {} }, // B0 provenance store replaces fields
     consents,
     dnt: {
-      signed: conversation.dntSignedAt != null, valid: dntValid, validUntil: conversation.dntValidUntil?.toISOString() ?? null, coversProductTypes: dntValid && prod ? [prod.insuranceType] : [], answeredCount: legacyCounts.answered, totalCount: legacyCounts.total, sessionActive: conversation.dntSignedAt == null && legacyCounts.answered > 0 && legacyCounts.answered < legacyCounts.total,
+      signed: latestDnt !== null && latestDnt.status !== 'WITHDRAWN', valid: dntValid, validUntil: latestDnt?.validUntil.toISOString() ?? null, coversProductTypes: dntValid ? latestDnt!.productTypesCovered : [], answeredCount: sessionCounts.answered, totalCount: sessionCounts.total, sessionActive: activeDntSession !== null,
       latest: latestDnt ? { status: latestDnt.status, signedAt: latestDnt.signedAt.toISOString(), validUntil: latestDnt.validUntil.toISOString(), productTypesCovered: latestDnt.productTypesCovered } : null,
       activeSessionId: activeDntSession?.id ?? null,
       sessionType: activeDntSession?.type ?? null,

@@ -19,6 +19,8 @@ vi.mock('@/lib/db', () => ({
       findUnique: (...args: unknown[]) => appFindUnique(...args),
       create: (...args: unknown[]) => appCreate(...args),
     },
+    // B2.6: the DNT gate reads the customer-scoped Dnt aggregate.
+    dnt: { findFirst: () => Promise.resolve({ id: 'dnt-1', status: 'ACTIVE', signedAt: new Date(), validUntil: new Date(Date.now() + 3600e3), productTypesCovered: ['LIFE'] }) },
   },
 }))
 vi.mock('@/lib/engines/questionnaire-engine', () => ({
@@ -54,13 +56,11 @@ beforeEach(() => {
   resolveCodesSpy.mockResolvedValue(['application', 'bd_medical'])
 })
 
-const SIGNED_DNT = { dntSignedAt: new Date(), dntValidUntil: new Date(Date.now() + 1000 * 60 * 60) }
-
 describe('startApplication — candidate promotion', () => {
   it('promotes candidateProductId when context.product is absent', async () => {
     appFindUnique.mockResolvedValueOnce(null)
     // conversation query now covers DNT gate + product resolution in one shot
-    convFindUnique.mockResolvedValueOnce({ ...SIGNED_DNT, candidateProductId: 'p-protect', productId: null })
+    convFindUnique.mockResolvedValueOnce({ candidateProductId: 'p-protect', productId: null })
     calculateProgressSpy.mockResolvedValueOnce({ total: 10, answered: 0, percentage: 0 })
     appCreate.mockResolvedValueOnce({ id: 'app-1' })
     getNextQuestionSpy.mockResolvedValueOnce({
@@ -83,7 +83,7 @@ describe('startApplication — candidate promotion', () => {
   it('returns failure when neither context.product nor candidate is set', async () => {
     appFindUnique.mockResolvedValueOnce(null)
     // DNT is signed but no product — should hit the "no product" error
-    convFindUnique.mockResolvedValueOnce({ ...SIGNED_DNT, candidateProductId: null, productId: null })
+    convFindUnique.mockResolvedValueOnce({ candidateProductId: null, productId: null })
 
     const r = await startApplication({}, baseCtx)
 

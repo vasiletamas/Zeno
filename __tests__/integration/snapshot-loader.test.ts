@@ -20,10 +20,12 @@ describe.skipIf(!process.env.DATABASE_URL)('loadDomainSnapshot (integration)', (
     expect(snap.dnt.signed).toBe(false)
   })
 
-  it('derives dnt.valid=false when dntValidUntil is in the past (expired DNT bug fixed)', async () => {
+  it('derives dnt.valid=false when the customer Dnt is expired (aggregate source, B2)', async () => {
     const product = await ensureTestProduct()
     const customer = await prisma.customer.create({ data: { isAnonymous: false, language: 'ro' } })
-    const conv = await prisma.conversation.create({ data: { customerId: customer.id, productId: product.id, dntSignedAt: new Date('2024-01-01'), dntValidUntil: new Date('2024-12-31') } })
+    const conv = await prisma.conversation.create({ data: { customerId: customer.id, productId: product.id } })
+    const session = await prisma.dntSession.create({ data: { customerId: customer.id, productId: product.id, type: 'NEW', status: 'SIGNED' } })
+    await prisma.dnt.create({ data: { customerId: customer.id, signedAt: new Date('2024-01-01'), validUntil: new Date('2024-12-31'), productTypesCovered: ['LIFE'], sourceSessionId: session.id } })
     const snap = await loadDomainSnapshot(conv.id)
     expect(snap.dnt.signed).toBe(true)
     expect(snap.dnt.valid).toBe(false)

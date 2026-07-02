@@ -1,11 +1,9 @@
 import { prisma } from '@/lib/db'
-import { resolveGroupCodes } from '@/lib/engines/question-groups'
-import { getNextQuestion } from '@/lib/engines/questionnaire-engine'
-import { saveDntAnswer } from '@/lib/tools/handlers/dnt-handlers'
+import { openDntSession, writeDntAnswer, getDntNextQuestion } from '@/lib/tools/handlers/dnt-handlers'
 import { ensureTestProduct } from './test-db'
 import type { ToolContext } from '@/lib/tools/types'
 
-function answerFor(q: { type: string; options: unknown; validationRules?: unknown; code?: string | null }): string {
+function answerFor(q: { type: string; options: unknown; code?: string | null }): string {
   if (q.type === 'BOOLEAN') return 'da'
   if (q.type === 'NUMBER') return '0'
   if (q.code === 'DNT_CNP') return '1980418089861' // pattern-pinned 13-digit CNP
@@ -16,29 +14,45 @@ function answerFor(q: { type: string; options: unknown; validationRules?: unknow
     const o = first as { value?: unknown; label?: unknown }
     return String(o.value ?? o.label ?? 'da')
   }
-  const rules = (q.validationRules ?? {}) as { minLength?: number }
-  return rules.minLength ? 'x'.repeat(rules.minLength) : 'da'
+  return 'da'
+}
+
+function makeCtx(customerId: string, conversationId: string): ToolContext {
+  return { customerId, conversationId, language: 'ro', db: prisma } as unknown as ToolContext
 }
 
 /**
- * Creates a customer + conversation on the seeded protect product and answers
- * every visible DNT question through the real handler (first option / 'da' /
- * '0'), leaving the questionnaire signable.
+ * Answers every visible question of the customer's ACTIVE DNT session through
+ * the real write_dnt_answer handler (B2: session-scoped, keyed by code).
+ */
+export async function answerAllDntQuestions(customerId: string, conversationId: string): Promise<number> {
+  const ctx = makeCtx(customerId, conversationId)
+  let count = 0
+  for (let i = 0; i < 100; i++) {
+    const n = await getDntNextQuestion({}, ctx)
+    if (!n.success) throw new Error(`dnt fixture: get_dnt_next_question failed: ${n.error}`)
+    const d = n.data as { complete: boolean; question: { code: string | null; type: string; options: unknown } | null }
+    if (d.complete || !d.question) break
+    if (!d.question.code) throw new Error('dnt fixture: question without a code cannot be answered by write_dnt_answer')
+    const w = await writeDntAnswer({ questionCode: d.question.code, value: answerFor(d.question) }, ctx)
+    if (!w.success) throw new Error(`dnt fixture could not answer ${d.question.code}: ${w.error}`)
+    count++
+  }
+  return count
+}
+
+/**
+ * Creates a customer + conversation on the seeded protect product, opens a
+ * DNT session, and answers every visible question — leaving it signable.
  */
 export async function seedDntFullyAnswered() {
   const product = await ensureTestProduct()
   const customer = await prisma.customer.create({ data: { isAnonymous: true, language: 'ro' } })
   const conversation = await prisma.conversation.create({ data: { customerId: customer.id, productId: product.id } })
-  const ctx = { customerId: customer.id, conversationId: conversation.id, language: 'ro', db: prisma } as unknown as ToolContext
-  const codes = (await resolveGroupCodes(product.id, 'dnt', prisma)) ?? []
-  let answerCount = 0
-  for (let i = 0; i < 100; i++) {
-    const next = await getNextQuestion(codes, { kind: 'conversation', conversationId: conversation.id })
-    if (!next) break
-    const r = await saveDntAnswer({ questionId: next.question.id, answer: answerFor(next.question) }, ctx)
-    if (!r.success) throw new Error(`dnt fixture could not answer ${next.question.code ?? next.question.id}: ${r.error}`)
-    answerCount++
-  }
+  const ctx = makeCtx(customer.id, conversation.id)
+  const opened = await openDntSession({}, ctx)
+  if (!opened.success) throw new Error(`dnt fixture: open_dnt_session failed: ${opened.error}`)
+  const answerCount = await answerAllDntQuestions(customer.id, conversation.id)
   if (answerCount === 0) throw new Error('dnt fixture answered zero questions — is the DNT group seeded?')
-  return { customerId: customer.id, conversationId: conversation.id, ctx, answerCount }
+  return { customerId: customer.id, conversationId: conversation.id, ctx, answerCount, sessionId: (opened.data as { sessionId: string }).sessionId }
 }
