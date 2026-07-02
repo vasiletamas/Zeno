@@ -32,6 +32,7 @@ import type { DeriveAndExposeResult } from '@/lib/engines/domain-types'
 import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
 import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, type WorkflowSessionData, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
 import { buildTurnTools, DEGRADED_FLOOR } from './turn-tools'
+import { shouldRefreshExposure, formatRoundRefreshMessage } from './round-refresh'
 import { loadTurnContext, type TurnContext } from './turn-context'
 import { inferCandidate, hasAnyCategoryKeyword } from './candidate-inference'
 import { resolveAgent } from './agent-resolver'
@@ -1184,8 +1185,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       }
 
       // --- Phase 2: Execute writing tools sequentially ---
-      let transitionOccurred = false
-
       for (const tc of writing) {
         const def = getToolDefinition(tc.name)
         const isBlocking = def?.executionMode === 'blocking'
@@ -1258,10 +1257,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
             data: { tool: tc.name, success: pipelineResult.toolResult.success },
           }
         }
-
-        if (pipelineResult.transition) {
-          transitionOccurred = true
-        }
       }
 
       // --- Emit results in original tool call order ---
@@ -1302,10 +1297,24 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         }
       }
 
-      // Refresh tool context after tool executions (state may have changed)
-      if (transitionOccurred) {
-        toolContext = await buildToolContext(state.customerId, state.conversationId, state.language)
-        toolContext.activeSkillPacks = state.activeSkillPacks
+      // Re-derive exposure after every applied commit round (A3.4, T1.D5):
+      // the tool list, the executor wall, and a compact state message all
+      // refresh so a same-turn commit chain stays legal end-to-end.
+      const roundEnvelopes = roundToolCalls
+        .map((tc) => resultMap.get(tc.id)?.pipelineResult.toolResult.envelope)
+        .filter((e): e is NonNullable<typeof e> => e !== undefined)
+      if (shouldRefreshExposure(roundEnvelopes)) {
+        try {
+          const refreshed = deriveAndExpose(await loadDomainSnapshot(state.conversationId))
+          tools = buildTurnTools(refreshed.actions)
+          toolContext = await buildToolContext(state.customerId, state.conversationId, state.language)
+          toolContext.activeSkillPacks = state.activeSkillPacks
+          toolContext.actor = 'agent'
+          toolContext.exposedTools = refreshed.actions.available
+          messages.push({ role: 'system', content: formatRoundRefreshMessage(refreshed.state, refreshed.actions) })
+        } catch (err: unknown) {
+          logWarn({ layer: 'orchestrator', category: 'derive_state', message: 'post-round re-derivation failed — keeping previous exposure', context: { conversationId: state.conversationId }, error: err })
+        }
       }
 
       round++
