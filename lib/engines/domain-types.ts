@@ -49,6 +49,12 @@ export interface DerivedStateV3 {
   eligibility: DomainSnapshot['eligibility']
   suitability: DomainSnapshot['suitability']
   openItems: DomainSnapshot['openItems']
+  /**
+   * Alert-worthy facts the agent should not miss (A3.ADD-1/T13.D8): identity
+   * fields in conflict state, an expiring DNT, and — once B4 lands the
+   * status — a REFERRED application. Snake_case codes, never prose.
+   */
+  flagsForReview: string[]
   nextBestAction: string // MUST only name actions present in ExposedActions.available
 }
 

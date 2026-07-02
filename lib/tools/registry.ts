@@ -17,7 +17,7 @@ import { calculateAge } from '@/lib/chat/age'
 
 // --- Handler imports ---
 import { checkDntStatus, startDntQuestionnaire, saveDntAnswer, signDnt } from './handlers/dnt-handlers'
-import { startApplication, saveApplicationAnswer, getApplicationStatus, resumeApplication, cancelApplication } from './handlers/application-handlers'
+import { startApplication, saveApplicationAnswer, resumeApplication, cancelApplication } from './handlers/application-handlers'
 import { changeSelection } from './handlers/change-selection-handlers'
 import { setAnswer } from './handlers/set-answer-handlers'
 import { generateQuote, getQuoteDetails, acceptQuote, modifyQuote } from './handlers/quote-handlers'
@@ -815,21 +815,6 @@ registerTool('resume_application', {
   allowedRoles: ALL_ROLES,
   kind: 'commit',
 }, resumeApplication)
-
-registerTool('get_application_status', {
-  description: 'Get the current status and progress of the application.',
-  parameters: {
-    type: 'object',
-    properties: {},
-    additionalProperties: false,
-  },
-  executionMode: 'blocking',
-  customerVisible: false,
-  statusMessage: null,
-  alwaysAllowed: false,
-  allowedRoles: ALL_ROLES,
-  kind: 'read',
-}, getApplicationStatus)
 
 registerTool('cancel_application', {
   description: 'Cancel the current application.',

@@ -8,7 +8,7 @@ import { checkIdentityRequirement, IDENTITY_REQUIREMENTS, type IdentityRequireme
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.1.0' // 1.1.0: identity-requirements gate in exposure (A3.6)
+export const engineVersion = '1.2.0' // 1.1.0: identity gate (A3.6); 1.2.0: get_application_status retired + flagsForReview (A3.ADD-1)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -40,7 +40,6 @@ export const ACTION_RULES: ActionRule[] = [
   { action: 'get_objection_strategy', kind: 'read', exposedWhen: always },
   { action: 'get_customer_profile', kind: 'read', exposedWhen: always },
   { action: 'check_dnt_status', kind: 'read', exposedWhen: (s) => s.product !== null || s.dnt.signed },
-  { action: 'get_application_status', kind: 'read', exposedWhen: (s) => s.application !== null },
   { action: 'get_quote_details', kind: 'read', exposedWhen: (s) => s.quote !== null || s.acceptedQuote !== null },
   { action: 'escalate_to_human', kind: 'commit', exposedWhen: always },
   { action: 'set_candidate_product', kind: 'commit', exposedWhen: always },
@@ -98,12 +97,16 @@ export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequiremen
   }
   const availableSet = new Set(available)
   const next = NEXT_BEST_PRIORITY.find((a) => availableSet.has(a))
+  const flagsForReview: string[] = []
+  if (s.dnt.valid && s.dnt.validUntil !== null && new Date(s.dnt.validUntil).getTime() - Date.now() < 30 * 24 * 60 * 60 * 1000) flagsForReview.push('dnt_expiring')
+  for (const [field, meta] of Object.entries(s.identity.fields)) if (meta?.provenance === 'conflict') flagsForReview.push(`identity_conflict:${field}`)
   const state: DerivedStateV3 = {
     phase: d.phase, subphase: d.subphase, product: s.product,
     selection: { tier: s.application?.tier ?? null, level: s.application?.level ?? null, addon: s.application?.addon ?? null },
     identity: s.identity, consents: s.consents, dnt: s.dnt, application: s.application,
     quote: s.quote, schedule: s.schedule, policy: s.policy,
     eligibility: s.eligibility, suitability: s.suitability, openItems: s.openItems,
+    flagsForReview,
     nextBestAction: next ? `call ${next}` : 'continue the conversation (no funnel commit is currently available)',
   }
   return { state, actions: { available, blocked } }

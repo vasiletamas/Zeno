@@ -95,8 +95,6 @@ const resumeApplicationSchema = z.object({
   applicationId: z.string().optional(),
 }).strict()
 
-const getApplicationStatusSchema = z.object({}).strict()
-
 const cancelApplicationSchema = z.object({
   reason: z.string().optional(),
 }).strict()
@@ -182,7 +180,6 @@ const toolSchemas: Record<string, ZodType> = {
   start_application: startApplicationSchema,
   save_application_answer: saveApplicationAnswerSchema,
   resume_application: resumeApplicationSchema,
-  get_application_status: getApplicationStatusSchema,
   cancel_application: cancelApplicationSchema,
 
   // Quote

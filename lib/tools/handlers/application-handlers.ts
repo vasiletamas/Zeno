@@ -384,45 +384,9 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
   }
 }
 
-// ─────────────────────────────────────────────
-// get_application_status
-// ─────────────────────────────────────────────
-
-export const getApplicationStatus: ToolHandler = async (_args, context) => {
-  try {
-    const application = await context.db.application.findUnique({
-      where: { conversationId: context.conversationId },
-    })
-
-    if (!application) {
-      return {
-        success: true,
-        data: { hasApplication: false },
-        message: 'No application found for this conversation.',
-      }
-    }
-
-    const progress = await calculateProgress(await appGroupCodes(context), context.conversationId)
-    const flags = (application.flagsForReview as unknown as Array<Record<string, unknown>>) ?? []
-
-    return {
-      success: true,
-      data: {
-        hasApplication: true,
-        applicationId: application.id,
-        status: application.status,
-        progress,
-        tierId: application.tierId,
-        levelId: application.levelId,
-        includesAddon: application.includesAddon,
-        flagsForReview: flags,
-      },
-      message: `Application status: ${application.status}. Progress: ${progress.percentage}%.`,
-    }
-  } catch (error) {
-    return { success: false, error: String(error) }
-  }
-}
+// get_application_status was retired by A3.ADD-1 (T13.D8): the compact
+// DerivedStateV3 summary is injected every turn and get_current_state is the
+// single on-demand detail read.
 
 // ─────────────────────────────────────────────
 // resume_application
