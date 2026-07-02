@@ -51,4 +51,10 @@ describe('deriveAndExpose — exposure over the FULL snapshot (contradiction #12
     expect(typeof engineVersion).toBe('string')
     expect(engineVersion).toMatch(/^\d+\.\d+\.\d+$/)
   })
+  it('catalog discovery works from a completely empty snapshot (heir of discovery-empty-catalog)', () => {
+    const r = deriveAndExpose(makeSnapshot())
+    expect(r.actions.available).toContain('list_products')
+    expect(r.actions.available).toContain('get_product_info')
+    expect(r.actions.available).toContain('escalate_to_human')
+  })
 })

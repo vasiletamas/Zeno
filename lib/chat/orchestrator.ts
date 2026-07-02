@@ -30,12 +30,12 @@ import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { deriveAndExpose, engineVersion } from '@/lib/engines/derive-and-expose'
 import type { DeriveAndExposeResult } from '@/lib/engines/domain-types'
 import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
-import { loadAllSections, loadStateGrounding, loadCustomerInsights, type WorkflowSessionData, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
-import { withDefaultDiscoveryTools } from './default-tools'
+import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, type WorkflowSessionData, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
+import { buildTurnTools, DEGRADED_FLOOR } from './turn-tools'
 import { loadTurnContext, type TurnContext } from './turn-context'
 import { inferCandidate, hasAnyCategoryKeyword } from './candidate-inference'
 import { resolveAgent } from './agent-resolver'
-import { getActiveSkillPacks, mergeSkillPackSections, computeAllowedTools } from '@/lib/skills/skill-pack-loader'
+import { getActiveSkillPacks, mergeSkillPackSections } from '@/lib/skills/skill-pack-loader'
 import { executeComplianceCheck, COMPLIANCE_RELEVANT_BY_PHASE, type ComplianceCheckResult } from './compliance-checker'
 import { trackChatStarted } from '@/lib/analytics/events'
 import { estimateTokens, calculateMessageBudget } from '@/lib/chat/token-budget'
@@ -409,14 +409,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // STEPS 3+4 — Reasoning gate + Context assembly (parallel)
   // =============================================
 
-  // Determine allowed tools for this step (hoisted for use in gate + skill pack scoping).
-  // DEFAULT_DISCOVERY_TOOLS are merged in as a baseline so the agent always has
-  // catalog tools during the pre-workflow discovery phase. See
-  // docs/superpowers/specs/2026-05-20-zeno-discovery-toolset-design.md.
-  const stepAllowedTools = withDefaultDiscoveryTools(
-    turnCtx.conversation.workflowSession?.currentStep.allowedTools ?? [],
-  )
-
   // --- gatePromise: Step 3 — Deterministic state derivation (replaces the
   // reasoning-gate LLM pre-pass). loadDomainSnapshot() is a cheap DB read (no
   // LLM) and deriveAndExpose() is pure, so this always runs; the (phase,
@@ -503,7 +495,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
       sections = await loadAllSections({
         agentConfig: { systemPrompt: agentConfig.systemPrompt, constraints: agentConfig.constraints },
-        allowedTools: stepAllowedTools,
+        // capabilityManifest is patched after the gate resolves (A3.1 erratum
+        // 3): exposure does not exist yet — context assembly deliberately
+        // runs in parallel with the gate.
+        allowedTools: [],
         productId: state.productId,
         conversationId: state.conversationId,
         customerId: state.customerId,
@@ -590,6 +585,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
   // Patch situationalBriefing from the derived state (phase/subphase + next best action)
   sections.situationalBriefing = exposure ? formatDerivedBriefing(exposure.state, exposure.actions) : null
+
+  // Patch capabilityManifest from the exposure set (A3.1 erratum 3 — same
+  // patch-after-gate pattern as the briefing, keeping gate ∥ context intact).
+  sections.capabilityManifest = loadCapabilityManifest(exposure?.actions.available ?? [...DEGRADED_FLOOR])
 
   // --- Skill pack loading and merging ---
   // Gate-driven skill-pack recommendations are gone; workflow/pack-driven packs
@@ -792,10 +791,9 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // Server-resolved commit actor (A2.9): every LLM tool-loop call is the
   // agent's; the synthetic branch below overrides per-call with 'gui'.
   toolContext.actor = 'agent'
-  const effectiveTools = effectivePacks.length > 0
-    ? computeAllowedTools(stepAllowedTools, effectivePacks)
-    : stepAllowedTools
-  const tools: LLMToolDefinition[] = getToolsForLLM(effectiveTools.length > 0 ? effectiveTools : undefined)
+  // The per-turn tool list IS the exposure set (A3.1). On derive failure the
+  // model gets the explicit degraded floor — reads + escape hatch.
+  let tools: LLMToolDefinition[] = exposure ? buildTurnTools(exposure.actions) : getToolsForLLM([...DEGRADED_FLOOR])
   let finalContent = ''
   let lastStatusMessage: string | undefined
 
