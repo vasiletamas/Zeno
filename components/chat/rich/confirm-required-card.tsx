@@ -16,8 +16,8 @@ export const CONFIRMABLE_TOOLS = ['sign_dnt', 'accept_quote'] as const
 const COPY: Record<(typeof CONFIRMABLE_TOOLS)[number], { title: { ro: string; en: string }; body: { ro: string; en: string }; cta: { ro: string; en: string } }> = {
   sign_dnt: {
     title: { ro: 'Confirmă semnarea', en: 'Confirm signing' },
-    body: { ro: 'Semnezi analiza de nevoi (DNT)? Semnătura confirmă că răspunsurile îți aparțin.', en: 'Sign the demands-and-needs analysis (DNT)? Your signature confirms the answers are yours.' },
-    cta: { ro: 'Semnează', en: 'Sign' },
+    body: { ro: 'Semnezi analiza de nevoi (DNT)? Semnătura confirmă că răspunsurile îți aparțin și include acordul tău pentru prelucrarea datelor (GDPR) și confirmarea că ai înțeles că ești asistat de un sistem AI.', en: 'Sign the demands-and-needs analysis (DNT)? Your signature confirms the answers are yours and includes your consent to data processing (GDPR) and your acknowledgment of the AI-assistance disclosure.' },
+    cta: { ro: 'Semnează și îmi dau acordul', en: 'Sign and consent' },
   },
   accept_quote: {
     title: { ro: 'Confirmă acceptarea ofertei', en: 'Confirm quote acceptance' },
@@ -28,6 +28,9 @@ const COPY: Record<(typeof CONFIRMABLE_TOOLS)[number], { title: { ro: string; en
 
 export function buildConfirmAction(tool: string, confirmToken: string): UIAction | null {
   if (!(CONFIRMABLE_TOOLS as readonly string[]).includes(tool)) return null
+  // sign_dnt: clicking the consent-labelled CTA IS the explicit grant (B1.5) —
+  // the consent object is material, so it must match the original call's args.
+  if (tool === 'sign_dnt') return { type: tool, payload: { confirmToken, consent: { gdpr: true, aiDisclosure: true } } }
   return { type: tool, payload: { confirmToken } }
 }
 

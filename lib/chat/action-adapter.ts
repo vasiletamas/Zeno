@@ -115,10 +115,15 @@ export function adaptAction(action: UIAction): ToolCall | null {
       }
 
     case 'sign_dnt':
+      // The consent object is MATERIAL (B1.5): it must ride along from the
+      // first click so the confirm token binds to the same args hash.
       return {
         id: `action_${Date.now()}`,
         name: 'sign_dnt',
-        arguments: action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {},
+        arguments: {
+          ...(action.payload.consent ? { consent: action.payload.consent } : {}),
+          ...(action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {}),
+        },
       }
 
     case 'start_application':

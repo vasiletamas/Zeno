@@ -11,9 +11,9 @@ describe('confirm_required GUI consumer (A3 erratum 5)', () => {
     expect(tc?.name).toBe('accept_quote')
     expect(tc?.arguments).toEqual({ confirmToken: 'tok-1' })
   })
-  it('sign_dnt round-trips identically', () => {
+  it('sign_dnt round-trips with the explicit consent grant (B1.5 — the CTA is the consent capture)', () => {
     const action = buildConfirmAction('sign_dnt', 'tok-2')
-    expect(adaptAction(action!)?.arguments).toEqual({ confirmToken: 'tok-2' })
+    expect(adaptAction(action!)?.arguments).toEqual({ consent: { gdpr: true, aiDisclosure: true }, confirmToken: 'tok-2' })
   })
   it('non-confirmable tools produce no action (defense against forged events)', () => {
     expect(buildConfirmAction('escalate_to_human', 'tok-3')).toBeNull()

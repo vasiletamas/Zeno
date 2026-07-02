@@ -31,13 +31,14 @@ describe.skipIf(!process.env.DATABASE_URL)('gateway idempotency (#8 replay-first
     const codes = await resolveGroupCodes(product.id, 'dnt')
     const questions = await prisma.question.findMany({ where: { group: { code: { in: codes } } }, select: { id: true } })
     await prisma.answer.createMany({ data: questions.map((q) => ({ questionId: q.id, conversationId: conv.id, value: 'da' })) })
-    const first = await executeCommit({ tool: 'sign_dnt', args: {}, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
+    const consent = { gdpr: true, aiDisclosure: true }
+    const first = await executeCommit({ tool: 'sign_dnt', args: { consent }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
     expect(first.outcome).toBe('requires_confirmation')
-    const applied = await executeCommit({ tool: 'sign_dnt', args: { confirmToken: first.confirmToken }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
+    const applied = await executeCommit({ tool: 'sign_dnt', args: { consent, confirmToken: first.confirmToken }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
     expect(applied.outcome).toBe('applied')
-    // gdprConsent is a MATERIAL arg (not confirm-class): different material
+    // consent is a MATERIAL arg (B1.5, not confirm-class): different material
     // args, same stable targetRef → strict conflict rule.
-    const resubmit = await executeCommit({ tool: 'sign_dnt', args: { gdprConsent: true }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
+    const resubmit = await executeCommit({ tool: 'sign_dnt', args: { consent: { gdpr: true, aiDisclosure: false } }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
     expect(resubmit.outcome).toBe('rejected')
     expect(resubmit.reason).toBe('already_applied')
     const freshApplied = await prisma.commitLedger.count({ where: { conversationId: conv.id, tool: 'sign_dnt', outcome: 'applied', idempotencyDisposition: 'fresh' } })

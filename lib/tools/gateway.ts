@@ -64,12 +64,12 @@ export function resolveTargetRef(tool: string, args: Record<string, unknown>, st
 /**
  * Interim handler contract for confirmed commits: the legacy handlers gate on
  * literal-true flags that callers no longer send (the gateway owns the
- * two-step, erratum 1). sign_dnt also receives gdprConsent — consent capture
- * stays on the legacy surface until B1 folds it into sign_dnt and flips
- * storage to the ConsentEvent ledger (contradiction #2, ruling 7).
+ * two-step, erratum 1). Consent is NEVER injected — since B1.5 the customer's
+ * consent decision arrives as the material `consent` argument on sign_dnt and
+ * is recorded in the ConsentEvent ledger (contradiction #2, ruling 7).
  */
 const CONFIRM_ARG_INJECTION: Record<string, Record<string, unknown>> = {
-  sign_dnt: { confirmSignature: true, gdprConsent: true },
+  sign_dnt: { confirmSignature: true },
   accept_quote: { confirmAcceptance: true },
 }
 

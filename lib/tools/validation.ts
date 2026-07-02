@@ -62,17 +62,18 @@ const saveDntAnswerSchema = z.object({
   answer: z.string().min(1, 'Answer is required'),
 }).strict()
 
-// The gateway owns two-step confirmation (A2 erratum 1): the literal-true
-// confirm flags are no longer required — a confirmed resubmit carries only
-// {confirmToken}. Legacy confirm-class keys stay tolerated (optional) so the
-// pre-A3 LLM surface, which still advertises them, keeps validating; the
-// gateway strips them before validation and injects the handler contract
-// server-side. sign_dnt's gdprConsent requirement moved with them — consent
-// capture stays on record_gdpr_consent until B1 folds it into sign_dnt per
-// contradiction #2.
+// The gateway owns two-step confirmation (A2 erratum 1): confirm-class keys
+// are stripped before validation and the ceremony flag is injected server-
+// side. Since B1.5 the customer's consent decision is a MATERIAL argument —
+// sign_dnt is the sole consent-capturing commit (contradiction #2), so the
+// consent object participates in the args hash and the confirm token binds
+// to it (a changed consent is a fresh commit, not a replay).
 const signDntSchema = z.object({
+  consent: z.object({
+    gdpr: z.boolean(),
+    aiDisclosure: z.boolean(),
+  }).optional(),
   confirmSignature: z.boolean().optional(),
-  gdprConsent: z.boolean().optional(),
   confirmToken: z.string().optional(),
 }).strict()
 

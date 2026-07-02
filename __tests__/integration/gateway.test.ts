@@ -34,16 +34,18 @@ describe.skipIf(!process.env.DATABASE_URL)('commit gateway — pinned #8 order',
     expect(row?.actor).toBe('agent')
   })
 
-  it('requires_confirmation (ledgered) on first sign_dnt; a resubmit carrying ONLY {confirmToken} validates and applies', async () => {
+  it('requires_confirmation (ledgered) on first sign_dnt; the confirmed resubmit carries the same material consent + token and applies', async () => {
     const { product, conv, customer, ctx } = await fixture()
     const total = await answerAllDntQuestions(product.id, conv.id)
     expect(total).toBeGreaterThan(0) // seeded dnt-phase questions must exist for this fixture
-    const first = await executeCommit({ tool: 'sign_dnt', args: {}, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
+    const consent = { gdpr: true, aiDisclosure: true }
+    const first = await executeCommit({ tool: 'sign_dnt', args: { consent }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
     expect(first.outcome).toBe('requires_confirmation')
     expect(first.confirmToken).toBeTruthy()
-    // erratum 1: the confirmed call carries only the token — the gateway strips
-    // confirm-class args before validation and injects the handler contract.
-    const second = await executeCommit({ tool: 'sign_dnt', args: { confirmToken: first.confirmToken }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
+    // erratum 1 + B1.5: confirm-class args are stripped and the ceremony flag
+    // injected server-side; the consent object is MATERIAL and rides along
+    // unchanged, so the token (bound to the args hash) verifies.
+    const second = await executeCommit({ tool: 'sign_dnt', args: { consent, confirmToken: first.confirmToken }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
     expect(second.outcome).toBe('applied')
     // erratum 6: the token issuance is a ledgered commit attempt.
     const rows = await prisma.commitLedger.findMany({ where: { conversationId: conv.id, tool: 'sign_dnt' }, orderBy: { createdAt: 'asc' } })

@@ -644,14 +644,21 @@ registerTool('save_dnt_answer', {
 }, saveDntAnswer)
 
 registerTool('sign_dnt', {
-  description: 'Sign the completed DNT document with customer consent.',
+  description: 'Sign the completed DNT document. Signing is the consent-capturing step: pass the customer\'s explicit GDPR-processing consent and AI-disclosure acknowledgment.',
   parameters: {
     type: 'object',
     properties: {
-      confirmSignature: { type: 'boolean', description: 'Customer confirms signature.' },
-      gdprConsent: { type: 'boolean', description: 'Customer consents to GDPR data processing.' },
+      consent: {
+        type: 'object',
+        properties: {
+          gdpr: { type: 'boolean', description: 'Customer explicitly consents to GDPR data processing.' },
+          aiDisclosure: { type: 'boolean', description: 'Customer acknowledges the AI-assistance disclosure.' },
+        },
+        required: ['gdpr', 'aiDisclosure'],
+        additionalProperties: false,
+      },
     },
-    required: ['confirmSignature', 'gdprConsent'],
+    required: ['consent'],
     additionalProperties: false,
   },
   executionMode: 'blocking',

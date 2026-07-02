@@ -10,6 +10,7 @@ import {
   calculateProgress,
 } from '@/lib/engines/questionnaire-engine'
 import { resolveGroupCodes, resolveActiveProductId } from '@/lib/engines/question-groups'
+import { appendConsentEvents } from '@/lib/customer/consent-service'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackDntCompleted } from '@/lib/analytics/events'
 import { bumpInsightOnAnswer } from './insight-bump'
@@ -271,14 +272,19 @@ export const saveDntAnswer: ToolHandler = async (args, context) => {
 
 export const signDnt: ToolHandler = async (args, context) => {
   const confirmSignature = args.confirmSignature as boolean
-  const gdprConsent = args.gdprConsent as boolean
+  const consent = args.consent as { gdpr?: boolean; aiDisclosure?: boolean } | undefined
 
   try {
     if (!confirmSignature) {
       return { success: false, error: 'Signature confirmation is required.' }
     }
-    if (!gdprConsent) {
-      return { success: false, error: 'GDPR consent is required to sign the document.' }
+    // B1.5 (contradiction #2): sign_dnt is the sole consent-capturing commit.
+    // Refusal never destroys progress — the session stays signable.
+    if (!consent?.gdpr || !consent?.aiDisclosure) {
+      return {
+        success: false,
+        error: 'requires_consent: both GDPR processing consent and AI-disclosure acknowledgment are required to sign; your answers are preserved.',
+      }
     }
 
     // Verify all DNT questions answered
@@ -294,10 +300,21 @@ export const signDnt: ToolHandler = async (args, context) => {
     const now = new Date()
     const validUntil = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000)
 
+    // Signature stamp + consent events land on the SAME client: under the
+    // gateway this is the commit transaction, so the pair is atomic.
     await context.db.conversation.update({
       where: { id: context.conversationId },
       data: { dntSignedAt: now, dntValidUntil: validUntil },
     })
+    await appendConsentEvents(
+      context.customerId,
+      [
+        { kind: 'gdpr_processing', action: 'granted', scope: 'insurance_sales' },
+        { kind: 'ai_disclosure', action: 'granted' },
+      ],
+      undefined,
+      context.db,
+    )
 
     trackDntCompleted(context.customerId)
 
@@ -307,6 +324,7 @@ export const signDnt: ToolHandler = async (args, context) => {
         signed: true,
         signedAt: now.toISOString(),
         validUntil: validUntil.toISOString(),
+        consentsRecorded: ['gdpr_processing', 'ai_disclosure'],
       },
       message: 'DNT successfully signed. Customer can now proceed with insurance applications.',
     }
