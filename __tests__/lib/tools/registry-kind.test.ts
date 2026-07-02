@@ -7,21 +7,27 @@ import { getRegisteredToolNames, getToolDefinition } from '@/lib/tools/registry'
 // open_dnt_session + write_dnt_answer added in B2.5; save_dnt_answer retired in B2.6;
 // resolve_referral + resolve_work_item added in E2.4 (operator queue, actor-gated);
 // start/confirm_channel_verification added in B3.5 (identity);
-// request_document_upload added in B3.7 (document pipeline)
-const COMMITS = ['set_candidate_product', 'switch_product', 'open_dnt_session', 'write_dnt_answer', 'sign_dnt', 'start_application', 'save_application_answer', 'set_answer', 'resume_application', 'cancel_application', 'change_selection', 'generate_quote', 'accept_quote', 'modify_quote', 'check_bd_eligibility', 'initiate_payment', 'collect_customer_field', 'escalate_to_human', 'withdraw_consent', 'resolve_referral', 'resolve_work_item', 'start_channel_verification', 'confirm_channel_verification', 'request_document_upload']
+// request_document_upload added in B3.7 (document pipeline);
+// B4: start_application→set_application, select_coverage added,
+// set_answer/change_selection/switch_product retired (T5.D2/T5.D3)
+const COMMITS = ['set_candidate_product', 'open_dnt_session', 'write_dnt_answer', 'sign_dnt', 'set_application', 'save_application_answer', 'select_coverage', 'resume_application', 'cancel_application', 'generate_quote', 'accept_quote', 'modify_quote', 'check_bd_eligibility', 'initiate_payment', 'collect_customer_field', 'escalate_to_human', 'withdraw_consent', 'resolve_referral', 'resolve_work_item', 'start_channel_verification', 'confirm_channel_verification', 'request_document_upload']
 
 describe('tool kind classification', () => {
   it('every registered tool carries a kind', () => {
     for (const name of getRegisteredToolNames()) expect(['read', 'commit', 'internal']).toContain(getToolDefinition(name)?.kind)
   })
-  it('the 24 committing tools are kind=commit (check_bd_eligibility included — it mutates includesAddon)', () => {
+  it('the 22 committing tools are kind=commit (check_bd_eligibility included — it mutates includesAddon)', () => {
     for (const name of COMMITS) expect(getToolDefinition(name)?.kind, name).toBe('commit')
+  })
+  it('the B4-retired mutators are gone', () => {
+    for (const name of ['set_answer', 'change_selection', 'switch_product', 'start_application']) expect(getToolDefinition(name)).toBeUndefined()
   })
   it('no registered tool is kind=internal anymore (the two stubs died in A5.ADD-1)', () => {
     for (const name of getRegisteredToolNames()) expect(getToolDefinition(name)?.kind).not.toBe('internal')
   })
-  it('accept_quote and sign_dnt require confirmation (gateway-owned two-step)', () => {
+  it('accept_quote, sign_dnt and cancel_application require confirmation (gateway-owned two-step)', () => {
     expect(getToolDefinition('accept_quote')?.requiresConfirmation).toBe(true)
     expect(getToolDefinition('sign_dnt')?.requiresConfirmation).toBe(true)
+    expect(getToolDefinition('cancel_application')?.requiresConfirmation).toBe(true) // B4.5
   })
 })

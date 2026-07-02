@@ -400,16 +400,16 @@ function fuzzyMatchOption(
 
 /**
  * Where a questionnaire's answers live (T3.D6 generalization, B2.3):
- * conversation-scoped Answer rows (legacy + application flow until B4) or
- * session-scoped DntAnswer rows. B4 adds the application scope.
+ * application-scoped Answer rows (B4.1 re-key — the conversation scope
+ * died with Answer.conversationId) or session-scoped DntAnswer rows.
  */
 export type AnswerScope =
-  | { kind: 'conversation'; conversationId: string }
+  | { kind: 'application'; applicationId: string }
   | { kind: 'dntSession'; sessionId: string }
 
 async function loadScopedAnswers(scope: AnswerScope, questionIds: string[]): Promise<Map<string, string>> {
-  const rows = scope.kind === 'conversation'
-    ? await prisma.answer.findMany({ where: { conversationId: scope.conversationId, questionId: { in: questionIds } } })
+  const rows = scope.kind === 'application'
+    ? await prisma.answer.findMany({ where: { applicationId: scope.applicationId, questionId: { in: questionIds } } })
     : await prisma.dntAnswer.findMany({ where: { sessionId: scope.sessionId, questionId: { in: questionIds } } })
   return new Map(rows.map(a => [a.questionId, a.value]))
 }
@@ -426,7 +426,11 @@ async function loadScopedAnswers(scope: AnswerScope, questionIds: string[]): Pro
 export async function getNextQuestion(
   groupCodes: string[],
   scope: AnswerScope,
-): Promise<{ question: QuestionData; progress: { answered: number; total: number } } | null> {
+  // B4.6 prefill-as-proposals (T5.D5): questionCode → prior answer. A match
+  // rides back as suggestedAnswer — a PROPOSAL the customer must confirm
+  // via a real save commit, never a silently copied answer.
+  proposals?: Map<string, string>,
+): Promise<{ question: QuestionData; progress: { answered: number; total: number }; suggestedAnswer?: string } | null> {
   // Load all question groups matching the codes
   const groups = await prisma.questionGroup.findMany({
     where: { code: { in: groupCodes } },
@@ -499,9 +503,11 @@ export async function getNextQuestion(
 
   if (!nextQuestion) return null
 
+  const suggestedAnswer = nextQuestion.code ? proposals?.get(nextQuestion.code) : undefined
   return {
     question: nextQuestion,
     progress: { answered: answeredCount, total: visibleCount },
+    ...(suggestedAnswer !== undefined ? { suggestedAnswer } : {}),
   }
 }
 

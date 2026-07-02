@@ -3,7 +3,8 @@ import { deriveAndExpose, ACTION_RULES, engineVersion } from '@/lib/engines/deri
 import { makeSnapshot } from './snapshot-fixtures'
 
 const validDnt = { signed: true, valid: true, validUntil: '2027-01-01T00:00:00.000Z', coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0 }
-const doneApp = { id: 'app-1', status: 'COMPLETED' as const, tier: 'standard', level: 'l1', addon: false, answeredCount: 6, requiredCount: 6, missingCodes: [] }
+// B4: the app stays OPEN through quoting — COMPLETED is terminal (T5.D6)
+const doneApp = { id: 'app-1', status: 'OPEN' as const, tier: 'standard', level: 'l1', addon: false, answeredCount: 6, requiredCount: 6, missingCodes: [] }
 
 describe('deriveAndExpose — exposure over the FULL snapshot (contradiction #12)', () => {
   it('escalate_to_human is ALWAYS available (exposure floor)', () => {

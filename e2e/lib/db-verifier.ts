@@ -79,8 +79,8 @@ export async function verifyHappyPath(
   )
 
   // 2. Application exists, status COMPLETED, tierId + levelId set, includesAddon true
-  const application = await prisma.application.findUnique({
-    where: { conversationId },
+  const application = await prisma.application.findFirst({
+    where: { originConversationId: conversationId },
   })
   checks.push(
     check(
@@ -124,9 +124,9 @@ export async function verifyHappyPath(
   )
 
   // 3. DNT answers count > 0
-  const answerCount = await prisma.answer.count({
-    where: { conversationId },
-  })
+  const answerCount = application
+    ? await prisma.answer.count({ where: { applicationId: application.id } })
+    : 0
   checks.push(
     check(
       'DNT answers count > 0',
@@ -267,8 +267,8 @@ export async function verifyBdRejection(
   )
 
   // 2. Application exists, status COMPLETED, includesAddon = false
-  const application = await prisma.application.findUnique({
-    where: { conversationId },
+  const application = await prisma.application.findFirst({
+    where: { originConversationId: conversationId },
   })
   checks.push(
     check(
@@ -312,9 +312,9 @@ export async function verifyBdRejection(
   )
 
   // 3. DNT answers count > 0
-  const answerCount = await prisma.answer.count({
-    where: { conversationId },
-  })
+  const answerCount = application
+    ? await prisma.answer.count({ where: { applicationId: application.id } })
+    : 0
   checks.push(
     check(
       'DNT answers count > 0',
@@ -532,8 +532,8 @@ export async function verifyChangeOfMind(
   )
 
   // 2. Application exists
-  const application = await prisma.application.findUnique({
-    where: { conversationId },
+  const application = await prisma.application.findFirst({
+    where: { originConversationId: conversationId },
   })
   checks.push(
     check(
@@ -628,9 +628,10 @@ export async function verifyDntPauseResume(
     ),
   )
 
-  // 2. All DNT answers present (count > 0)
+  // 2. All DNT answers present (count > 0) — B4: answers hang off the
+  // application originated by this conversation
   const answers = await prisma.answer.findMany({
-    where: { conversationId },
+    where: { application: { originConversationId: conversationId } },
     include: { question: true },
   })
   checks.push(

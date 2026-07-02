@@ -70,25 +70,12 @@ export async function loadTurnContext(
   customerId: string,
 ): Promise<TurnContext> {
   const [rawConversation, rawCustomer, rawConsentEvents, rawMessages] = await Promise.all([
-    // Query 1 — conversation with product and application (+ quote + policy)
+    // Query 1 — conversation with product (the application hangs off the
+    // activeApplicationId pointer since B4 and is loaded below)
     prisma.conversation.findUniqueOrThrow({
       where: { id: conversationId },
       include: {
         product: { select: { id: true, code: true, name: true } },
-        application: {
-          select: {
-            status: true,
-            currentQuestionIndex: true,
-            totalQuestions: true,
-            quote: {
-              select: {
-                status: true,
-                premiumAnnual: true,
-                policy: { select: { id: true } },
-              },
-            },
-          },
-        },
       },
     }),
 
@@ -137,7 +124,23 @@ export async function loadTurnContext(
     candidateProductId: rawConversation.candidateProductId,
     candidateConfidence: rawConversation.candidateConfidence,
     candidateSetAt: rawConversation.candidateSetAt,
-    application: (rawConversation as { application?: TurnContextConversation['application'] }).application ?? null,
+    application: rawConversation.activeApplicationId
+      ? ((await prisma.application.findUnique({
+          where: { id: rawConversation.activeApplicationId },
+          select: {
+            status: true,
+            currentQuestionIndex: true,
+            totalQuestions: true,
+            quote: {
+              select: {
+                status: true,
+                premiumAnnual: true,
+                policy: { select: { id: true } },
+              },
+            },
+          },
+        })) as TurnContextConversation['application'])
+      : null,
   }
 
   // -------------------------------------------------------------------------

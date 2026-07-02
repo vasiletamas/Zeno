@@ -6,6 +6,8 @@ vi.mock('@/lib/db', () => ({
     customer: { findUnique: vi.fn() },
     consentEvent: { findMany: vi.fn() },
     message: { findMany: vi.fn() },
+    // B4: the application loads via the activeApplicationId pointer
+    application: { findUnique: vi.fn() },
   },
 }))
 
@@ -23,15 +25,17 @@ const baseConversation = {
   mode: 'SALES',
   productId: 'prod-1',
   product: { id: 'prod-1', code: 'PROD-1', name: { ro: 'Produs 1', en: 'Product 1' } },
-  application: {
-    status: 'IN_PROGRESS',
-    currentQuestionIndex: 2,
-    totalQuestions: 10,
-    quote: {
-      status: 'DRAFT',
-      premiumAnnual: 1200,
-      policy: { id: 'pol-1' },
-    },
+  activeApplicationId: 'app-1', // B4 pointer — the application row is mocked separately
+}
+
+const baseApplication = {
+  status: 'IN_PROGRESS',
+  currentQuestionIndex: 2,
+  totalQuestions: 10,
+  quote: {
+    status: 'DRAFT',
+    premiumAnnual: 1200,
+    policy: { id: 'pol-1' },
   },
 }
 
@@ -56,6 +60,7 @@ describe('loadTurnContext', () => {
     vi.clearAllMocks()
     // Consent ledger defaults to empty; tests that need consent facts mock rows.
     vi.mocked(prisma.consentEvent.findMany).mockResolvedValue([] as never)
+    vi.mocked(prisma.application.findUnique).mockResolvedValue(baseApplication as never)
   })
 
   describe('all 4 queries are issued', () => {

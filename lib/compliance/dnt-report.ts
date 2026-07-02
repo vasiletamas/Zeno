@@ -78,19 +78,16 @@ export async function generateDntReport(policyId: string): Promise<Buffer> {
             include: {
               tier: true,
               level: true,
-              conversation: {
+              // B4: answers key on the application, not the conversation
+              answers: {
                 include: {
-                  answers: {
+                  question: {
                     include: {
-                      question: {
-                        include: {
-                          group: true,
-                        },
-                      },
+                      group: true,
                     },
-                    orderBy: { answeredAt: 'asc' },
                   },
                 },
+                orderBy: { answeredAt: 'asc' },
               },
             },
           },
@@ -101,9 +98,8 @@ export async function generateDntReport(policyId: string): Promise<Buffer> {
 
   const { customer, product, quote } = policy
   const application = quote?.application
-  const conversation = application?.conversation
   // B2.6: DNT answers live on the signed Dnt's source session (customer-
-  // scoped); conversation-scoped Answer rows carry the application answers.
+  // scoped); application-scoped Answer rows carry the application answers.
   const signedDnt = await prisma.dnt.findFirst({
     where: { customerId: customer.id, status: 'ACTIVE' },
     orderBy: { signedAt: 'desc' },
@@ -118,7 +114,7 @@ export async function generateDntReport(policyId: string): Promise<Buffer> {
       },
     },
   })
-  const answers = [...(signedDnt?.sourceSession.answers ?? []), ...(conversation?.answers ?? [])]
+  const answers = [...(signedDnt?.sourceSession.answers ?? []), ...(application?.answers ?? [])]
   // Decrypt CNP for masked display
   let maskedCnp = '-'
   if (customer.cnpEncrypted && customer.cnpIv && customer.cnpTag) {

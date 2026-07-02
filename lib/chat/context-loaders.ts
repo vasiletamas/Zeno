@@ -415,10 +415,18 @@ export async function loadQuestionnaireContext(
 
   if (questions.length === 0) return null
 
+  // B4: answers are application-scoped — read through the conversation's
+  // active-application pointer (no application → nothing answered).
   const questionIds = questions.map((q) => q.id)
-  const answers = await prisma.answer.findMany({
-    where: { conversationId, questionId: { in: questionIds } },
+  const conv = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { activeApplicationId: true },
   })
+  const answers = conv?.activeApplicationId
+    ? await prisma.answer.findMany({
+        where: { applicationId: conv.activeApplicationId, questionId: { in: questionIds } },
+      })
+    : []
 
   const answeredIds = new Set(answers.map((a) => a.questionId))
   const currentQuestion = questions.find((q) => !answeredIds.has(q.id))

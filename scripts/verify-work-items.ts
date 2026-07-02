@@ -92,11 +92,12 @@ async function main() {
   const level = await prisma.pricingLevel.findFirstOrThrow({ where: { tierId: tier.id, isActive: true }, orderBy: { orderIndex: 'asc' } })
   const app = await prisma.application.create({
     data: {
-      conversationId: conv2.id, customerId: customer2.id, productId: product.id,
+      originConversationId: conv2.id, customerId: customer2.id, productId: product.id,
       tierId: tier.id, levelId: level.id, includesAddon: false,
-      status: 'REFERRED', currentQuestionIndex: 0, totalQuestions: 0,
+      status: 'REFERRED',
     },
   })
+  await prisma.conversation.update({ where: { id: conv2.id }, data: { activeApplicationId: app.id } })
   const referralItem = await createReferralWorkItem({
     applicationId: app.id, customerId: customer2.id, conversationId: conv2.id,
     reason: 'pending_external_check: cumulative sum at risk',

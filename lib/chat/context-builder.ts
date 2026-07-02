@@ -29,7 +29,12 @@ export async function buildToolContext(
           insuranceType: true,
         },
       },
-      application: {
+    },
+  })
+  // B4: the application hangs off the conversation via the pointer
+  const applicationRow = conversation?.activeApplicationId
+    ? await prisma.application.findUnique({
+        where: { id: conversation.activeApplicationId },
         select: {
           id: true,
           status: true,
@@ -52,9 +57,8 @@ export async function buildToolContext(
             },
           },
         },
-      },
-    },
-  })
+      })
+    : null
 
   const ctx: ToolContext = {
     customerId,
@@ -79,8 +83,8 @@ export async function buildToolContext(
   }
 
   // Map application if present
-  if (conversation?.application) {
-    const a = conversation.application
+  if (applicationRow) {
+    const a = applicationRow
     ctx.application = {
       id: a.id,
       status: a.status,

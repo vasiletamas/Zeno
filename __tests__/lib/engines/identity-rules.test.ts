@@ -24,9 +24,8 @@ it('invalid CNP checksum blocks the declared tier', () => {
 })
 
 it('#1 rows: generate_quote needs declared cnp-or-dob; accept_quote needs verified_channel; initiate_payment adds product docs', () => {
-  // start_application is today's registered name for the B4 set_application
-  // surface — no hard identity gate pre-needs-analysis (#1).
-  expect(IDENTITY_REQUIREMENTS.start_application).toEqual({ minTier: 'anonymous' })
+  // no hard identity gate pre-needs-analysis (#1)
+  expect(IDENTITY_REQUIREMENTS.set_application).toEqual({ minTier: 'anonymous' })
   const anon = { fields: {}, verifiedChannels: [] as ('email' | 'sms')[] }
   expect(evaluateIdentityRequirement('generate_quote', anon, [])).toEqual({ ok: false, needs: ['declared:cnp_or_dateOfBirth'] })
   expect(evaluateIdentityRequirement('generate_quote', { fields: { dateOfBirth: { value: '1998-04-18', provenance: 'declared' } }, verifiedChannels: [] }, [])).toEqual({ ok: true })

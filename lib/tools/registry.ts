@@ -17,15 +17,13 @@ import { calculateAge } from '@/lib/chat/age'
 
 // --- Handler imports ---
 import { getDntState, getDntQuestions, getDntNextQuestion, openDntSession, writeDntAnswer, signDnt } from './handlers/dnt-handlers'
-import { startApplication, saveApplicationAnswer, resumeApplication, cancelApplication } from './handlers/application-handlers'
-import { changeSelection } from './handlers/change-selection-handlers'
-import { setAnswer } from './handlers/set-answer-handlers'
+import { setApplication, saveApplicationAnswer, resumeApplication, cancelApplication, getLastApplicationInfo } from './handlers/application-handlers'
+import { selectCoverage } from './handlers/select-coverage-handlers'
 import { generateQuote, getQuoteDetails, acceptQuote, modifyQuote } from './handlers/quote-handlers'
 import { compareProducts } from './handlers/product-handlers'
 import { previewProductRequirements } from './handlers/preview-handlers'
 import { getStateHandler } from './handlers/state-handlers'
 import { setCandidateProduct } from './handlers/candidate-handlers'
-import { switchProduct } from './handlers/product-switch-handler'
 import { getCustomerProfile } from './handlers/profile-handlers'
 import { withdrawConsent } from './handlers/consent-handlers'
 import { getObjectionStrategy } from './handlers/objection-handlers'
@@ -233,10 +231,6 @@ const STATUS_SET_CANDIDATE_PRODUCT = {
   ],
 }
 
-const STATUS_SWITCH_PRODUCT = {
-  ro: ['Schimb produsul selectat', 'Trec la noul produs', 'Re\u00eencarc op\u021biunile pentru noul produs'],
-  en: ['Switching to a new product', 'Loading new product options', 'Updating your selection'],
-}
 
 // ==============================================
 // REAL HANDLERS (list_products, get_product_info kept from A2)
@@ -528,26 +522,8 @@ registerTool('set_candidate_product', {
   kind: 'commit',
 }, setCandidateProduct)
 
-registerTool('switch_product', {
-  description:
-    'Switch to a different insurance product within the same conversation. ' +
-    'Resets any prior tier/level/addon selections (invalid for the new product), ' +
-    'expires any DRAFT quote, and recomputes required questions. Shared answers carry over automatically.',
-  parameters: {
-    type: 'object',
-    properties: {
-      productId: { type: 'string', description: 'Product ID to switch to (cuid from list_products, NOT the display name or code).' },
-    },
-    required: ['productId'],
-    additionalProperties: false,
-  },
-  executionMode: 'blocking',
-  customerVisible: false,
-  statusMessage: STATUS_SWITCH_PRODUCT,
-  allowedRoles: ALL_ROLES,
-  sideEffect: 'lifecycle',
-  kind: 'commit',
-}, switchProduct)
+// switch_product retired in B4 (T5.D3: product is FROZEN on the application;
+// changing product = cancel + set_application on the new candidate)
 
 registerTool('get_objection_strategy', {
   description: 'Get a strategy for handling a specific customer objection type.',
@@ -686,17 +662,19 @@ registerTool('sign_dnt', {
   requiresConfirmation: true,
 }, signDnt)
 
-// --- Application ---
+// --- Application (B4 lifecycle) ---
+// start_application/set_answer/change_selection retired: set_application
+// freezes product only; select_coverage is the sole selection writer.
 
-registerTool('start_application', {
-  description: 'Start a new insurance application for the selected product.',
+registerTool('set_application', {
+  description:
+    'Open the insurance application for the product in focus. Freezes the PRODUCT only — ' +
+    'coverage (tier/level/addon) is chosen separately with select_coverage, and the needs analysis (DNT) gates the questionnaire. ' +
+    'One live application per customer and product; resume_application continues an existing one.',
   parameters: {
     type: 'object',
     properties: {
-      productId: { type: 'string', description: 'Product ID to apply for.' },
-      tierCode: { type: 'string', description: 'Optional. Pricing tier code (e.g. "standard", "optim") the customer already chose conversationally. Resolves to Application.tierId and records the PACKAGE_CHOICE answer so it is not re-asked.' },
-      levelCode: { type: 'string', description: 'Optional. Pricing level code (e.g. "level_2") within the tier. Requires tierCode. Resolves to Application.levelId and records the PREMIUM_LEVEL answer.' },
-      includesAddon: { type: 'boolean', description: 'Optional. Whether the customer chose the add-on. Sets Application.includesAddon and records the BD_ADDON_INTEREST answer.' },
+      productId: { type: 'string', description: 'Optional explicit product ID (defaults to the product/candidate in focus).' },
     },
     additionalProperties: false,
   },
@@ -706,15 +684,14 @@ registerTool('start_application', {
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
   kind: 'commit',
-}, startApplication)
+}, setApplication)
 
 registerTool('save_application_answer', {
-  description: 'Save an answer to the current application question.',
+  description: 'Save the customer\'s answer to the current application question.',
   parameters: {
     type: 'object',
     properties: {
       answer: { type: 'string', description: 'The customer\'s answer.' },
-      field: { type: 'string', description: 'Optional: specific field code to set (e.g. PACKAGE_CHOICE, PREMIUM_LEVEL).' },
     },
     required: ['answer'],
     additionalProperties: false,
@@ -727,67 +704,16 @@ registerTool('save_application_answer', {
   kind: 'commit',
 }, saveApplicationAnswer)
 
-registerTool('set_answer', {
+registerTool('select_coverage', {
   description:
-    'Answer any question by its code, within the active DNT or application groups. ' +
-    'Supports editing previously answered questions. ' +
-    'Special codes PACKAGE_CHOICE, PREMIUM_LEVEL, BD_ADDON_INTEREST also update Application tier/level/addon.',
+    'Choose or change the coverage: pricing tier (e.g. "standard", "optim"), premium level (e.g. "level_1") and the add-on. ' +
+    'THE only way to set them — they are not questionnaire questions. ' +
+    'Re-selecting under an existing quote expires it (a fresh quote is needed).',
   parameters: {
     type: 'object',
     properties: {
-      questionCode: { type: 'string', description: 'The question code to answer (e.g. "HAS_DEPENDENTS", "PACKAGE_CHOICE", "PREMIUM_LEVEL", "BD_ADDON_INTEREST").' },
-      value: { type: 'string', description: 'The answer value (will be normalized based on question type).' },
-    },
-    required: ['questionCode', 'value'],
-    additionalProperties: false,
-  },
-  executionMode: 'blocking',
-  customerVisible: false,
-  statusMessage: null,
-  allowedRoles: ALL_ROLES,
-  sideEffect: 'save',
-  kind: 'commit',
-}, setAnswer)
-
-registerTool('resume_application', {
-  description: 'Resume a previously paused application.',
-  parameters: {
-    type: 'object',
-    properties: {
-      applicationId: { type: 'string', description: 'Application ID to resume.' },
-    },
-    additionalProperties: false,
-  },
-  executionMode: 'blocking',
-  customerVisible: false,
-  statusMessage: null,
-  allowedRoles: ALL_ROLES,
-  kind: 'commit',
-}, resumeApplication)
-
-registerTool('cancel_application', {
-  description: 'Cancel the current application.',
-  parameters: {
-    type: 'object',
-    properties: {
-      reason: { type: 'string', description: 'Reason for cancellation.' },
-    },
-    additionalProperties: false,
-  },
-  executionMode: 'blocking',
-  customerVisible: false,
-  statusMessage: null,
-  allowedRoles: ALL_ROLES,
-  kind: 'commit',
-}, cancelApplication)
-
-registerTool('change_selection', {
-  description: 'Change the insurance package tier, premium level, or add-on selection on an existing application (same product). Automatically expires any active quote so a new one can be generated with the updated selection.',
-  parameters: {
-    type: 'object',
-    properties: {
-      tier: { type: 'string', description: 'Pricing tier code to switch to (e.g. "standard", "optim"). Omit to keep the current tier.' },
-      level: { type: 'string', description: 'Premium level code to switch to (e.g. "level_1", "level_2"). Omit to keep the current level.' },
+      tier: { type: 'string', description: 'Pricing tier code. Omit to keep the current tier.' },
+      level: { type: 'string', description: 'Premium level code within the tier. Omit to keep the current level.' },
       addon: { type: 'boolean', description: 'true to include the add-on, false to remove it, omit to keep current.' },
     },
     additionalProperties: false,
@@ -801,7 +727,59 @@ registerTool('change_selection', {
   allowedRoles: ALL_ROLES,
   sideEffect: 'lifecycle',
   kind: 'commit',
-}, changeSelection)
+}, selectCoverage)
+
+registerTool('resume_application', {
+  description: 'Resume the customer\'s existing application — works across conversations and channels. Unpauses a PAUSED application and returns the current position (next question, progress, selection).',
+  parameters: {
+    type: 'object',
+    properties: {
+      applicationId: { type: 'string', description: 'Optional explicit application ID (defaults to the customer\'s resumable application).' },
+    },
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+}, resumeApplication)
+
+registerTool('cancel_application', {
+  description: 'Cancel the current application — terminal and confirmed with the customer first. A cancelled application cannot be resumed; a new one can be opened.',
+  parameters: {
+    type: 'object',
+    properties: {
+      reason: { type: 'string', description: 'Reason for cancellation.' },
+    },
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: true,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+  requiresConfirmation: true,
+}, cancelApplication)
+
+registerTool('get_last_application_info', {
+  description:
+    'Read the customer\'s most recent COMPLETED application and return its answers as PROPOSALS for the new one. ' +
+    'Each proposal must be confirmed with the customer question by question — never copy silently.',
+  parameters: {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffects: false,
+  kind: 'read',
+}, getLastApplicationInfo)
 
 // --- Quote ---
 

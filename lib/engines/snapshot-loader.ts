@@ -31,18 +31,23 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   })
   const activeProductId = conversation.productId ?? conversation.candidateProductId ?? null
   const prod = activeProductId ? await db.product.findUnique({ where: { id: activeProductId } }) : null
-  const application = await db.application.findUnique({ where: { conversationId } })
-  // questionnaire completeness (reuses the question-group engine exactly like the old deriveState)
+  // B4.1: the conversation POINTS at a customer-scoped application (T5.D4);
+  // a CANCELLED pointer target is treated as no application (terminal).
+  const application = conversation.activeApplicationId
+    ? await db.application.findUnique({ where: { id: conversation.activeApplicationId } })
+    : null
   let appState: DomainSnapshot['application'] = null
-  if (application) {
-    const groupCodes = (await resolveGroupCodes(application.productId, 'application', db)) ?? []
+  if (application && application.status !== 'CANCELLED') {
+    const baseCodes = (await resolveGroupCodes(application.productId, 'application', db)) ?? []
+    // #4: the BD questionnaire is in the active set only while the addon is on
+    const groupCodes = application.includesAddon ? [...baseCodes, 'bd_medical'] : baseCodes
     const questions = groupCodes.length > 0 ? await db.question.findMany({ where: { group: { code: { in: groupCodes } } }, select: { id: true, code: true } }) : []
-    const answered = await db.answer.findMany({ where: { conversationId, questionId: { in: questions.map((q) => q.id) } }, select: { questionId: true } })
+    const answered = await db.answer.findMany({ where: { applicationId: application.id, questionId: { in: questions.map((q) => q.id) } }, select: { questionId: true } })
     const answeredIds = new Set(answered.map((a) => a.questionId))
     const tier = application.tierId ? await db.pricingTier.findUnique({ where: { id: application.tierId } }) : null
     const level = application.levelId ? await db.pricingLevel.findUnique({ where: { id: application.levelId } }) : null
     appState = {
-      id: application.id, status: application.status as 'OPEN' | 'PAUSED' | 'COMPLETED',
+      id: application.id, status: application.status,
       tier: tier?.code ?? null, level: level?.code ?? null, addon: application.includesAddon,
       answeredCount: answeredIds.size, requiredCount: questions.length,
       missingCodes: questions.filter((q) => !answeredIds.has(q.id)).map((q) => q.code ?? q.id),
@@ -76,9 +81,10 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     const sessionAnswerRows = sessionQuestions.length > 0 ? await db.dntAnswer.findMany({ where: { sessionId: activeDntSession.id }, select: { questionId: true, value: true } }) : []
     sessionCounts = countVisible(sessionQuestions, new Map(sessionAnswerRows.map((a) => [a.questionId, a.value])))
   }
-  // quotes: issued (today: DRAFT, non-expired) and accepted
-  const issued = application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'DRAFT' }, orderBy: { createdAt: 'desc' } }) : null
-  const accepted = application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'ACCEPTED' } }) : null
+  // quotes: issued (today: DRAFT, non-expired) and accepted — only for a
+  // live (non-CANCELLED) application slice
+  const issued = appState && application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'DRAFT' }, orderBy: { createdAt: 'desc' } }) : null
+  const accepted = appState && application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'ACCEPTED' } }) : null
   const policy = accepted ? await db.policy.findUnique({ where: { quoteId: accepted.id } }) : null
   return {
     conversationId, customerId: conversation.customerId,

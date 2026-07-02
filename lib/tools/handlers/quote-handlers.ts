@@ -6,8 +6,8 @@
 
 import { calculateQuote } from '@/lib/engines/quote-engine'
 import type { QuoteInput } from '@/lib/engines/quote-engine'
-import { getNextQuestion } from '@/lib/engines/questionnaire-engine'
 import { verifyConsents } from '@/lib/compliance/consent-check'
+import { loadActiveApplication } from './application-handlers'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackQuoteGenerated, trackQuoteAccepted } from '@/lib/analytics/events'
 
@@ -26,18 +26,18 @@ export const generateQuote: ToolHandler = async (_args, context) => {
       }
     }
 
-    // Load application (must be COMPLETED)
-    const application = await context.db.application.findUnique({
-      where: { conversationId: context.conversationId },
-    })
-
+    // B4: the conversation points at the customer-scoped application; the
+    // questionnaire-completeness gate lives in exposure (missingCodes),
+    // and the status machine keeps the app OPEN until D1's quote lifecycle
+    // pins the completion transition.
+    const application = await loadActiveApplication(context)
     if (!application) {
       return { success: false, error: 'No application found.' }
     }
-    if (application.status !== 'COMPLETED') {
+    if (application.status !== 'OPEN') {
       return {
         success: false,
-        error: `Application is not complete (status: ${application.status}). Please finish the questionnaire first.`,
+        error: `Application is not quotable (status: ${application.status}).`,
       }
     }
 
@@ -143,9 +143,9 @@ export const generateQuote: ToolHandler = async (_args, context) => {
     if (paymentQuestion) {
       const paymentAnswer = await context.db.answer.findUnique({
         where: {
-          questionId_conversationId: {
+          questionId_applicationId: {
             questionId: paymentQuestion.id,
-            conversationId: context.conversationId,
+            applicationId: application.id,
           },
         },
       })
@@ -184,32 +184,35 @@ export const generateQuote: ToolHandler = async (_args, context) => {
 
     const result = calculateQuote(quoteInput)
 
-    // Create Quote record
-    const quote = await context.db.quote.create({
-      data: {
-        applicationId: application.id,
-        productId: application.productId,
-        customerId: application.customerId,
-        premiumAnnual: result.premiumAnnual,
-        premiumMonthly: result.premiumMonthly,
-        premiumSemiAnnual: result.premiumSemiAnnual,
-        premiumQuarterly: result.premiumQuarterly,
-        paymentFrequency,
-        currency: 'RON',
-        coverages: JSON.parse(JSON.stringify({
-          baseCoverages: result.baseCoverages,
-          addonCoverages: result.addonCoverages,
-          basePremiumAnnual: result.basePremiumAnnual,
-          addonPremiumAnnual: result.addonPremiumAnnual,
-          pricingTierLabel: result.pricingTierLabel,
-          pricingLevelLabel: result.pricingLevelLabel,
-        })),
-        addonsSelected: application.includesAddon
-          ? JSON.parse(JSON.stringify({ included: true, addonPremiumAnnual: result.addonPremiumAnnual }))
-          : undefined,
-        status: 'DRAFT',
-        validUntil: result.validUntil,
-      },
+    // Quote.applicationId is @unique — a re-quote after re_rating REPLACES
+    // the expired row (D1's quote lifecycle owns richer history later).
+    const quoteData = {
+      productId: application.productId,
+      customerId: application.customerId,
+      premiumAnnual: result.premiumAnnual,
+      premiumMonthly: result.premiumMonthly,
+      premiumSemiAnnual: result.premiumSemiAnnual,
+      premiumQuarterly: result.premiumQuarterly,
+      paymentFrequency,
+      currency: 'RON',
+      coverages: JSON.parse(JSON.stringify({
+        baseCoverages: result.baseCoverages,
+        addonCoverages: result.addonCoverages,
+        basePremiumAnnual: result.basePremiumAnnual,
+        addonPremiumAnnual: result.addonPremiumAnnual,
+        pricingTierLabel: result.pricingTierLabel,
+        pricingLevelLabel: result.pricingLevelLabel,
+      })),
+      addonsSelected: application.includesAddon
+        ? JSON.parse(JSON.stringify({ included: true, addonPremiumAnnual: result.addonPremiumAnnual }))
+        : undefined,
+      status: 'DRAFT' as const,
+      validUntil: result.validUntil,
+    }
+    const quote = await context.db.quote.upsert({
+      where: { applicationId: application.id },
+      create: { applicationId: application.id, ...quoteData },
+      update: quoteData,
     })
 
     trackQuoteGenerated(application.customerId, result.premiumAnnual)
@@ -268,10 +271,8 @@ export const getQuoteDetails: ToolHandler = async (args, context) => {
         where: { id: quoteId },
       })
     } else {
-      // Find quote via application for this conversation
-      const application = await context.db.application.findUnique({
-        where: { conversationId: context.conversationId },
-      })
+      // Find quote via the conversation's active application (B4)
+      const application = await loadActiveApplication(context)
       if (application) {
         quote = await context.db.quote.findUnique({
           where: { applicationId: application.id },
@@ -320,10 +321,8 @@ export const acceptQuote: ToolHandler = async (args, context) => {
       return { success: false, error: 'Confirmation is required to accept the quote.' }
     }
 
-    // Find quote via application for this conversation
-    const application = await context.db.application.findUnique({
-      where: { conversationId: context.conversationId },
-    })
+    // Find quote via the conversation's active application (B4)
+    const application = await loadActiveApplication(context)
     if (!application) {
       return { success: false, error: 'No application found.' }
     }
@@ -447,10 +446,11 @@ export const acceptQuote: ToolHandler = async (args, context) => {
 
 export const modifyQuote: ToolHandler = async (_args, context) => {
   try {
-    // Find application and current quote
-    const application = await context.db.application.findUnique({
-      where: { conversationId: context.conversationId },
-    })
+    // B4: selection lives on the Application (select_coverage is the sole
+    // writer) — modifying a quote just expires it; the customer re-selects
+    // with select_coverage and generates a fresh quote. No answers are
+    // touched and the application is not "reopened" (it stayed OPEN).
+    const application = await loadActiveApplication(context)
     if (!application) {
       return { success: false, error: 'No application found.' }
     }
@@ -462,55 +462,10 @@ export const modifyQuote: ToolHandler = async (_args, context) => {
       return { success: false, error: 'No quote found to modify.' }
     }
 
-    // Expire current quote
     await context.db.quote.update({
       where: { id: quote.id },
       data: { status: 'EXPIRED' },
     })
-
-    // Reset Application for re-selection
-    await context.db.application.update({
-      where: { id: application.id },
-      data: {
-        tierId: null,
-        levelId: null,
-        currentQuestionIndex: 0,
-        status: 'OPEN',
-        completedAt: null,
-      },
-    })
-
-    // Delete the selection answers (PACKAGE_CHOICE, PREMIUM_LEVEL, BD_ADDON_INTEREST, PAYMENT_FREQUENCY)
-    // so the customer can re-answer them
-    const specialCodes = ['PACKAGE_CHOICE', 'PREMIUM_LEVEL', 'BD_ADDON_INTEREST', 'PAYMENT_FREQUENCY']
-    const specialQuestions = await context.db.question.findMany({
-      where: { code: { in: specialCodes } },
-    })
-    if (specialQuestions.length > 0) {
-      await context.db.answer.deleteMany({
-        where: {
-          conversationId: context.conversationId,
-          questionId: { in: specialQuestions.map(q => q.id) },
-        },
-      })
-    }
-
-    // Get next question
-    const nextResult = await getNextQuestion(['application'], { kind: 'conversation', conversationId: context.conversationId })
-
-    const lang = context.language ?? 'ro'
-    let nextQuestionData: Record<string, unknown> | null = null
-    if (nextResult) {
-      const nq = nextResult.question
-      const nqText = nq.text as { en: string; ro: string }
-      nextQuestionData = {
-        id: nq.id,
-        code: nq.code,
-        text: nqText[lang],
-        type: nq.type,
-        options: nq.options,
-      }
-    }
 
     return {
       success: true,
@@ -518,10 +473,9 @@ export const modifyQuote: ToolHandler = async (_args, context) => {
         modificationStarted: true,
         oldQuoteId: quote.id,
         applicationId: application.id,
-        nextQuestion: nextQuestionData,
       },
-      message:
-        'Quote expired. Application reopened for package/level re-selection. Please answer the questions to generate an updated quote.',
+      effects: ['re_rating'],
+      message: 'Quote expired. Change the coverage with select_coverage, then generate an updated quote.',
     }
   } catch (error) {
     return { success: false, error: String(error) }

@@ -45,7 +45,7 @@ describe('formatDerivedBriefing (new vocabulary)', () => {
     expect(text).toContain('Next best action:')
   })
   it('briefing renders per-stage facts: quote validity in QUOTE, payment status in PAYMENT', () => {
-    const q = deriveAndExpose(makeSnapshot({ application: { id: 'a', status: 'COMPLETED', tier: 't', level: 'l', addon: false, answeredCount: 6, requiredCount: 6, missingCodes: [] }, dnt: { signed: true, valid: true, validUntil: '2027-01-01T00:00:00.000Z', coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0 }, consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true }, quote: { id: 'q1', status: 'DRAFT', premiumAnnual: 500, validUntil: '2027-01-01T00:00:00.000Z', expired: false } }))
+    const q = deriveAndExpose(makeSnapshot({ application: { id: 'a', status: 'OPEN', tier: 't', level: 'l', addon: false, answeredCount: 6, requiredCount: 6, missingCodes: [] }, dnt: { signed: true, valid: true, validUntil: '2027-01-01T00:00:00.000Z', coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0 }, consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true }, quote: { id: 'q1', status: 'DRAFT', premiumAnnual: 500, validUntil: '2027-01-01T00:00:00.000Z', expired: false } }))
     expect(formatDerivedBriefing(q.state, q.actions)).toContain('Quote valid until: 2027-01-01')
     const p = deriveAndExpose(makeSnapshot({ acceptedQuote: { id: 'q', acceptedAt: null }, schedule: { exists: true, settled: false, nextDueAt: null, lastPaymentStatus: 'FAILED' } }))
     expect(formatDerivedBriefing(p.state, p.actions)).toContain('Payment status: FAILED')
@@ -55,7 +55,7 @@ describe('formatDerivedBriefing (new vocabulary)', () => {
     expect(formatDerivedBriefing(r.state, r.actions)).toContain('DNT remaining: 3')
   })
   it('renders blocked actions with machine reason codes so the agent can explain a block', () => {
-    const r = deriveAndExpose(makeSnapshot({ application: { id: 'a', status: 'COMPLETED', tier: 't', level: 'l', addon: false, answeredCount: 6, requiredCount: 6, missingCodes: [] }, dnt: { signed: true, valid: true, validUntil: '2027-01-01T00:00:00.000Z', coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0 } }))
+    const r = deriveAndExpose(makeSnapshot({ application: { id: 'a', status: 'OPEN', tier: 't', level: 'l', addon: false, answeredCount: 6, requiredCount: 6, missingCodes: [] }, dnt: { signed: true, valid: true, validUntil: '2027-01-01T00:00:00.000Z', coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0 } }))
     const text = formatDerivedBriefing(r.state, r.actions)
     expect(text).toContain('Blocked actions:')
     expect(text).toContain('generate_quote (requires_consent')

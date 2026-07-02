@@ -12,6 +12,9 @@ vi.mock('@/lib/db', () => ({
     questionGroup: { findMany: (...a: unknown[]) => questionGroupFindManySpy(...a) },
     question: { findMany: (...a: unknown[]) => questionFindManySpy(...a) },
     answer: { findMany: (...a: unknown[]) => answerFindManySpy(...a) },
+    // B4: preview compares against the conversation's active application
+    conversation: { findUnique: () => Promise.resolve({ activeApplicationId: 'app-1' }) },
+    application: { findUnique: () => Promise.resolve({ id: 'app-1', status: 'OPEN' }) },
   },
 }))
 vi.mock('@/lib/tools/resolve-product', () => ({
@@ -27,6 +30,7 @@ const { previewProductRequirements } = await import('@/lib/tools/handlers/previe
 const CONTEXT = {
   conversationId: 'conv-1',
   customerId: 'cust-1',
+  db: (await import('@/lib/db')).prisma, // B4: loadActiveApplication reads through context.db
   language: 'ro' as const,
 } as unknown as Parameters<typeof previewProductRequirements>[1]
 

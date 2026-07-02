@@ -108,7 +108,7 @@ async function trial(n: number): Promise<{ advanced: boolean; ceremony: boolean 
     select: { content: true },
   })
   const dntAnswers = await dntAnswerCount(customer.id)
-  const application = await prisma.application.findUnique({ where: { conversationId: conv.id } })
+  const application = await prisma.application.findFirst({ where: { originConversationId: conv.id } })
   const state = await prisma.conversation.findUnique({
     where: { id: conv.id },
     select: { candidateProductId: true, productId: true },

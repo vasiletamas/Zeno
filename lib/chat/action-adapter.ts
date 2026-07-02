@@ -30,25 +30,26 @@ export interface UIAction {
  */
 export function adaptAction(action: UIAction): ToolCall | null {
   switch (action.type) {
-    // ── Product selection (tier + level from ProductCard) ──
+    // ── Coverage selection (B4.4: select_coverage is the sole writer) ──
     case 'select_tier':
       return {
         id: `action_${Date.now()}`,
-        name: 'save_application_answer',
-        arguments: {
-          answer: String(action.payload.tierCode),
-          field: 'PACKAGE_CHOICE',
-        },
+        name: 'select_coverage',
+        arguments: { tier: String(action.payload.tierCode) },
       }
 
     case 'select_level':
       return {
         id: `action_${Date.now()}`,
-        name: 'save_application_answer',
-        arguments: {
-          answer: String(action.payload.levelCode),
-          field: 'PREMIUM_LEVEL',
-        },
+        name: 'select_coverage',
+        arguments: { level: String(action.payload.levelCode) },
+      }
+
+    case 'select_coverage':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'select_coverage',
+        arguments: action.payload,
       }
 
     // ── Question answering (routes by groupType) ──
@@ -115,12 +116,12 @@ export function adaptAction(action: UIAction): ToolCall | null {
         },
       }
 
-    // ── BD continue/decline ──
+    // ── BD continue-without-addon: a selection fact, not an answer (B4.4) ──
     case 'bd_continue':
       return {
         id: `action_${Date.now()}`,
-        name: 'save_application_answer',
-        arguments: { answer: 'continue_without_bd' },
+        name: 'select_coverage',
+        arguments: { addon: false },
       }
 
     // ── B1 legacy mappings ──
@@ -153,10 +154,12 @@ export function adaptAction(action: UIAction): ToolCall | null {
         },
       }
 
+    // legacy GUI action name; the tool is set_application since B4.3
     case 'start_application':
+    case 'set_application':
       return {
         id: `action_${Date.now()}`,
-        name: 'start_application',
+        name: 'set_application',
         arguments: action.payload,
       }
 

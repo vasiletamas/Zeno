@@ -7,6 +7,7 @@ import { prisma } from '@/lib/db'
 import type { ToolHandler } from '@/lib/tools/types'
 import { resolveProductRef, listAvailableProductRefs } from '@/lib/tools/resolve-product'
 import { resolveGroupCodes } from '@/lib/engines/question-groups'
+import { loadActiveApplication } from './application-handlers'
 
 export const previewProductRequirements: ToolHandler = async (args, context) => {
   const productId = args.productId as string | undefined
@@ -50,11 +51,16 @@ export const previewProductRequirements: ToolHandler = async (args, context) => 
       return { success: true, data: { wouldCarryOver: [], stillMissing: [] }, message: 'No questions found for the specified groups.' }
     }
 
+    // B4: answers are application-scoped — carry-over compares against the
+    // conversation's active application (none → everything is missing).
     const questionIds = questions.map((q) => q.id)
-    const answers = await prisma.answer.findMany({
-      where: { conversationId: context.conversationId, questionId: { in: questionIds } },
-      select: { questionId: true },
-    })
+    const activeApp = await loadActiveApplication(context)
+    const answers = activeApp
+      ? await prisma.answer.findMany({
+          where: { applicationId: activeApp.id, questionId: { in: questionIds } },
+          select: { questionId: true },
+        })
+      : []
     const answeredQuestionIds = new Set(answers.map((a) => a.questionId))
 
     const wouldCarryOver: string[] = []

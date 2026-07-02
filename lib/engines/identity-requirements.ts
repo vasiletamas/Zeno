@@ -12,9 +12,8 @@
  * meaningful (either field alone unlocks quoting). (b) T4-R6's document
  * default is resolved to before-initiate_payment; flip by seeding
  * accept_quote's verificationRequirements if compliance wants accept-time.
- * Rows are keyed by REGISTERED commit tools: start_application is B4's
- * set_application surface today; the payment-documents row rides
- * initiate_payment until D3 lands ensure_payment_session.
+ * Rows are keyed by REGISTERED commit tools; the payment-documents row
+ * rides initiate_payment until D3 lands ensure_payment_session.
  */
 
 import type { IdentityTier, DomainSnapshot } from './domain-types'
@@ -27,7 +26,7 @@ export interface IdentityRequirement {
 export type IdentityRequirementsTable = Record<string, IdentityRequirement>
 
 export const IDENTITY_REQUIREMENTS: IdentityRequirementsTable = {
-  start_application: { minTier: 'anonymous' }, // no hard gate pre-needs-analysis (#1)
+  set_application: { minTier: 'anonymous' }, // no hard gate pre-needs-analysis (#1)
   sign_dnt: { minTier: 'anonymous' },
   generate_quote: { minTier: 'anonymous', anyDeclaredOf: ['cnp', 'dateOfBirth'] },
   accept_quote: { minTier: 'verified_channel' },

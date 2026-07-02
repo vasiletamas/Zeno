@@ -96,7 +96,7 @@ export async function runPostPaymentFlow(
   const appUrl = process.env.APP_URL ?? 'http://localhost:3001'
   let dashboardUrl = `${appUrl}/dashboard`
   if (customer.email) {
-    const conversationId = payment.policy.quote?.application?.conversationId ?? null
+    const conversationId = payment.policy.quote?.application?.originConversationId ?? null
     const { linkToken } = await issueChallenge(
       customer.id, 'email', customer.email, conversationId,
       prisma,

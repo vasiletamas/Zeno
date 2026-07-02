@@ -7,7 +7,7 @@ import { makeSnapshot } from './snapshot-fixtures'
 describe('identity-requirements mechanism (contradiction #1)', () => {
   it('the B3.2 rows are landed — one row per ratified commit gate', () => {
     expect(Object.keys(IDENTITY_REQUIREMENTS).sort()).toEqual(
-      ['accept_quote', 'generate_quote', 'initiate_payment', 'sign_dnt', 'start_application'],
+      ['accept_quote', 'generate_quote', 'initiate_payment', 'set_application', 'sign_dnt'],
     )
   })
   it('pins the ratified rows (ADD-1, erratum-4a encoding)', () => {

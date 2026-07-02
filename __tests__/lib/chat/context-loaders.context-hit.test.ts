@@ -5,6 +5,8 @@ vi.mock('@/lib/db', () => ({
     question: { findMany: vi.fn() },
     answer: { findMany: vi.fn() },
     customerInsight: { findUnique: vi.fn() },
+    // B4: loadQuestionnaireContext resolves the active-application pointer
+    conversation: { findUnique: vi.fn().mockResolvedValue({ activeApplicationId: 'app-1' }) },
   },
 }))
 vi.mock('@/lib/errors/logger', () => ({

@@ -5,6 +5,7 @@
  */
 
 import type { ToolHandler } from '@/lib/tools/types'
+import { loadActiveApplication } from './application-handlers'
 
 const BD_GROUP_CODES = ['bd_medical']
 
@@ -29,11 +30,15 @@ export const checkBdEligibility: ToolHandler = async (_args, context) => {
       orderBy: { orderIndex: 'asc' },
     })
 
-    // Load answers for this conversation
+    // B4: answers key on the conversation's active application
+    const application = await loadActiveApplication(context)
+    if (!application) {
+      return { success: false, error: 'No active application for the BD questionnaire.' }
+    }
     const questionIds = questions.map(q => q.id)
     const answers = await context.db.answer.findMany({
       where: {
-        conversationId: context.conversationId,
+        applicationId: application.id,
         questionId: { in: questionIds },
       },
     })
@@ -49,19 +54,12 @@ export const checkBdEligibility: ToolHandler = async (_args, context) => {
     // Check if any answer is "true" (yes to a medical condition)
     const hasPositiveAnswer = answers.some(a => a.value === 'true')
 
-    // Load application for this conversation
-    const application = await context.db.application.findUnique({
-      where: { conversationId: context.conversationId },
-    })
-
     if (hasPositiveAnswer) {
       // Reject BD addon
-      if (application) {
-        await context.db.application.update({
-          where: { id: application.id },
-          data: { includesAddon: false },
-        })
-      }
+      await context.db.application.update({
+        where: { id: application.id },
+        data: { includesAddon: false },
+      })
 
       return {
         success: true,

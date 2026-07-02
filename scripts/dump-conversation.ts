@@ -28,7 +28,6 @@ async function main() {
           },
         },
       },
-      application: { select: { id: true, status: true, tierId: true, levelId: true } },
       messages: { orderBy: { createdAt: "asc" } },
       turnTraces: { orderBy: { messageIndex: "asc" } },
       score: true,
@@ -40,9 +39,17 @@ async function main() {
     process.exit(1);
   }
 
+  // B4: the application hangs off the activeApplicationId pointer
+  const application = convo.activeApplicationId
+    ? await prisma.application.findUnique({
+        where: { id: convo.activeApplicationId },
+        select: { id: true, status: true, tierId: true, levelId: true },
+      })
+    : null
+
   const phase = convo.mode === 'POST_SALE'
     ? 'post_sale'
-    : (convo.application && convo.application.status !== 'COMPLETED'
+    : (application && application.status !== 'COMPLETED'
         ? 'application'
         : 'presentation')
 
@@ -67,7 +74,7 @@ async function main() {
     startedAt: convo.startedAt,
     completedAt: convo.completedAt,
     customer: convo.customer,
-    application: convo.application,
+    application,
     metadata: convo.metadata,
   }, null, 2));
 

@@ -1,8 +1,14 @@
 /**
- * Application Handlers
+ * Application Handlers (B4) — the customer-scoped application lifecycle.
  *
- * start_application, save_application_answer, get_application_status,
- * resume_application, cancel_application
+ * set_application freezes PRODUCT only (T5.D3) and carries no DNT pre-gate
+ * (T5.D1 — the DNT ordering flip lives in questionnaire exposure);
+ * answers key on the APPLICATION (B4.1 re-key); selection is
+ * select_coverage's business (T5.D2 — single writer, no selection
+ * questions); cancel is a confirmed terminal CANCELLED (never COMPLETED);
+ * resume works cross-conversation via Conversation.activeApplicationId
+ * (T5.D4) and get_last_application_info surfaces prior answers as
+ * PROPOSALS the customer confirms one by one (T5.D5).
  */
 
 import {
@@ -12,116 +18,83 @@ import {
   calculateProgress,
 } from '@/lib/engines/questionnaire-engine'
 import { resolveGroupCodes, resolveActiveProductId } from '@/lib/engines/question-groups'
-import { hasValidDnt } from '@/lib/customer/dnt-lookup'
+import { canTransition, type AppStatus } from '@/lib/engines/application-rules'
 import { getIdentityFacts } from '@/lib/customer/profile-service'
 import { deriveIdentityTier } from '@/lib/engines/identity-rules'
-import type { ToolHandler } from '@/lib/tools/types'
-import { trackProductSelected } from '@/lib/analytics/events'
+import type { ToolHandler, ToolContext } from '@/lib/tools/types'
 import { bumpInsightOnAnswer } from './insight-bump'
 
-async function appGroupCodes(context: { conversationId: string; product?: { id: string } }) {
+/**
+ * The active question-group codes for an application. The BD medical
+ * questionnaire belongs to the set only while the addon is selected (#4 —
+ * select_coverage's cascade_expand/questions_removed toggle it; answers
+ * are retained but excluded when the addon is off).
+ */
+export async function appGroupCodesFor(context: { conversationId: string; product?: { id: string } }, includesAddon: boolean): Promise<string[]> {
   const productId = await resolveActiveProductId(context.conversationId, context.product?.id)
-  return resolveGroupCodes(productId, 'application')
+  const codes = (await resolveGroupCodes(productId, 'application')) ?? []
+  return includesAddon ? [...codes, 'bd_medical'] : codes
+}
+
+/** The conversation's active application (T5.D4 channel pointer). */
+export async function loadActiveApplication(context: ToolContext) {
+  const conv = await context.db.conversation.findUnique({
+    where: { id: context.conversationId },
+    select: { activeApplicationId: true },
+  })
+  if (!conv?.activeApplicationId) return null
+  return context.db.application.findUnique({ where: { id: conv.activeApplicationId } })
 }
 
 // ─────────────────────────────────────────────
-// start_application
+// set_application (B4.3) — freeze product only
 // ─────────────────────────────────────────────
 
-export const startApplication: ToolHandler = async (args, context) => {
+export const setApplication: ToolHandler = async (args, context) => {
   try {
-    const tierCode = args.tierCode as string | undefined
-    const levelCode = args.levelCode as string | undefined
-    const includesAddon = args.includesAddon as boolean | undefined
-
     const conv = await context.db.conversation.findUnique({
       where: { id: context.conversationId },
       select: { productId: true, candidateProductId: true },
     })
-    // DNT gate (B2.6): the customer-scoped Dnt aggregate is the only truth.
-    const dntValid = await hasValidDnt(context.customerId, 'LIFE', context.db)
-    if (!dntValid) return { success: false, error: 'DNT must be signed before starting an application.' }
-
-    const existing = await context.db.application.findUnique({ where: { conversationId: context.conversationId } })
-    if (existing && existing.status === 'OPEN') {
-      return { success: true, data: { alreadyExists: true, applicationId: existing.id }, message: 'An open application already exists for this conversation.' }
+    const productId: string | null =
+      (args.productId as string | undefined) ?? context.product?.id ?? conv?.productId ?? conv?.candidateProductId ?? null
+    if (!productId) {
+      return { success: false, error: 'no_candidate_product: choose the product first (set_candidate_product).' }
     }
 
-    const productId: string | null = context.product?.id ?? conv?.productId ?? conv?.candidateProductId ?? null
-    if (!productId) return { success: false, error: 'No product selected. Call set_candidate_product first or pass an explicit productId.' }
-
-    let tierId: string | null = null
-    if (tierCode) {
-      const tier = await context.db.pricingTier.findFirst({ where: { productId, code: tierCode } })
-      if (!tier) return { success: false, error: `Pricing tier "${tierCode}" not found for this product. Provide a valid tier code.` }
-      tierId = tier.id
+    // customer-scoped uniqueness: one live application per (customer, product)
+    const existing = await context.db.application.findFirst({
+      where: { customerId: context.customerId, productId, status: { in: ['OPEN', 'PAUSED', 'REFERRED'] } },
+    })
+    if (existing) {
+      return { success: false, error: `application_already_open: ${existing.id} (status ${existing.status}) — resume it instead.` }
     }
-
-    let levelId: string | null = null
-    if (levelCode) {
-      if (!tierId) return { success: false, error: 'levelCode requires tierCode to be provided first.' }
-      const level = await context.db.pricingLevel.findFirst({ where: { tierId, code: levelCode } })
-      if (!level) return { success: false, error: `Pricing level "${levelCode}" not found for the selected tier. Provide a valid level code.` }
-      levelId = level.id
-    }
-
-    const codes = await resolveGroupCodes(productId, 'application')
-    const progress = await calculateProgress(codes, { kind: 'conversation', conversationId: context.conversationId })
 
     const application = await context.db.application.create({
       data: {
-        conversationId: context.conversationId,
         customerId: context.customerId,
-        productId,
-        tierId,
-        levelId,
-        includesAddon: includesAddon ?? false,
+        productId, // frozen (T5.D3): coverage moves via select_coverage, product changes need a new application
+        originConversationId: context.conversationId,
         status: 'OPEN',
-        currentQuestionIndex: 0,
-        totalQuestions: progress.total,
       },
     })
+    await context.db.conversation.update({
+      where: { id: context.conversationId },
+      data: { activeApplicationId: application.id, productId },
+    })
 
-    // Record the conversational selections as Answers so getNextQuestion skips them.
-    const recordSelection = async (questionCode: string, value: string) => {
-      const q = await context.db.question.findFirst({ where: { code: questionCode, group: { code: { in: codes } } } })
-      if (!q) return
-      await context.db.answer.upsert({
-        where: { questionId_conversationId: { questionId: q.id, conversationId: context.conversationId } },
-        create: { questionId: q.id, conversationId: context.conversationId, value },
-        update: { value, answeredAt: new Date() },
-      })
-    }
-    if (tierCode) await recordSelection('PACKAGE_CHOICE', tierCode)
-    if (levelCode) await recordSelection('PREMIUM_LEVEL', levelCode)
-    // !== undefined (not truthiness): includesAddon === false is a meaningful answer that must be recorded
-    if (includesAddon !== undefined) await recordSelection('BD_ADDON_INTEREST', String(includesAddon))
-
-    if (context.product?.id !== productId) {
-      await context.db.conversation.update({ where: { id: context.conversationId }, data: { productId } })
-    }
-
-    const result = await getNextQuestion(codes, { kind: 'conversation', conversationId: context.conversationId })
-    if (!result) return { success: false, error: 'No application questions configured.' }
-
-    const lang = context.language ?? 'ro'
-    const q = result.question
-    const text = q.text as { en: string; ro: string }
-    // ADD-3 (T4-R6, G6): soft verification offer — a FLAG for the copy
-    // layer, never a wall; the funnel continues either way.
+    // R6 soft offer (ADD-3): a flag for the copy layer, never a wall.
     const facts = await getIdentityFacts(context.customerId, context.db)
-    const verificationOffer = deriveIdentityTier(facts) !== 'verified_channel'
+    const softOffer = deriveIdentityTier(facts) !== 'verified_channel'
+
     return {
       success: true,
       data: {
-        applicationStarted: true,
         applicationId: application.id,
-        currentQuestion: { id: q.id, code: q.code, text: text[lang], helpText: q.helpText ? (q.helpText as { en: string; ro: string })[lang] : null, type: q.type, options: q.options },
-        progress: result.progress,
-        ...(verificationOffer ? { verificationOffer: true } : {}),
+        productFrozen: productId,
+        ...(softOffer ? { softOffer: 'channel_verification' } : {}),
       },
-      message: 'Application started.',
-      uiAction: { type: 'show_question', payload: { question: { id: q.id, code: q.code, text: q.text as { en: string; ro: string }, helpText: q.helpText as { en: string; ro: string } | null, type: q.type, options: q.options }, progress: result.progress, groupType: 'application' } as unknown as Record<string, unknown> },
+      message: 'Application opened for the product in focus. The needs analysis (DNT) gates the questionnaire, and coverage is chosen with select_coverage.',
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -129,57 +102,42 @@ export const startApplication: ToolHandler = async (args, context) => {
 }
 
 // ─────────────────────────────────────────────
-// save_application_answer
+// save_application_answer (B4.1 re-key)
 // ─────────────────────────────────────────────
 
 export const saveApplicationAnswer: ToolHandler = async (args, context) => {
   const answer = args.answer as string
-  const fieldArg = args.field as string | undefined
 
   try {
-    // Find the active application
-    const application = await context.db.application.findUnique({
-      where: { conversationId: context.conversationId },
-    })
+    const application = await loadActiveApplication(context)
     if (!application || application.status !== 'OPEN') {
-      return {
-        success: false,
-        error: 'No open application found. Please start an application first.',
-      }
+      return { success: false, error: 'No open application found. Please set an application first.' }
     }
 
-    // Determine active group codes from product via resolver
-    const activeGroupCodes = await appGroupCodes(context)
-    const activeGroupType = 'application'
+    const activeGroupCodes = await appGroupCodesFor(context, application.includesAddon)
+    const scope = { kind: 'application' as const, applicationId: application.id }
 
-    // Get current question
-    const currentResult = await getNextQuestion(activeGroupCodes, { kind: 'conversation', conversationId: context.conversationId })
+    const currentResult = await getNextQuestion(activeGroupCodes, scope)
     if (!currentResult) {
       return {
         success: true,
-        data: { alreadyComplete: true, applicationId: application.id },
+        data: { alreadyComplete: true, applicationId: application.id, readyForQuote: true },
         message: 'All application questions have already been answered.',
       }
     }
 
     const currentQuestion = currentResult.question
 
-    // Refetch question with group + insightKey (needed for insight bump)
     const questionMeta = await context.db.question.findUnique({
       where: { id: currentQuestion.id },
       include: { group: true },
     })
-
-    // Capture pre-existing insight (if any) to detect confirmed/denied for bd_medical
     const priorInsight = questionMeta?.insightKey
       ? await context.db.customerInsight.findUnique({
-          where: {
-            customerId_key: { customerId: context.customerId, key: questionMeta.insightKey },
-          },
+          where: { customerId_key: { customerId: context.customerId, key: questionMeta.insightKey } },
         })
       : null
 
-    // Validate
     const validation = validateAnswer(
       { type: currentQuestion.type, options: currentQuestion.options, validationRules: currentQuestion.validationRules },
       answer,
@@ -188,174 +146,71 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
       return { success: false, error: validation.error ?? 'Invalid answer.' }
     }
 
-    // Check flags
     const flagResult = checkForFlags(currentQuestion.validationRules, validation.normalizedValue)
 
-    // If escalate: pause application
-    if (flagResult.flagged && flagResult.action === 'escalate') {
-      // Save answer first
-      await context.db.answer.upsert({
-        where: {
-          questionId_conversationId: {
-            questionId: currentQuestion.id,
-            conversationId: context.conversationId,
-          },
-        },
-        create: {
-          questionId: currentQuestion.id,
-          conversationId: context.conversationId,
-          value: validation.normalizedValue,
-        },
-        update: {
-          value: validation.normalizedValue,
-          answeredAt: new Date(),
-        },
+    const saveAnswer = () =>
+      context.db.answer.upsert({
+        where: { questionId_applicationId: { questionId: currentQuestion.id, applicationId: application.id } },
+        create: { questionId: currentQuestion.id, applicationId: application.id, value: validation.normalizedValue },
+        update: { value: validation.normalizedValue, answeredAt: new Date() },
       })
 
-      // Accumulate flag
+    // escalate-class flag: save, pause, surface
+    if (flagResult.flagged && flagResult.action === 'escalate') {
+      await saveAnswer()
       const existingFlags = (application.flagsForReview as unknown as Array<Record<string, unknown>>) ?? []
-      const newFlag = {
-        questionCode: currentQuestion.code,
-        answer: validation.normalizedValue,
-        reason: flagResult.reason,
-        action: flagResult.action,
-      }
-
+      const newFlag = { questionCode: currentQuestion.code, answer: validation.normalizedValue, reason: flagResult.reason, action: flagResult.action }
       await context.db.application.update({
         where: { id: application.id },
-        data: {
-          status: 'PAUSED',
-          flagsForReview: JSON.parse(JSON.stringify([...existingFlags, newFlag])),
-        },
+        data: { status: 'PAUSED', flagsForReview: JSON.parse(JSON.stringify([...existingFlags, newFlag])) },
       })
-
       return {
         success: true,
-        data: {
-          answerSaved: true,
-          escalated: true,
-          reason: flagResult.reason,
-          applicationId: application.id,
-        },
+        data: { answerSaved: true, escalated: true, reason: flagResult.reason, applicationId: application.id },
         message: `Application paused for review. ${flagResult.reason ?? 'This answer requires human review.'}`,
       }
     }
 
-    // Accumulate soft flags
     if (flagResult.flagged && flagResult.action === 'flag') {
       const existingFlags = (application.flagsForReview as unknown as Array<Record<string, unknown>>) ?? []
-      const newFlag = {
-        questionCode: currentQuestion.code,
-        answer: validation.normalizedValue,
-        reason: flagResult.reason,
-        action: 'flag',
-      }
+      const newFlag = { questionCode: currentQuestion.code, answer: validation.normalizedValue, reason: flagResult.reason, action: 'flag' }
       await context.db.application.update({
         where: { id: application.id },
-        data: {
-          flagsForReview: JSON.parse(JSON.stringify([...existingFlags, newFlag])),
-        },
+        data: { flagsForReview: JSON.parse(JSON.stringify([...existingFlags, newFlag])) },
       })
     }
 
-    // Save answer
-    await context.db.answer.upsert({
-      where: {
-        questionId_conversationId: {
-          questionId: currentQuestion.id,
-          conversationId: context.conversationId,
-        },
-      },
-      create: {
-        questionId: currentQuestion.id,
-        conversationId: context.conversationId,
-        value: validation.normalizedValue,
-      },
-      update: {
-        value: validation.normalizedValue,
-        answeredAt: new Date(),
-      },
-    })
-
-    // Special question handling by code
-    // Use fieldArg if provided (from UI direct field set), otherwise check currentQuestion.code
-    const effectiveCode = fieldArg ?? currentQuestion.code
-    const updateData: Record<string, unknown> = {
-      currentQuestionIndex: application.currentQuestionIndex + 1,
-    }
-
-    if (effectiveCode === 'PACKAGE_CHOICE') {
-      // Resolve PricingTier by answer value (e.g., "standard" or "optim")
-      const tier = await context.db.pricingTier.findFirst({
-        where: { productId: application.productId, code: validation.normalizedValue },
-      })
-      if (tier) updateData.tierId = tier.id
-      trackProductSelected(context.customerId, validation.normalizedValue, '')
-    }
-
-    if (effectiveCode === 'PREMIUM_LEVEL') {
-      // Resolve PricingLevel by answer value (e.g., "level_1")
-      if (application.tierId) {
-        const level = await context.db.pricingLevel.findFirst({
-          where: { tierId: application.tierId, code: validation.normalizedValue },
-        })
-        if (level) updateData.levelId = level.id
-      }
-      trackProductSelected(context.customerId, '', validation.normalizedValue)
-    }
-
-    if (effectiveCode === 'BD_ADDON_INTEREST') {
-      updateData.includesAddon = validation.normalizedValue === 'true'
-    }
-
+    await saveAnswer()
     await context.db.application.update({
       where: { id: application.id },
-      data: updateData,
+      data: { currentQuestionIndex: application.currentQuestionIndex + 1 },
     })
 
-    // Bump insight + write compliance resolution log for bd_medical CONTEXT HITs
     if (questionMeta?.insightKey) {
       await bumpInsightOnAnswer({
         customerId: context.customerId,
         conversationId: context.conversationId,
-        question: {
-          id: questionMeta.id,
-          code: questionMeta.code,
-          insightKey: questionMeta.insightKey,
-          group: { code: questionMeta.group.code },
-        },
+        question: { id: questionMeta.id, code: questionMeta.code, insightKey: questionMeta.insightKey, group: { code: questionMeta.group.code } },
         answerValue: validation.normalizedValue,
         previousInsightValue: priorInsight?.value,
         previousInsightCategory: priorInsight?.category,
       })
     }
 
-    // Get next question
-    const nextResult = await getNextQuestion(activeGroupCodes, { kind: 'conversation', conversationId: context.conversationId })
-
+    const nextResult = await getNextQuestion(activeGroupCodes, scope)
     if (!nextResult) {
-      // Mark application as COMPLETED
-      await context.db.application.update({
-        where: { id: application.id },
-        data: { status: 'COMPLETED', completedAt: new Date() },
-      })
-
+      // Completeness is DERIVED (missingCodes = []) — the status machine
+      // stays OPEN; generate_quote exposure turns on from the derived state.
       return {
         success: true,
-        data: {
-          answerSaved: true,
-          isComplete: true,
-          applicationId: application.id,
-          readyForQuote: true,
-        },
-        message: 'Application complete! All questions answered. Ready to generate a quote.',
+        data: { answerSaved: true, isComplete: true, applicationId: application.id, readyForQuote: true },
+        message: 'Application questionnaire complete. Choose coverage with select_coverage if not chosen, then generate the quote.',
       }
     }
 
     const lang = context.language ?? 'ro'
     const nq = nextResult.question
     const nqText = nq.text as { en: string; ro: string }
-
     return {
       success: true,
       data: {
@@ -375,16 +230,9 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
       uiAction: {
         type: 'show_question',
         payload: {
-          question: {
-            id: nq.id,
-            code: nq.code,
-            text: nq.text as { en: string; ro: string },
-            helpText: nq.helpText as { en: string; ro: string } | null,
-            type: nq.type,
-            options: nq.options,
-          },
+          question: { id: nq.id, code: nq.code, text: nq.text as { en: string; ro: string }, helpText: nq.helpText as { en: string; ro: string } | null, type: nq.type, options: nq.options },
           progress: nextResult.progress,
-          groupType: activeGroupType,
+          groupType: 'application',
         } as unknown as Record<string, unknown>,
       },
     }
@@ -398,63 +246,68 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
 // single on-demand detail read.
 
 // ─────────────────────────────────────────────
-// resume_application
+// resume_application (B4.6) — cross-conversation
 // ─────────────────────────────────────────────
 
-export const resumeApplication: ToolHandler = async (_args, context) => {
+/**
+ * Deliberate deviation from the catalog R-classification (recorded per
+ * erratum 6): binding the conversation pointer and unpausing ARE state
+ * changes, so resume_application is a commit whose data payload carries the
+ * position read — the pure-read half of T5.D4 lives in `position`.
+ */
+export const resumeApplication: ToolHandler = async (args, context) => {
   try {
-    const application = await context.db.application.findUnique({
-      where: { conversationId: context.conversationId },
-    })
-
-    if (!application || application.status !== 'PAUSED') {
-      return {
-        success: false,
-        error: 'No paused application found to resume.',
-      }
+    const requestedId = args.applicationId as string | undefined
+    const application = requestedId
+      ? await context.db.application.findUnique({ where: { id: requestedId } })
+      : await context.db.application.findFirst({
+          where: { customerId: context.customerId, status: { in: ['OPEN', 'PAUSED', 'REFERRED'] } },
+          orderBy: { updatedAt: 'desc' },
+        })
+    if (!application || application.customerId !== context.customerId) {
+      return { success: false, error: 'No resumable application found for this customer.' }
+    }
+    if (application.status === 'REFERRED') {
+      return { success: false, error: 'with_underwriter: the application is under review — it resumes when the underwriter answers.' }
+    }
+    if (application.status !== 'OPEN' && application.status !== 'PAUSED') {
+      return { success: false, error: `illegal_status_transition: a ${application.status} application cannot be resumed.` }
     }
 
-    // Set to OPEN
-    await context.db.application.update({
-      where: { id: application.id },
-      data: { status: 'OPEN' },
+    if (application.status === 'PAUSED') {
+      await context.db.application.update({ where: { id: application.id }, data: { status: 'OPEN' } })
+    }
+    await context.db.conversation.update({
+      where: { id: context.conversationId },
+      data: { activeApplicationId: application.id, productId: application.productId },
     })
 
-    // Get next question
-    const nextResult = await getNextQuestion(await appGroupCodes(context), { kind: 'conversation', conversationId: context.conversationId })
-
-    if (!nextResult) {
-      return {
-        success: true,
-        data: {
-          applicationId: application.id,
-          alreadyComplete: true,
-          readyForQuote: true,
-        },
-        message: 'Application resumed. All questions already answered — ready for quote generation.',
-      }
-    }
+    const codes = await appGroupCodesFor(context, application.includesAddon)
+    const scope = { kind: 'application' as const, applicationId: application.id }
+    const [next, progress, tier, level] = await Promise.all([
+      getNextQuestion(codes, scope),
+      calculateProgress(codes, scope),
+      application.tierId ? context.db.pricingTier.findUnique({ where: { id: application.tierId } }) : null,
+      application.levelId ? context.db.pricingLevel.findUnique({ where: { id: application.levelId } }) : null,
+    ])
 
     const lang = context.language ?? 'ro'
-    const nq = nextResult.question
-    const nqText = nq.text as { en: string; ro: string }
-
     return {
       success: true,
       data: {
-        applicationId: application.id,
-        resumed: true,
-        currentQuestion: {
-          id: nq.id,
-          code: nq.code,
-          text: nqText[lang],
-          helpText: nq.helpText ? (nq.helpText as { en: string; ro: string })[lang] : null,
-          type: nq.type,
-          options: nq.options,
+        position: {
+          applicationId: application.id,
+          status: 'OPEN',
+          progress,
+          nextQuestion: next
+            ? { id: next.question.id, code: next.question.code, text: (next.question.text as { en: string; ro: string })[lang], type: next.question.type, options: next.question.options }
+            : null,
+          selection: { tier: tier?.code ?? null, level: level?.code ?? null, addon: application.includesAddon },
         },
-        progress: nextResult.progress,
       },
-      message: 'Application resumed. Let\'s continue where you left off.',
+      message: next
+        ? 'Application resumed — continuing where the customer left off.'
+        : 'Application resumed. All questions already answered — ready for coverage selection / quote.',
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -462,37 +315,81 @@ export const resumeApplication: ToolHandler = async (_args, context) => {
 }
 
 // ─────────────────────────────────────────────
-// cancel_application
+// cancel_application (B4.5) — confirmed, terminal
 // ─────────────────────────────────────────────
 
 export const cancelApplication: ToolHandler = async (args, context) => {
   const reason = (args.reason as string | undefined) ?? 'cancelled'
 
   try {
-    const application = await context.db.application.findUnique({
-      where: { conversationId: context.conversationId },
-    })
-
-    if (!application || application.status === 'COMPLETED') {
-      return {
-        success: false,
-        error: 'No active application found to cancel.',
-      }
+    const application = await loadActiveApplication(context)
+    if (!application) {
+      return { success: false, error: 'No active application found to cancel.' }
+    }
+    if (!canTransition(application.status as AppStatus, 'CANCELLED')) {
+      return { success: false, error: `illegal_status_transition: a ${application.status} application cannot be cancelled.` }
     }
 
+    const flags = (application.flagsForReview as unknown as Array<Record<string, unknown>>) ?? []
     await context.db.application.update({
       where: { id: application.id },
-      data: { status: 'COMPLETED', completedAt: new Date() },
+      data: {
+        status: 'CANCELLED', // T5.D6: cancel is distinguishable from completion
+        completedAt: null,
+        flagsForReview: JSON.parse(JSON.stringify([...flags, { cancelReason: reason }])),
+      },
+    })
+    await context.db.conversation.update({
+      where: { id: context.conversationId },
+      data: { activeApplicationId: null },
     })
 
     return {
       success: true,
-      data: {
-        applicationId: application.id,
-        status: 'COMPLETED',
-        reason,
-      },
+      data: { applicationId: application.id, status: 'CANCELLED', reason },
+      effects: ['terminal'],
       message: 'Application cancelled.',
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
+
+// ─────────────────────────────────────────────
+// get_last_application_info (B4.6) — prefill-as-proposals, pure read
+// ─────────────────────────────────────────────
+
+export const getLastApplicationInfo: ToolHandler = async (_args, context) => {
+  try {
+    const conv = await context.db.conversation.findUnique({
+      where: { id: context.conversationId },
+      select: { productId: true, candidateProductId: true },
+    }).catch(() => null)
+    const focusProductId = context.product?.id ?? conv?.productId ?? conv?.candidateProductId ?? undefined
+
+    const prior = await context.db.application.findFirst({
+      where: { customerId: context.customerId, status: 'COMPLETED', ...(focusProductId ? { productId: focusProductId } : {}) },
+      orderBy: { completedAt: 'desc' },
+    })
+    if (!prior) {
+      return { success: true, data: { proposals: [] }, message: 'No completed prior application — nothing to propose.' }
+    }
+
+    const answers = await context.db.answer.findMany({
+      where: { applicationId: prior.id },
+      include: { question: { select: { code: true } } },
+      orderBy: { answeredAt: 'asc' },
+    })
+    // PROPOSALS, not answers (T5.D5): each needs the customer's per-question
+    // confirmation via a real save_application_answer commit stamped now.
+    const proposals = answers
+      .filter((a) => a.question.code)
+      .map((a) => ({ questionCode: a.question.code as string, suggestedAnswer: a.value, answeredAt: a.answeredAt.toISOString() }))
+
+    return {
+      success: true,
+      data: { applicationId: prior.id, completedAt: prior.completedAt?.toISOString() ?? null, proposals },
+      message: `Found ${proposals.length} prior answers as proposals — confirm each with the customer before saving; never copy silently.`,
     }
   } catch (error) {
     return { success: false, error: String(error) }

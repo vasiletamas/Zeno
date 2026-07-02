@@ -23,6 +23,12 @@ async function main() {
       `CREATE UNIQUE INDEX IF NOT EXISTS "DntSession_one_active_per_customer" ON "DntSession"("customerId") WHERE "status" = 'ACTIVE'`,
     )
 
+    // B4.1: at most one live application per (customer, product) — same
+    // partial-unique mechanism, same bootstrap home.
+    await prisma.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "Application_one_open_per_product" ON "Application"("customerId", "productId") WHERE "status" IN ('OPEN','PAUSED','REFERRED')`,
+    )
+
     await seedProduct(prisma)
     await seedQuestions(prisma)
     await seedObjections(prisma)

@@ -544,6 +544,7 @@ model Conversation {
   candidateProductId  String?
   candidateConfidence Int?
   candidateSetAt      DateTime?
+  activeApplicationId String? // T5.D4 channel pointer to the customer-scoped application (B4.1)
   status              ConversationStatus @default(ACTIVE)
   channel             String             @default("web")
   language            String             @default("ro")
@@ -561,8 +562,6 @@ model Conversation {
   candidateProduct Product?             @relation("ConversationCandidateProduct", fields: [candidateProductId], references: [id])
   messages         Message[]
   summary          ConversationSummary?
-  answers          Answer[]
-  application      Application?
   turnTraces       TurnTrace[]
   turnDebugs       TurnDebug[]
   score            ConversationScore?
@@ -642,25 +641,30 @@ model Question {
 }
 
 model Answer {
-  id             String   @id @default(cuid())
-  questionId     String
-  conversationId String
-  value          String
-  answeredAt     DateTime @default(now())
+  id            String   @id @default(cuid())
+  questionId    String
+  applicationId String
+  value         String
+  answeredAt    DateTime @default(now())
 
-  question     Question     @relation(fields: [questionId], references: [id])
-  conversation Conversation @relation(fields: [conversationId], references: [id])
+  question    Question    @relation(fields: [questionId], references: [id])
+  application Application @relation(fields: [applicationId], references: [id])
 
-  @@unique([questionId, conversationId])
+  @@unique([questionId, applicationId])
 }
 
 // ==========================================
 // DOMAIN: QUOTE AND POLICY
 // ==========================================
 
+// B4.1: applications are CUSTOMER-scoped (at most one open per customer ×
+// product — raw-SQL partial unique index in the seed bootstrap, Prisma
+// cannot express it). Conversations point at an application via
+// Conversation.activeApplicationId (T5.D4); originConversationId is audit
+// only. Answers key on the application, not the conversation.
 model Application {
   id                   String            @id @default(cuid())
-  conversationId       String            @unique
+  originConversationId String?
   customerId           String
   productId            String
   tierId               String?
@@ -674,12 +678,14 @@ model Application {
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
 
-  conversation Conversation  @relation(fields: [conversationId], references: [id])
   customer     Customer      @relation(fields: [customerId], references: [id])
   product      Product       @relation(fields: [productId], references: [id])
   tier         PricingTier?  @relation(fields: [tierId], references: [id])
   level        PricingLevel? @relation(fields: [levelId], references: [id])
   quote        Quote?
+  answers      Answer[]
+
+  @@index([customerId, status])
 }
 
 model Quote {

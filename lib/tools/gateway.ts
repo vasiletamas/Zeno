@@ -45,7 +45,7 @@ export interface CommitRequest {
  * material hash: a same-value resubmit replays, a new value is a fresh commit.
  * Every other commit replays only on identical material args.
  */
-const ONE_SHOT = new Set(['sign_dnt', 'accept_quote', 'generate_quote', 'start_application'])
+const ONE_SHOT = new Set(['sign_dnt', 'accept_quote', 'generate_quote', 'set_application'])
 
 /**
  * State-guarded commits (B2.5): duplicates are answered by the ENGINE with a
@@ -73,13 +73,12 @@ export function resolveTargetRef(tool: string, args: Record<string, unknown>, st
   if (tool === 'collect_customer_field') return `field:${String(args.field ?? 'unknown')}`
   if (tool === 'write_dnt_answer') return `dnt_answer:${String(args.questionCode ?? 'unknown')}`
   if (tool === 'save_application_answer') return `app_answer:${String(args.field ?? 'auto')}`
-  if (tool === 'set_answer') return `question:${String(args.questionCode ?? 'unknown')}`
   if (tool === 'withdraw_consent') return `consent:${String(args.kind ?? 'unknown')}`
   if (OPERATOR_TOOLS.has(tool)) return `work_item:${String(args.workItemId ?? 'unknown')}`
   // one-shot / entity-scoped commits — stable natural key
   if (tool === 'sign_dnt') return `dnt_session:${state.dnt.activeSessionId ?? 'none'}` // B2.6: customer-scoped renewals may recur per conversation
   if (tool === 'accept_quote' || tool === 'modify_quote') return `quote:${state.quote?.id ?? 'none'}`
-  if (tool === 'generate_quote') return `application:${state.application?.id ?? 'none'}`
+  if (tool === 'generate_quote' || tool === 'set_application') return `application:${state.application?.id ?? 'none'}`
   if (tool === 'initiate_payment') return `policy:${state.policy?.id ?? 'none'}`
   return `conversation:${conversationId}`
 }
@@ -252,7 +251,9 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
     const effectiveArgs = { ...validatedArgs, ...(requiresConfirmation ? CONFIRM_ARG_INJECTION[req.tool] ?? {} : {}) }
     const handlerResult: ToolResult = await handler(effectiveArgs, { ...req.toolContext, db: tx })
     const post = deriveAndExpose(await loadDomainSnapshot(req.conversationId, tx))
-    const effects: CommitEffect[] = []
+    // handler-declared domain effects (B4) merge with the gateway's own
+    // advance_phase delta; C1's planner supersedes handler declarations.
+    const effects: CommitEffect[] = handlerResult.success ? [...(handlerResult.effects ?? [])] : []
     let phaseDelta: CommitResult['phaseDelta']
     if (lockedPre.state.phase !== post.state.phase || lockedPre.state.subphase !== post.state.subphase) {
       effects.push('advance_phase')

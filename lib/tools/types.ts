@@ -76,6 +76,13 @@ export interface ToolResult {
    * result. Serialized VERBATIM to the model; reads never carry one.
    */
   envelope?: CommitResult
+  /**
+   * Domain effects a COMMIT handler declares (B4: re_rating,
+   * cascade_expand, questions_removed, terminal). The gateway merges them
+   * into the envelope alongside its own advance_phase delta. The C1
+   * consequence planner supersedes handler-declared effects when it lands.
+   */
+  effects?: CommitResult['effects']
   data?: Record<string, unknown>
   error?: string
   message?: string

@@ -13,12 +13,12 @@ describe('resolve_referral (actor=operator)', () => {
   beforeEach(async () => { await resetFunnelTables() })
 
   it('rejects non-operator actors with actor_not_permitted', async () => {
-    const { app, item } = await seedReferredApplication()
+    const { app, item, conversationId } = await seedReferredApplication()
     const r = await executeCommit({
       tool: 'resolve_referral', actor: 'agent',
-      conversationId: app.conversationId, customerId: app.customerId,
+      conversationId, customerId: app.customerId,
       args: { workItemId: item.id, decision: 'approve' },
-      toolContext: ctx(app.customerId, app.conversationId),
+      toolContext: ctx(app.customerId, conversationId),
     })
     expect(r).toMatchObject({ outcome: 'rejected', reason: 'actor_not_permitted' })
   })
@@ -51,13 +51,13 @@ describe('resolve_referral (actor=operator)', () => {
   })
 
   it('rejects resolution of a non-OPEN work item with work_item_not_open', async () => {
-    const { app, item } = await seedReferredApplication()
+    const { app, item, conversationId } = await seedReferredApplication()
     await prisma.workItem.update({ where: { id: item.id }, data: { status: 'RESOLVED' } })
     const r = await executeCommit({
       tool: 'resolve_referral', actor: 'operator',
-      conversationId: app.conversationId, customerId: app.customerId,
+      conversationId, customerId: app.customerId,
       args: { workItemId: item.id, decision: 'approve' },
-      toolContext: ctx(app.customerId, app.conversationId),
+      toolContext: ctx(app.customerId, conversationId),
     })
     expect(r).toMatchObject({ outcome: 'rejected', reason: 'work_item_not_open' })
   })

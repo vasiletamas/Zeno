@@ -116,12 +116,16 @@ export async function DELETE(request: NextRequest) {
       `verificationChallenges (${challengeResult.count} records)`,
     )
 
-    // 2. Delete Answers for customer's conversations
-    if (conversationIds.length > 0) {
-      const deleteResult = await prisma.answer.deleteMany({
-        where: { conversationId: { in: conversationIds } },
-      })
-      deletedFields.push(`answers (${deleteResult.count} records)`)
+    // 2. Delete Answers for the customer's applications (B4: answers are
+    // application-scoped)
+    {
+      const apps = await prisma.application.findMany({ where: { customerId }, select: { id: true } })
+      if (apps.length > 0) {
+        const deleteResult = await prisma.answer.deleteMany({
+          where: { applicationId: { in: apps.map((a) => a.id) } },
+        })
+        deletedFields.push(`answers (${deleteResult.count} records)`)
+      }
     }
 
     // 3. Anonymize user Messages — replace content

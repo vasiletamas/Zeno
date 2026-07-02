@@ -23,19 +23,16 @@ export default async function ApplicationDetailPage({
       product: { select: { name: true, code: true } },
       tier: { select: { name: true, code: true } },
       level: { select: { name: true, code: true } },
-      conversation: {
+      // B4: answers key on the application itself
+      answers: {
         include: {
-          answers: {
+          question: {
             include: {
-              question: {
-                include: {
-                  group: { select: { name: true, code: true } },
-                },
-              },
+              group: { select: { name: true, code: true } },
             },
-            orderBy: { answeredAt: 'asc' },
           },
         },
+        orderBy: { answeredAt: 'asc' },
       },
       quote: true,
     },

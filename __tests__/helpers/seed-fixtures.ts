@@ -28,37 +28,39 @@ export async function seedReferredApplication() {
   const tier = await prisma.pricingTier.findFirstOrThrow({ where: { productId, isActive: true }, orderBy: { orderIndex: 'asc' } })
   const level = await prisma.pricingLevel.findFirstOrThrow({ where: { tierId: tier.id, isActive: true }, orderBy: { orderIndex: 'asc' } })
 
-  // A real pre-referral application went through the full questionnaire —
-  // answer every application-phase question (resolved exactly like the
-  // snapshot loader: product groups + global groups) so an approved app
-  // derives straight back to QUOTE_GENERATION (missingCodes must be empty).
-  const groupCodes = (await resolveGroupCodes(productId, 'application')) ?? []
-  const appQuestions = groupCodes.length > 0
-    ? await prisma.question.findMany({ where: { group: { code: { in: groupCodes } } } })
-    : []
-  const valueFor = (code: string): string => {
-    if (code === 'PACKAGE_CHOICE') return tier.code
-    if (code === 'PREMIUM_LEVEL') return level.code
-    if (code === 'BD_ADDON_INTEREST') return 'false'
-    if (code === 'PAYMENT_FREQUENCY') return 'annual'
-    return 'true' // HEALTH_DECLARATION_CONFIRM and future booleans
-  }
-  await prisma.answer.createMany({
-    data: appQuestions.map((q) => ({ questionId: q.id, conversationId, value: valueFor(q.code ?? '') })),
-  })
-
+  // B4: the application is customer-scoped and the conversation points at
+  // it; answers key on the application.
   const app = await prisma.application.create({
     data: {
-      conversationId,
+      originConversationId: conversationId,
       customerId,
       productId,
       tierId: tier.id,
       levelId: level.id,
       includesAddon: false,
       status: 'REFERRED',
-      currentQuestionIndex: appQuestions.length,
-      totalQuestions: appQuestions.length,
     },
+  })
+  await prisma.conversation.update({ where: { id: conversationId }, data: { activeApplicationId: app.id } })
+
+  // A real pre-referral application went through the full questionnaire —
+  // answer every application-phase question (resolved exactly like the
+  // snapshot loader) so an approved app derives straight back to
+  // QUOTE_GENERATION (missingCodes must be empty).
+  const groupCodes = (await resolveGroupCodes(productId, 'application')) ?? []
+  const appQuestions = groupCodes.length > 0
+    ? await prisma.question.findMany({ where: { group: { code: { in: groupCodes } } } })
+    : []
+  const valueFor = (code: string): string => {
+    if (code === 'PAYMENT_FREQUENCY') return 'annual'
+    return 'true' // HEALTH_DECLARATION_CONFIRM and future booleans
+  }
+  await prisma.answer.createMany({
+    data: appQuestions.map((q) => ({ questionId: q.id, applicationId: app.id, value: valueFor(q.code ?? '') })),
+  })
+  await prisma.application.update({
+    where: { id: app.id },
+    data: { currentQuestionIndex: appQuestions.length, totalQuestions: appQuestions.length },
   })
   const item = await createReferralWorkItem({
     applicationId: app.id,

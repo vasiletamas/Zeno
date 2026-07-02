@@ -79,13 +79,18 @@ const signDntSchema = z.object({
 // APPLICATION TOOL SCHEMAS
 // ==============================================
 
-const startApplicationSchema = z.object({
+const setApplicationSchema = z.object({
   productId: z.string().optional(),
 }).strict()
 
 const saveApplicationAnswerSchema = z.object({
   answer: z.string().min(1, 'Answer is required'),
-  field: z.string().optional(),
+}).strict()
+
+const selectCoverageSchema = z.object({
+  tier: z.string().optional(),
+  level: z.string().optional(),
+  addon: z.boolean().optional(),
 }).strict()
 
 const resumeApplicationSchema = z.object({
@@ -94,6 +99,7 @@ const resumeApplicationSchema = z.object({
 
 const cancelApplicationSchema = z.object({
   reason: z.string().optional(),
+  confirmToken: z.string().optional(),
 }).strict()
 
 // ==============================================
@@ -209,11 +215,13 @@ const toolSchemas: Record<string, ZodType> = {
   write_dnt_answer: writeDntAnswerSchema,
   sign_dnt: signDntSchema,
 
-  // Application
-  start_application: startApplicationSchema,
+  // Application (B4 lifecycle)
+  set_application: setApplicationSchema,
   save_application_answer: saveApplicationAnswerSchema,
+  select_coverage: selectCoverageSchema,
   resume_application: resumeApplicationSchema,
   cancel_application: cancelApplicationSchema,
+  get_last_application_info: z.object({}).strict(),
 
   // Quote
   generate_quote: generateQuoteSchema,

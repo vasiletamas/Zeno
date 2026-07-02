@@ -3,11 +3,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // Mock Prisma
 const mockFindMany = vi.fn()
 const mockCreate = vi.fn()
+// B4: the scorer resolves the application via the activeApplicationId pointer
+const mockAppFindUnique = vi.fn()
 
 vi.mock('@/lib/db', () => ({
   prisma: {
     conversation: { findMany: (...args: unknown[]) => mockFindMany(...args) },
     conversationScore: { create: (...args: unknown[]) => mockCreate(...args) },
+    application: { findUnique: (...args: unknown[]) => mockAppFindUnique(...args) },
   },
 }))
 
@@ -24,22 +27,23 @@ describe('scoreConversations', () => {
         id: 'conv-1',
         messageCount: 12,
         mode: 'SALES',
-        application: {
-          id: 'app-1',
-          quote: {
-            id: 'quote-1',
-            policy: {
-              id: 'policy-1',
-              payments: [{ status: 'COMPLETED' }],
-            },
-          },
-        },
+        activeApplicationId: 'app-1',
         turnTraces: [
           { cost: 0.05, latencyMs: 2000, anomalies: [] },
           { cost: 0.03, latencyMs: 1500, anomalies: [{ type: 'latency' }] },
         ],
       },
     ])
+    mockAppFindUnique.mockResolvedValue({
+      id: 'app-1',
+      quote: {
+        id: 'quote-1',
+        policy: {
+          id: 'policy-1',
+          payments: [{ status: 'COMPLETED' }],
+        },
+      },
+    })
     mockCreate.mockResolvedValue({ id: 'score-1' })
 
     const result = await scoreConversations()
@@ -68,13 +72,14 @@ describe('scoreConversations', () => {
         id: 'conv-2',
         messageCount: 8,
         mode: 'SALES',
-        application: {
-          id: 'app-2',
-          quote: { id: 'quote-2', policy: null },
-        },
+        activeApplicationId: 'app-2',
         turnTraces: [{ cost: 0.02, latencyMs: 1000, anomalies: [] }],
       },
     ])
+    mockAppFindUnique.mockResolvedValue({
+      id: 'app-2',
+      quote: { id: 'quote-2', policy: null },
+    })
     mockCreate.mockResolvedValue({ id: 'score-2' })
 
     const result = await scoreConversations()
@@ -97,7 +102,7 @@ describe('scoreConversations', () => {
         id: 'conv-3',
         messageCount: 3,
         mode: 'SALES',
-        application: null,
+        activeApplicationId: null,
         turnTraces: [{ cost: 0.01, latencyMs: 500, anomalies: [] }],
       },
     ])

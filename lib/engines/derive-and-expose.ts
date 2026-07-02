@@ -3,6 +3,7 @@ import type { BlockedAction, DeriveAndExposeResult, DerivedStateV3, ReasonCode }
 import { checkIdentityRequirement, IDENTITY_REQUIREMENTS, type IdentityRequirementsTable } from './identity-requirements'
 import { consentBlocksCommit } from './consent-rules'
 import { dntExposure, type DntFact, type ProductTypeStr } from './dnt-rules'
+import { applicationExposure, canTransition, type AppStatus } from './application-rules'
 
 /**
  * Adapt the snapshot's DNT aggregate facts to the pure #12 exposure
@@ -35,12 +36,42 @@ const dntRule = (action: string, kind: 'read' | 'commit'): ActionRule => ({
 })
 
 /**
+ * Adapt the snapshot's application slice to the pure B4.2 lifecycle rules:
+ * the T5.D1 DNT gate lives in questionnaire exposure, selection
+ * incompleteness is a generate_quote blocked-reason (#10).
+ */
+function appExposureFromSnapshot(s: DomainSnapshot): ReturnType<typeof applicationExposure> {
+  return applicationExposure({
+    application: s.application
+      ? { exists: true, status: s.application.status as AppStatus, tier: s.application.tier, level: s.application.level, addon: s.application.addon, answersComplete: s.application.missingCodes.length === 0 }
+      : { exists: false, status: 'OPEN', tier: null, level: null, addon: null, answersComplete: false },
+    dntValidForProduct: s.dnt.valid && (s.product ? s.dnt.coversProductTypes.includes(s.product.insuranceType) : false),
+  })
+}
+
+const appRule = (action: string): ActionRule => ({
+  action,
+  kind: 'commit',
+  exposedWhen: (s) => appExposureFromSnapshot(s).available.includes(action),
+  blockedReason: (s) => {
+    const b = appExposureFromSnapshot(s).blocked.find((x) => x.action === action)
+    if (b) return { reason: b.reason as ReasonCode, params: b.params }
+    // precise terminal answers the lifecycle rules stay silent about
+    if (s.application) {
+      if (action === 'cancel_application' && !canTransition(s.application.status as AppStatus, 'CANCELLED')) return { reason: 'illegal_status_transition' }
+      if (action === 'resume_application' && s.application.status === 'REFERRED') return { reason: 'with_underwriter' }
+    }
+    return null
+  },
+})
+
+/**
  * Engine version stamp carried in every per-turn legality snapshot
  * (debug:gate payload) so recompute-and-diff replay can tell which rule set
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.12.0' // 1.10.0: #1 identity rows land — generate_quote needs declared cnp-or-dob, accept_quote verified_channel, initiate_payment + product docs; tier derived from the provenance store (B3.2); 1.11.0: channel-verification commits exposed (start always, confirm on live challenge — B3.5); 1.12.0: request_document_upload exposed on unmet product doc requirements; identity gate resolves productDocuments from the snapshot (B3.7)
+export const engineVersion = '1.13.0' // 1.11.0: channel-verification commits exposed (B3.5); 1.12.0: request_document_upload + productDocuments gate (B3.7); 1.13.0: B4 lifecycle — set_application (no DNT pre-gate, T5.D1) + select_coverage via the pure application rules; set_answer/change_selection/switch_product/start_application retired; questionnaire DNT-gated in exposure; selection_incomplete is a generate_quote blocked-reason (#10)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -77,9 +108,9 @@ export const ACTION_RULES: ActionRule[] = [
   dntRule('open_dnt_session', 'commit'),
   dntRule('write_dnt_answer', 'commit'),
   { action: 'get_quote_details', kind: 'read', exposedWhen: (s) => s.quote !== null || s.acceptedQuote !== null },
+  { action: 'get_last_application_info', kind: 'read', exposedWhen: always }, // B4.6 prefill-as-proposals read
   { action: 'escalate_to_human', kind: 'commit', exposedWhen: always },
   { action: 'set_candidate_product', kind: 'commit', exposedWhen: always },
-  { action: 'switch_product', kind: 'commit', exposedWhen: (s) => s.product !== null },
   { action: 'collect_customer_field', kind: 'commit', exposedWhen: always },
   { action: 'withdraw_consent', kind: 'commit', exposedWhen: (s) => s.consents.hasAnyEvents },
   // B3.5: verification is offerable at any point (soft, never a wall pre-gate);
@@ -89,23 +120,32 @@ export const ACTION_RULES: ActionRule[] = [
   // B3.7: offerable while any product-required document is still unvalidated
   { action: 'request_document_upload', kind: 'commit', exposedWhen: (s) => Object.values(s.documents.requirementsByTool).flat().some((k) => !s.documents.validated.includes(k)) },
   dntRule('sign_dnt', 'commit'),
-  { action: 'start_application', kind: 'commit', exposedWhen: (s) => s.product !== null && s.dnt.valid && s.application === null,
-    blockedReason: (s) => (s.application !== null ? { reason: 'application_already_open' } : s.product !== null && !s.dnt.valid ? { reason: s.dnt.signed ? 'dnt_expired' : 'dnt_not_signed' } : null) },
-  { action: 'save_application_answer', kind: 'commit', exposedWhen: (s) => s.application?.status === 'OPEN' && s.application.missingCodes.length > 0 },
-  { action: 'set_answer', kind: 'commit', exposedWhen: (s) => s.application !== null },
-  { action: 'change_selection', kind: 'commit', exposedWhen: (s) => s.application !== null },
-  { action: 'resume_application', kind: 'commit', exposedWhen: (s) => s.application?.status === 'PAUSED' },
-  { action: 'cancel_application', kind: 'commit', exposedWhen: (s) => s.application !== null && s.application.status !== 'COMPLETED' },
+  // B4.3: set_application freezes PRODUCT only — NO DNT pre-gate (T5.D1);
+  // the questionnaire exposure below carries the DNT ordering flip.
+  { action: 'set_application', kind: 'commit', exposedWhen: (s) => (s.product !== null || s.candidateProductId !== null) && s.application === null,
+    blockedReason: (s) => (s.application !== null ? { reason: 'application_already_open', params: { applicationId: s.application.id } } : { reason: 'no_candidate_product' }) },
+  // B4.2: lifecycle exposure comes from the pure application rules
+  appRule('save_application_answer'),
+  appRule('select_coverage'),
+  appRule('resume_application'),
+  appRule('cancel_application'),
   { action: 'check_bd_eligibility', kind: 'commit', exposedWhen: (s) => s.application !== null && s.application.addon === true },
-  { action: 'generate_quote', kind: 'commit', exposedWhen: (s, d) => d.phase === 'APPLICATION' && d.subphase === 'QUOTE_GENERATION' && s.consents.gdprProcessing,
-    blockedReason: (s, d) => (d.subphase === 'QUOTE_GENERATION' && !s.consents.gdprProcessing ? { reason: 'requires_consent', params: { kind: 'gdpr_processing' } } : d.subphase === 'QUESTIONNAIRE' ? { reason: 'questionnaire_incomplete', params: { missing: s.application?.missingCodes.slice(0, 5) } } : d.phase === 'QUOTE' ? { reason: 'quote_already_issued' } : null) },
+  { action: 'generate_quote', kind: 'commit',
+    exposedWhen: (s, d) => d.phase === 'APPLICATION' && appExposureFromSnapshot(s).available.includes('generate_quote') && s.consents.gdprProcessing,
+    blockedReason: (s, d) => {
+      if (d.phase === 'QUOTE') return { reason: 'quote_already_issued' }
+      const b = appExposureFromSnapshot(s).blocked.find((x) => x.action === 'generate_quote')
+      if (b) return { reason: b.reason as ReasonCode, params: b.params }
+      if (appExposureFromSnapshot(s).available.includes('generate_quote') && !s.consents.gdprProcessing) return { reason: 'requires_consent', params: { kind: 'gdpr_processing' } }
+      return null
+    } },
   { action: 'accept_quote', kind: 'commit', exposedWhen: (_s, d) => d.phase === 'QUOTE',
     blockedReason: (s, d) => (d.phase === 'PAYMENT' || d.phase === 'POLICY' ? { reason: 'quote_already_accepted' } : s.application !== null && d.phase !== 'QUOTE' ? { reason: 'no_issued_quote' } : null) },
   { action: 'modify_quote', kind: 'commit', exposedWhen: (_s, d) => d.phase === 'QUOTE' },
   { action: 'initiate_payment', kind: 'commit', exposedWhen: (s) => s.policy !== null && s.policy.status === 'PENDING_SUBMISSION' },
 ]
 
-const NEXT_BEST_PRIORITY = ['initiate_payment', 'accept_quote', 'generate_quote', 'save_application_answer', 'sign_dnt', 'write_dnt_answer', 'open_dnt_session', 'start_application', 'set_candidate_product', 'list_products']
+const NEXT_BEST_PRIORITY = ['initiate_payment', 'accept_quote', 'generate_quote', 'select_coverage', 'save_application_answer', 'sign_dnt', 'write_dnt_answer', 'open_dnt_session', 'set_application', 'set_candidate_product', 'list_products']
 
 export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequirements?: IdentityRequirementsTable }): DeriveAndExposeResult {
   const d = derivePhase(s)

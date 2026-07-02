@@ -178,7 +178,7 @@ export async function GET(request: Request) {
             quote: {
               include: {
                 application: {
-                  select: { conversationId: true },
+                  select: { originConversationId: true },
                 },
               },
             },
@@ -188,7 +188,7 @@ export async function GET(request: Request) {
     })
 
     const conversationId =
-      paymentWithRelations?.policy?.quote?.application?.conversationId
+      paymentWithRelations?.policy?.quote?.application?.originConversationId
 
     const appUrl = process.env.APP_URL ?? 'http://localhost:3001'
 

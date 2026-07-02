@@ -34,9 +34,10 @@ export const resolveReferral: ToolHandler = async (args, context) => {
     const refs = item.refs as ReferralRefs
 
     if (decision === 'approve') {
-      // COMPLETED restores the pre-referral state — generate_quote's own gate
-      // demands a complete application (the plan's OPEN would dead-end it).
-      await context.db.application.update({ where: { id: refs.applicationId }, data: { status: 'COMPLETED' } })
+      // B4 status machine: REFERRED → OPEN is the underwriter-approval
+      // re-entry (canTransition); the follow-up system generate_quote runs
+      // on the OPEN, answers-complete application.
+      await context.db.application.update({ where: { id: refs.applicationId }, data: { status: 'OPEN' } })
       await context.db.workItem.update({
         where: { id: item.id },
         data: { status: 'RESOLVED', resolutionCode: 'approved', resolution: note ?? null, resolvedBy, resolvedAt: new Date() },

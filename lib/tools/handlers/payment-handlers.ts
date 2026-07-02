@@ -33,22 +33,19 @@ export const initiatePayment: ToolHandler = async (
 
     // If not in context, query the DB chain
     if (!policyId) {
+      // B4: the application hangs off the activeApplicationId pointer
       const conversation = await context.db.conversation.findUnique({
         where: { id: context.conversationId },
-        include: {
-          application: {
-            include: {
-              quote: {
-                include: {
-                  policy: true,
-                },
-              },
-            },
-          },
-        },
+        select: { activeApplicationId: true },
       })
+      const application = conversation?.activeApplicationId
+        ? await context.db.application.findUnique({
+            where: { id: conversation.activeApplicationId },
+            include: { quote: { include: { policy: true } } },
+          })
+        : null
 
-      const policy = conversation?.application?.quote?.policy
+      const policy = application?.quote?.policy
       if (!policy) {
         return {
           success: false,

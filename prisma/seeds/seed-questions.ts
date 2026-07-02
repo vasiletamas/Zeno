@@ -116,6 +116,19 @@ export async function seedQuestions(prisma: PrismaClient) {
       }
     }
 
+    // B4: the seed is AUTHORITATIVE per group — questions removed from the
+    // catalog (e.g. the T5.D2 selection questions) are deleted, answers
+    // first (FK).
+    const stale = await prisma.question.findMany({
+      where: { groupId: group.id, code: { notIn: questions.map((q) => q.code) } },
+      select: { id: true },
+    })
+    if (stale.length > 0) {
+      const staleIds = stale.map((s) => s.id)
+      await prisma.answer.deleteMany({ where: { questionId: { in: staleIds } } })
+      await prisma.question.deleteMany({ where: { id: { in: staleIds } } })
+    }
+
     return { group, questionIdMap }
   }
 
@@ -636,45 +649,9 @@ export async function seedQuestions(prisma: PrismaClient) {
           flagAnswers: [{ value: 'false', action: 'escalate', reason: 'Customer declared existing health conditions — requires manual underwriting review' }],
         },
       },
-      {
-        code: 'PACKAGE_CHOICE',
-        text: {
-          en: 'Which insurance package would you like?',
-          ro: 'Ce pachet de asigurare doriți?',
-        },
-        type: 'DROPDOWN',
-        insightKey: 'selectedTier',
-        orderIndex: 2,
-        options: [
-          { value: 'standard', label: { en: 'Standard', ro: 'Standard' } },
-          { value: 'optim', label: { en: 'Optim', ro: 'Optim' } },
-        ],
-      },
-      {
-        code: 'PREMIUM_LEVEL',
-        text: {
-          en: 'Which premium level do you prefer?',
-          ro: 'Ce nivel de primă preferați?',
-        },
-        type: 'DROPDOWN',
-        insightKey: 'selectedLevel',
-        orderIndex: 3,
-        options: [
-          { value: 'level_1', label: { en: 'Level I (lowest premium)', ro: 'Nivelul I (primă minimă)' } },
-          { value: 'level_2', label: { en: 'Level II (medium premium)', ro: 'Nivelul II (primă medie)' } },
-          { value: 'level_3', label: { en: 'Level III (highest premium)', ro: 'Nivelul III (primă maximă)' } },
-        ],
-      },
-      {
-        code: 'BD_ADDON_INTEREST',
-        text: {
-          en: 'Would you like to add Medical Treatment Abroad coverage (up to EUR 2,000,000)?',
-          ro: 'Doriți să adăugați acoperirea Tratament Medical în Străinătate (până la 2.000.000 EUR)?',
-        },
-        type: 'BOOLEAN',
-        insightKey: 'selectedAddon_externalTreatment',
-        orderIndex: 4,
-      },
+      // B4/T5.D2: PACKAGE_CHOICE, PREMIUM_LEVEL and BD_ADDON_INTEREST left
+      // the questionnaire — selection is select_coverage's Application
+      // columns, the sole writer. PAYMENT_FREQUENCY moves in Block D.
       {
         code: 'PAYMENT_FREQUENCY',
         text: {

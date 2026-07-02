@@ -34,30 +34,39 @@ interface ConversationWithRelations {
 }
 
 export async function scoreConversations(): Promise<number> {
-  const conversations = (await prisma.conversation.findMany({
+  const rawConversations = await prisma.conversation.findMany({
     where: {
       status: { in: ['COMPLETED', 'ABANDONED'] },
       score: null, // no ConversationScore yet
     },
     include: {
-      application: {
-        include: {
-          quote: {
-            include: {
-              policy: {
-                include: {
-                  payments: { where: { status: 'COMPLETED' }, take: 1 },
-                },
-              },
-            },
-          },
-        },
-      },
       turnTraces: {
         select: { cost: true, latencyMs: true, anomalies: true },
       },
     },
-  })) as ConversationWithRelations[]
+  })
+  // B4: the application hangs off the activeApplicationId pointer
+  const conversations = (await Promise.all(
+    rawConversations.map(async (conv) => ({
+      ...conv,
+      application: conv.activeApplicationId
+        ? await prisma.application.findUnique({
+            where: { id: conv.activeApplicationId },
+            include: {
+              quote: {
+                include: {
+                  policy: {
+                    include: {
+                      payments: { where: { status: 'COMPLETED' }, take: 1 },
+                    },
+                  },
+                },
+              },
+            },
+          })
+        : null,
+    })),
+  )) as unknown as ConversationWithRelations[]
 
   let scored = 0
 

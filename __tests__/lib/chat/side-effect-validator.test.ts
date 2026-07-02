@@ -59,10 +59,10 @@ describe('validateSideEffectClaims', () => {
     expect(result.violations[0].category).toBe('lifecycle')
   })
 
-  it('allows "am pornit aplicația" when start_application succeeded', () => {
+  it('allows "am pornit aplicația" when set_application succeeded', () => {
     const result = validateSideEffectClaims(
       'Perfect, am pornit aplicația pentru tine.',
-      [{ id: 't1', name: 'start_application', arguments: {} } as any],
+      [{ id: 't1', name: 'set_application', arguments: {} } as any],
       [{ success: true }] as any,
       'ro',
     )
