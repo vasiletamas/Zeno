@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import { useDebug } from './debug-provider'
 import { TurnCard } from './turn-card'
+import { CommitTimelineSection } from './sections/commit-timeline-section'
+import type { CommitLedgerExportRow } from '@/lib/debug/conversation-export'
 
 const IS_DEV = process.env.NODE_ENV === 'development'
 
@@ -35,6 +37,25 @@ function DebugDrawerInner({ open, onOpenChange }: DebugDrawerProps) {
       if (!res.ok) return
       const data = (await res.json()) as { diffs: { kind: string }[] }
       setReplay({ total: data.diffs.length, drift: data.diffs.filter((d) => d.kind === 'same_version_drift').length })
+    } catch {
+      /* best-effort; ignore */
+    }
+  }
+
+  // F2.6: commit timeline — the conversation's CommitLedger rows from the
+  // v2 export, toggled as a panel above the turn cards.
+  const [ledger, setLedger] = useState<CommitLedgerExportRow[] | null>(null)
+  async function toggleLedger() {
+    if (ledger) {
+      setLedger(null)
+      return
+    }
+    if (!conversationId) return
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/export`)
+      if (!res.ok) return
+      const data = (await res.json()) as { ledger?: CommitLedgerExportRow[] }
+      setLedger(data.ledger ?? [])
     } catch {
       /* best-effort; ignore */
     }
@@ -105,6 +126,15 @@ function DebugDrawerInner({ open, onOpenChange }: DebugDrawerProps) {
           )}
           <button
             type="button"
+            onClick={toggleLedger}
+            disabled={!conversationId}
+            title={conversationId ? 'Show the conversation commit ledger (v2 export)' : 'Send a message first'}
+            className="text-[11px] font-mono underline hover:no-underline disabled:opacity-40 disabled:no-underline"
+          >
+            ledger
+          </button>
+          <button
+            type="button"
             onClick={clearLog}
             className="text-[11px] font-mono underline hover:no-underline"
           >
@@ -121,6 +151,15 @@ function DebugDrawerInner({ open, onOpenChange }: DebugDrawerProps) {
         </div>
       </header>
       <div className="flex-1 overflow-auto p-2 space-y-2 bg-gray-50">
+        {ledger && (
+          <div
+            data-testid="commit-timeline-panel"
+            className="border border-black/10 rounded-md bg-white p-3"
+          >
+            <p className="mb-2 text-xs font-mono font-semibold">Commit timeline</p>
+            <CommitTimelineSection ledger={ledger} />
+          </div>
+        )}
         {!enabled && (
           <p className="text-xs text-gray-500 p-2">
             Debug is off. Toggle it on, then send a message to capture a turn.

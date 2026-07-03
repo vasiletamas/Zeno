@@ -7,6 +7,7 @@ import { PromptSection } from './sections/prompt-section'
 import { ToolsSection } from './sections/tools-section'
 import { ToolNarrationSection } from './sections/tool-narration-section'
 import { IdentitySection } from './sections/identity-section'
+import { LegalitySection } from './sections/legality-section'
 
 interface TurnCardProps {
   turn: DebugTurn
@@ -24,6 +25,7 @@ const SEVERITY_RANK = { info: 0, warning: 1, critical: 2 } as const
 export function TurnCard({ turn, previousTurn, defaultOpen }: TurnCardProps) {
   const [openIdentity, setOpenIdentity] = useState(defaultOpen)
   const [openGate, setOpenGate] = useState(defaultOpen)
+  const [openLegality, setOpenLegality] = useState(defaultOpen)
   const [openPrompt, setOpenPrompt] = useState(defaultOpen)
   const [openTools, setOpenTools] = useState(defaultOpen)
   const [openToolNarration, setOpenToolNarration] = useState(defaultOpen)
@@ -88,6 +90,17 @@ export function TurnCard({ turn, previousTurn, defaultOpen }: TurnCardProps) {
         onToggle={() => setOpenGate(!openGate)}
       >
         <StateSection gate={turn.gate} />
+      </Subsection>
+      <Subsection
+        title={
+          turn.legality?.length
+            ? `Legality (${turn.legality.length})`
+            : 'Legality'
+        }
+        open={openLegality}
+        onToggle={() => setOpenLegality(!openLegality)}
+      >
+        <LegalitySection legality={turn.legality} />
       </Subsection>
       <Subsection
         title="Prompt"
