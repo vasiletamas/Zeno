@@ -16,6 +16,8 @@
  * calls this.
  */
 
+import { parseEligibilityRuleSet, deriveEligibilityBounds } from '@/lib/engines/eligibility'
+
 interface LocalizedText {
   en: string
   ro: string
@@ -160,6 +162,21 @@ function ageInBand(age: number, minAge: number | null, maxAge: number | null): b
   return true
 }
 
+/**
+ * C2.3 (#9 rule 3): the eligibility payload carries DERIVED bounds from the
+ * typed ruleset plus the authored narrative prose — never raw rule Json and
+ * never an authored numeric shadow copy. Legacy/informal shapes yield no
+ * numbers (presentation must not invent them).
+ */
+function shapeEligibility(raw: unknown): { eligibility_bounds: { minAge: number | null; maxAge: number | null }; narrative?: unknown } | undefined {
+  try {
+    const rs = parseEligibilityRuleSet(raw)
+    return { eligibility_bounds: deriveEligibilityBounds(rs), narrative: rs.narrative }
+  } catch {
+    return undefined
+  }
+}
+
 function shapeCoverages(
   rows: RawCoverageAmount[] | undefined,
   age: number | undefined,
@@ -225,7 +242,7 @@ export function shapeProductInfo(
     description: raw.description,
     insuranceType: raw.insuranceType,
     subType: raw.subType,
-    eligibility: raw.eligibility,
+    eligibility: shapeEligibility(raw.eligibility),
     features: raw.features,
     exclusions: raw.exclusions,
     pricingExplanation: raw.pricingExplanation,

@@ -28,6 +28,27 @@ export function parseEligibilityRuleSet(raw: unknown): EligibilityRuleSet {
   return EligibilityRuleSetSchema.parse(raw)
 }
 
+/**
+ * Presentation age bounds DERIVED from the product rules (C2.3, #9 rule 3):
+ * the numbers customers see are the numbers the engine enforces — no
+ * authored numeric shadow copy to drift.
+ */
+export function deriveEligibilityBounds(ruleSet: EligibilityRuleSet): { minAge: number | null; maxAge: number | null } {
+  let minAge: number | null = null
+  let maxAge: number | null = null
+  for (const r of ruleSet.rules) {
+    if (r.subject !== 'product' || r.fact !== 'age') continue
+    if (r.op === 'gte') minAge = Math.max(minAge ?? -Infinity, Number(r.value))
+    if (r.op === 'lte') maxAge = Math.min(maxAge ?? Infinity, Number(r.value))
+    if (r.op === 'between') {
+      const [lo, hi] = r.value as [number, number]
+      minAge = Math.max(minAge ?? -Infinity, lo)
+      maxAge = Math.min(maxAge ?? Infinity, hi)
+    }
+  }
+  return { minAge, maxAge }
+}
+
 export type EligibilityVerdict = 'eligible' | 'ineligible' | 'unknown'
 export type KnownFacts = Record<string, string | number | boolean | null | undefined>
 export interface EligibilityResult {

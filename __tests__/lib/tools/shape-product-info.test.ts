@@ -39,7 +39,16 @@ const RAW = {
   defaultPlaybook: 'HUGE PLAYBOOK '.repeat(800), // ~10KB of coaching that must be dropped
   pricingExplanation: 'Standard I=190 …',
   premiumRange: { min: 190, max: 430, currency: 'RON', frequency: 'annual' },
-  eligibility: { minAge: 18, maxAge: 64, residency: 'Romania' },
+  // C2: the typed ruleset — presentation numbers are DERIVED from it
+  eligibility: {
+    version: 1,
+    rules: [
+      { id: 'min_age', subject: 'product', fact: 'age', op: 'gte', value: 18, reason: 'ineligible_age_minimum' },
+      { id: 'max_age', subject: 'product', fact: 'age', op: 'lte', value: 64, reason: 'ineligible_age_maximum' },
+      { id: 'residency', subject: 'product', fact: 'residency', op: 'equals', value: 'Romania', reason: 'ineligible_residency' },
+    ],
+    narrative: { notes: 'Maximum cumulative sum at risk: 50,000 EUR' },
+  },
   features: ['Two packages'], exclusions: ['See conditions'],
   targetCustomer: 'young', contractTerm: '1y', gracePeriod: '60 days',
   medicalExamRequired: false, territoryCoverage: 'Worldwide',
@@ -96,7 +105,13 @@ describe('shapeProductInfo', () => {
     // keeps customer-relevant scalars
     expect(out.code).toBe('protect')
     expect(out.pricingExplanation).toBe('Standard I=190 …')
-    expect(out.eligibility).toEqual({ minAge: 18, maxAge: 64, residency: 'Romania' })
+    // C2.3 (#9 rule 3): bounds DERIVED from the rules; narrative passes as
+    // prose; raw rule Json never rides the payload
+    expect(out.eligibility).toEqual({
+      eligibility_bounds: { minAge: 18, maxAge: 64 },
+      narrative: { notes: 'Maximum cumulative sum at risk: 50,000 EUR' },
+    })
+    expect(json).not.toContain('ineligible_age_minimum')
   })
 
   it('dedups coverage types into a legend; coverage rows reference by code (not inlined)', () => {

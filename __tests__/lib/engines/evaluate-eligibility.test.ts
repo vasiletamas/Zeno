@@ -27,6 +27,10 @@ describe('evaluateEligibility', () => {
     const r = evaluateEligibility(RULES, { age: 30 }, 'product')
     expect(r.verdict).toBe('eligible')
   })
+  it('addon: bd yes → ineligible regardless of other rules; bd unanswered → unknown', () => {
+    expect(evaluateEligibility(RULES, { age: 30, 'answer:BD_CANCER_HISTORY': 'true' }, 'addon').verdict).toBe('ineligible')
+    expect(evaluateEligibility(RULES, { age: 30 }, 'addon').verdict).toBe('unknown')
+  })
   it('a failed rule wins over missing facts (ineligible beats unknown — early decisive signal)', () => {
     const r = evaluateEligibility(RULES, { 'answer:BD_CANCER_HISTORY': 'true' }, 'addon')
     expect(r.verdict).toBe('ineligible')
