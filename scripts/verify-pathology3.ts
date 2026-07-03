@@ -89,6 +89,8 @@ async function main() {
   }
   console.log(`\n==== across ${trials} trials: BLIND choices=${totalBlind} (want 0), INFORMED choices=${totalInformed} ====`)
   await prisma.$disconnect()
+  // live handles keep the loop alive - exit explicitly for battery runners
+  process.exit(totalBlind === 0 ? 0 : 1)
 }
 
 main().catch((e) => { console.error(e); process.exit(1) })

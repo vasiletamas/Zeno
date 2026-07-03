@@ -98,6 +98,9 @@ async function main() {
   }
   console.log(`\n==== stalls-after-"da" across ${trials} trials: ${totalStall} (lower = better; advances instead of interrogating) ====`)
   await prisma.$disconnect()
+  // live handles (event-bus timers) keep the loop alive - exit explicitly
+  // so battery runners get a real exit code
+  process.exit(totalStall === 0 ? 0 : 1)
 }
 
 main().catch((e) => { console.error(e); process.exit(1) })

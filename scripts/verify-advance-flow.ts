@@ -145,6 +145,8 @@ async function main() {
     `\n==== advance-flow: ${pass}/${trials} trials PASS (advanced into DNT, no confirm-product ceremony) ====`,
   )
   await prisma.$disconnect()
+  // live handles keep the loop alive - exit explicitly for battery runners
+  process.exit(pass === trials ? 0 : 1)
 }
 
 main().catch((e) => {
