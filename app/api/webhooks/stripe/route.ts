@@ -1,22 +1,23 @@
 /**
- * Stripe Webhook Handler
+ * Stripe Webhook Handler (D2.7 — settlement-inbox path)
  *
  * POST /api/webhooks/stripe
  *
- * Receives Stripe webhook events and processes payment outcomes.
  * IMPORTANT: Uses request.text() for raw body — Stripe signature
  * validation requires the original unmodified payload string.
  *
- * Unknown event types are acknowledged with 200 (not 4xx)
- * to prevent Stripe from retrying them.
+ * Verified events flow through the transactional settlement inbox
+ * (exactly-once on stripe's event.id). 'ignored' and unmatched events are
+ * acknowledged with 200; INTERNAL failures return 5xx so Stripe retries
+ * (T8.D3 — the old 200-swallow silently dropped money events).
  */
 
 import { NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
 import { getPaymentProvider } from '@/lib/payments'
-import { runPostPaymentFlow } from '@/lib/payments/post-payment'
+import { settlePaymentEvent } from '@/lib/payments/settlement'
 
 export async function POST(request: Request) {
+  let webhookEvent
   try {
     // CRITICAL: Read raw body as text, NOT JSON.
     // Stripe signature validation requires the exact bytes.
@@ -30,7 +31,6 @@ export async function POST(request: Request) {
       )
     }
 
-    // Parse and validate webhook event via Stripe provider
     const provider = getPaymentProvider()
     if (provider.name !== 'stripe') {
       console.warn(
@@ -39,7 +39,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ received: true }, { status: 200 })
     }
 
-    let webhookEvent
     try {
       webhookEvent = await provider.handleWebhook(rawBody, signature)
     } catch (error) {
@@ -53,60 +52,31 @@ export async function POST(request: Request) {
       )
     }
 
-    // Check for unrecognized event types (handleWebhook returns with
-    // metadata.originalEventType for unknown types)
-    if (webhookEvent.metadata?.originalEventType) {
+    if (webhookEvent.event === 'ignored') {
       console.log(
-        `[StripeWebhook] Ignoring event type: ${webhookEvent.metadata.originalEventType as string}`,
+        `[StripeWebhook] Ignoring event ${webhookEvent.eventId} (${String(webhookEvent.metadata?.originalEventType ?? 'unknown type')})`,
       )
       return NextResponse.json({ received: true }, { status: 200 })
     }
 
-    // Find payment by provider payment ID
-    const payment = await prisma.payment.findFirst({
-      where: { providerPaymentId: webhookEvent.providerPaymentId },
+    const result = await settlePaymentEvent({
+      provider: 'STRIPE',
+      eventId: webhookEvent.eventId,
+      event: webhookEvent.event,
+      providerPaymentId: webhookEvent.providerPaymentId,
+      failureReason: webhookEvent.metadata?.failureReason as string | undefined,
     })
 
-    if (!payment) {
-      // Payment not in our DB — might be for a different integration.
-      // Acknowledge to prevent retries.
+    if (result.disposition === 'unmatched') {
+      // Not one of ours — acknowledge so Stripe stops retrying.
       console.log(
-        `[StripeWebhook] No payment found for providerPaymentId=${webhookEvent.providerPaymentId}, ignoring`,
+        `[StripeWebhook] No payment for providerPaymentId=${webhookEvent.providerPaymentId}, recorded + ignored`,
       )
-      return NextResponse.json({ received: true }, { status: 200 })
     }
-
-    // Process the event
-    if (webhookEvent.event === 'payment_succeeded') {
-      console.log(
-        `[StripeWebhook] Payment succeeded: ${payment.id} (provider: ${webhookEvent.providerPaymentId})`,
-      )
-      await runPostPaymentFlow(payment.id)
-    } else if (webhookEvent.event === 'payment_failed') {
-      console.log(
-        `[StripeWebhook] Payment failed: ${payment.id} (provider: ${webhookEvent.providerPaymentId})`,
-      )
-      const failureReason =
-        (webhookEvent.metadata?.failureReason as string) ??
-        'Payment failed via Stripe webhook'
-
-      await prisma.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: 'FAILED',
-          failureReason,
-        },
-      })
-    }
-
-    return NextResponse.json({ received: true }, { status: 200 })
+    return NextResponse.json({ received: true, disposition: result.disposition }, { status: 200 })
   } catch (error) {
-    console.error('[StripeWebhook] Unhandled error:', error)
-    // Return 200 even on internal errors to prevent Stripe retries
-    // that would keep failing. Log the error for investigation.
-    return NextResponse.json(
-      { received: true, error: 'Internal processing error' },
-      { status: 200 },
-    )
+    console.error('[StripeWebhook] Internal processing error:', error)
+    // 5xx so Stripe RETRIES — a verified money event must never be dropped.
+    return NextResponse.json({ error: 'processing_failed' }, { status: 500 })
   }
 }

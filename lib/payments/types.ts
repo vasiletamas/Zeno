@@ -19,7 +19,11 @@ export interface PaymentStatus {
 }
 
 export interface WebhookEvent {
-  event: 'payment_succeeded' | 'payment_failed'
+  // D2.7: 'ignored' is EXPLICIT — verified-but-irrelevant events never
+  // masquerade as payment outcomes; eventId is the provider's event identity
+  // feeding the settlement inbox's exactly-once key (T8.D3).
+  event: 'payment_succeeded' | 'payment_failed' | 'ignored'
+  eventId: string
   providerPaymentId: string
   metadata?: Record<string, unknown>
 }

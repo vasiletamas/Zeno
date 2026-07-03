@@ -175,25 +175,30 @@ export class PayUPaymentProvider implements PaymentProvider {
     payload: unknown,
     signature: string,
   ): Promise<WebhookEvent> {
-    const { secretKey } = getPayUConfig()
-
     // Validate IPN signature: PayU sends OpenPayU-Signature header
     // Format: "signature=<hash>;algorithm=<alg>;sender=checkout"
+    // D2.7 (T8.D3): an UNSIGNED payload is a hard reject — the old code
+    // skipped verification when the segment was absent (live forgery flaw).
+    // The check runs before the config read so the reject is unconditional.
     const signatureParts = signature.split(';')
     const hashPart = signatureParts.find((p) => p.startsWith('signature='))
     const expectedHash = hashPart?.split('=')?.[1]
+    if (!expectedHash) {
+      throw new Error('Missing PayU webhook signature')
+    }
 
-    if (expectedHash) {
-      const payloadString =
-        typeof payload === 'string' ? payload : JSON.stringify(payload)
-      const computedHash = crypto
-        .createHmac('md5', secretKey)
-        .update(payloadString)
-        .digest('hex')
+    const { secretKey } = getPayUConfig()
+    const payloadString =
+      typeof payload === 'string' ? payload : JSON.stringify(payload)
+    // NOTE: the HMAC-MD5 scheme must be validated against the OpenPayU IPN
+    // spec before production (flagged per T8.D3) — sandbox-verified only.
+    const computedHash = crypto
+      .createHmac('md5', secretKey)
+      .update(payloadString)
+      .digest('hex')
 
-      if (computedHash !== expectedHash) {
-        throw new Error('Invalid PayU webhook signature')
-      }
+    if (computedHash !== expectedHash) {
+      throw new Error('Invalid PayU webhook signature')
     }
 
     const body = (
@@ -211,16 +216,31 @@ export class PayUPaymentProvider implements PaymentProvider {
       throw new Error('Invalid PayU webhook payload: missing order')
     }
 
+    // PayU IPNs carry no event id — the (orderId, status) pair is the
+    // stable identity feeding the inbox dedup key.
+    const eventId = `${order.orderId}:${order.status}`
+
     if (order.status === 'COMPLETED') {
       return {
         event: 'payment_succeeded',
+        eventId,
         providerPaymentId: order.orderId,
         metadata: { extOrderId: order.extOrderId },
       }
     }
 
+    if (order.status === 'PENDING' || order.status === 'WAITING_FOR_CONFIRMATION') {
+      return {
+        event: 'ignored',
+        eventId,
+        providerPaymentId: order.orderId,
+        metadata: { status: order.status, extOrderId: order.extOrderId },
+      }
+    }
+
     return {
       event: 'payment_failed',
+      eventId,
       providerPaymentId: order.orderId,
       metadata: { status: order.status, extOrderId: order.extOrderId },
     }

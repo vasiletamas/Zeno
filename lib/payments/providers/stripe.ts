@@ -23,6 +23,38 @@ function getStripeClient(): Stripe {
   return new Stripe(secretKey)
 }
 
+/**
+ * D2.7: the pure event mapping, exported for testability. Unknown types are
+ * the EXPLICIT 'ignored' variant (never masquerading as payment_succeeded);
+ * every variant carries stripe's event.id as the inbox identity.
+ */
+export function mapStripeEvent(event: Stripe.Event): WebhookEvent {
+  const paymentIntent = event.data.object as Stripe.PaymentIntent
+  switch (event.type) {
+    case 'payment_intent.succeeded':
+      return {
+        event: 'payment_succeeded',
+        eventId: event.id,
+        providerPaymentId: paymentIntent.id,
+        metadata: (paymentIntent.metadata ?? {}) as Record<string, unknown>,
+      }
+    case 'payment_intent.payment_failed':
+      return {
+        event: 'payment_failed',
+        eventId: event.id,
+        providerPaymentId: paymentIntent.id,
+        metadata: (paymentIntent.metadata ?? {}) as Record<string, unknown>,
+      }
+    default:
+      return {
+        event: 'ignored',
+        eventId: event.id,
+        providerPaymentId: '',
+        metadata: { originalEventType: event.type },
+      }
+  }
+}
+
 export class StripePaymentProvider implements PaymentProvider {
   name = 'stripe'
 
@@ -100,29 +132,6 @@ export class StripePaymentProvider implements PaymentProvider {
       webhookSecret,
     )
 
-    const paymentIntent = event.data.object as Stripe.PaymentIntent
-
-    switch (event.type) {
-      case 'payment_intent.succeeded':
-        return {
-          event: 'payment_succeeded',
-          providerPaymentId: paymentIntent.id,
-          metadata: (paymentIntent.metadata ?? {}) as Record<string, unknown>,
-        }
-      case 'payment_intent.payment_failed':
-        return {
-          event: 'payment_failed',
-          providerPaymentId: paymentIntent.id,
-          metadata: (paymentIntent.metadata ?? {}) as Record<string, unknown>,
-        }
-      default:
-        // Return as succeeded with the ID so callers can decide what to do.
-        // The webhook routes should filter for known event types.
-        return {
-          event: 'payment_succeeded',
-          providerPaymentId: paymentIntent.id ?? '',
-          metadata: { originalEventType: event.type },
-        }
-    }
+    return mapStripeEvent(event)
   }
 }

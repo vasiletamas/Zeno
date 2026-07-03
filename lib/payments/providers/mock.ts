@@ -23,7 +23,9 @@ export class MockPaymentProvider implements PaymentProvider {
     policyId: string
     description: string
   }): Promise<PaymentIntent> {
-    const providerPaymentId = `mock_pay_${Date.now()}`
+    // D2.7 (erratum 9): Payment.providerPaymentId is @unique — Date.now()
+    // collides for two intents in the same millisecond.
+    const providerPaymentId = `mock_pay_${crypto.randomUUID()}`
 
     return {
       clientSecret: 'mock_secret',
@@ -52,10 +54,11 @@ export class MockPaymentProvider implements PaymentProvider {
       typeof payload === 'string' ? JSON.parse(payload) : payload
     ) as { providerPaymentId?: string }
 
+    const providerPaymentId = body.providerPaymentId ?? `mock_pay_${crypto.randomUUID()}`
     return {
       event: 'payment_succeeded',
-      providerPaymentId:
-        body.providerPaymentId ?? `mock_pay_${Date.now()}`,
+      eventId: `mock_${providerPaymentId}`,
+      providerPaymentId,
     }
   }
 }
