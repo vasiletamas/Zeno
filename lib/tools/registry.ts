@@ -20,7 +20,7 @@ import { getDntState, getDntQuestions, getDntNextQuestion, openDntSession, write
 import { setApplication, getNextQuestionInfo, writeQuestionAnswer, modifyAnswer, resumeApplication, cancelApplication, getLastApplicationInfo } from './handlers/application-handlers'
 import { selectCoverage } from './handlers/select-coverage-handlers'
 import { acknowledgeSuitabilityWarning } from './handlers/suitability-handlers'
-import { generateQuote, getQuoteDetails, acceptQuote, cancelQuote, modifyQuote } from './handlers/quote-handlers'
+import { generateQuote, getQuoteInfo, acceptQuote, cancelQuote, modifyQuote } from './handlers/quote-handlers'
 import { compareProducts } from './handlers/product-handlers'
 import { previewProductRequirements } from './handlers/preview-handlers'
 import { getStateHandler } from './handlers/state-handlers'
@@ -868,8 +868,10 @@ registerTool('accept_quote', {
   requiresConfirmation: true,
 }, acceptQuote)
 
-registerTool('get_quote_details', {
-  description: 'Get detailed breakdown of a generated quote.',
+registerTool('get_quote_info', {
+  description:
+    'Get the quote: premiums, coverages, the EFFECTIVE status (a time-expired quote reads EXPIRED) and the payment options ' +
+    'the customer may elect at acceptance (frequency + amount — the contract frequency is chosen at accept_quote, not before).',
   parameters: {
     type: 'object',
     properties: {
@@ -882,7 +884,7 @@ registerTool('get_quote_details', {
   statusMessage: null,
   allowedRoles: ALL_ROLES,
   kind: 'read',
-}, getQuoteDetails)
+}, getQuoteInfo)
 
 registerTool('cancel_quote', {
   description:

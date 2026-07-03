@@ -136,7 +136,7 @@ const acceptQuoteSchema = z.object({
   confirmToken: z.string().optional(),
 }).strict()
 
-const getQuoteDetailsSchema = z.object({
+const getQuoteInfoSchema = z.object({
   quoteId: z.string().optional(),
 }).strict()
 
@@ -250,7 +250,7 @@ const toolSchemas: Record<string, ZodType> = {
   // Quote
   generate_quote: generateQuoteSchema,
   accept_quote: acceptQuoteSchema,
-  get_quote_details: getQuoteDetailsSchema,
+  get_quote_info: getQuoteInfoSchema,
   cancel_quote: cancelQuoteSchema,
   modify_quote: modifyQuoteSchema,
 

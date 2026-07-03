@@ -73,7 +73,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.20.0' // 1.17.0: discovery eligibility verdict DERIVED per turn (C2.6) — INELIGIBLE blocks set_application with the failed-rule reason, unknown never a wall; 1.18.0: suitability documented-warning flow (C3.4) — acknowledge_suitability_warning exposed while a warn_and_allow mismatch awaits ack, generate_quote blocked suitability_warning_unacknowledged (warn) or the mismatch's own reason (hard_block); 1.19.0: freeze-at-issue (D1) — a Quote row in ANY state blocks generate_quote with application_frozen; 1.20.0: cancel_quote exposure (D1.5) — live ISSUED quote only, quote_expired/quote_already_accepted precise blocks; accept_quote answers time-expiry with quote_expired (lazy-expiry trigger)
+export const engineVersion = '1.21.0' // 1.18.0: suitability documented-warning flow (C3.4) — acknowledge_suitability_warning exposed while a warn_and_allow mismatch awaits ack, generate_quote blocked suitability_warning_unacknowledged (warn) or the mismatch's own reason (hard_block); 1.19.0: freeze-at-issue (D1) — a Quote row in ANY state blocks generate_quote with application_frozen; 1.20.0: cancel_quote exposure (D1.5) — live ISSUED quote only, quote_expired/quote_already_accepted precise blocks; accept_quote answers time-expiry with quote_expired (lazy-expiry trigger); 1.21.0: get_quote_details renamed get_quote_info (D1.6)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -155,7 +155,7 @@ export const ACTION_RULES: ActionRule[] = [
   dntRule('get_dnt_next_question', 'read'),
   dntRule('open_dnt_session', 'commit'),
   dntRule('write_dnt_answer', 'commit'),
-  { action: 'get_quote_details', kind: 'read', exposedWhen: (s) => s.quote !== null || s.acceptedQuote !== null },
+  { action: 'get_quote_info', kind: 'read', exposedWhen: (s) => s.quote !== null || s.acceptedQuote !== null },
   { action: 'get_last_application_info', kind: 'read', exposedWhen: always }, // B4.6 prefill-as-proposals read
   // C1.ADD-1: the pinned questionnaire read — next question + progress +
   // structured branching provenance (T13.D1)

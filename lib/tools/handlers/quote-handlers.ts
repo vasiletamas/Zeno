@@ -1,13 +1,13 @@
 /**
  * Quote Handlers
  *
- * generate_quote, get_quote_details, accept_quote, cancel_quote, modify_quote
+ * generate_quote, get_quote_info, accept_quote, cancel_quote, modify_quote
  */
 
 import { calculateQuote } from '@/lib/engines/quote-engine'
 import type { QuoteInput } from '@/lib/engines/quote-engine'
 import { decideQuoteIssue } from '@/lib/engines/quote-decision'
-import { canQuoteTransition, type QuoteStatusV3 } from '@/lib/engines/quote-lifecycle'
+import { canQuoteTransition, effectiveQuoteStatus, type QuoteStatusV3 } from '@/lib/engines/quote-lifecycle'
 import { evaluateEligibility } from '@/lib/engines/eligibility'
 import { deriveSuitability } from '@/lib/engines/derive-and-expose'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
@@ -250,10 +250,10 @@ export const generateQuote: ToolHandler = async (_args, context) => {
 }
 
 // ─────────────────────────────────────────────
-// get_quote_details
+// get_quote_info (D1.6 — get_quote_details renamed)
 // ─────────────────────────────────────────────
 
-export const getQuoteDetails: ToolHandler = async (args, context) => {
+export const getQuoteInfo: ToolHandler = async (args, context) => {
   try {
     const quoteId = args.quoteId as string | undefined
 
@@ -277,6 +277,24 @@ export const getQuoteDetails: ToolHandler = async (args, context) => {
       return { success: false, error: 'No quote found.' }
     }
 
+    // T7.D5: reads speak the EFFECTIVE status through the one pure predicate
+    // and never write — opportunistic EXPIRED persistence is the gateway's.
+    const status = effectiveQuoteStatus({ status: quote.status as QuoteStatusV3, validUntil: quote.validUntil }, new Date())
+
+    // T7.D3: the contract frequency is elected at accept_quote — until then
+    // the read bundles the product's offered options against the quote's
+    // priced variants (no monthly: it is a display figure, not an offer).
+    const product = await context.db.product.findUnique({ where: { id: quote.productId } })
+    const freqOptions = product?.paymentFrequencyOptions as Record<string, unknown> | null
+    const variant: Record<string, number | null> = {
+      annual: quote.premiumAnnual,
+      semi_annual: quote.premiumSemiAnnual,
+      quarterly: quote.premiumQuarterly,
+    }
+    const payment_options = Object.keys(freqOptions ?? {})
+      .filter((opt) => variant[opt] != null)
+      .map((opt) => ({ option: opt, amount: variant[opt]!, currency: quote.currency }))
+
     const coverages = quote.coverages as Record<string, unknown>
     const addonsSelected = quote.addonsSelected as Record<string, unknown> | null
 
@@ -290,12 +308,13 @@ export const getQuoteDetails: ToolHandler = async (args, context) => {
         premiumQuarterly: quote.premiumQuarterly,
         paymentFrequency: quote.paymentFrequency,
         currency: quote.currency,
-        status: quote.status,
+        status,
         validUntil: quote.validUntil.toISOString(),
         coverages,
         addonsSelected,
+        payment_options,
       },
-      message: `Quote details: ${quote.premiumAnnual} RON/year. Status: ${quote.status}.`,
+      message: `Quote info: ${quote.premiumAnnual} RON/year. Status: ${status}.`,
     }
   } catch (error) {
     return { success: false, error: String(error) }
