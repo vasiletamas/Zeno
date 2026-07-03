@@ -141,12 +141,11 @@ export const generateQuote: ToolHandler = async (_args, context) => {
       where: { code: 'PAYMENT_FREQUENCY' },
     })
     if (paymentQuestion) {
-      const paymentAnswer = await context.db.answer.findUnique({
+      const paymentAnswer = await context.db.answer.findFirst({
         where: {
-          questionId_applicationId: {
-            questionId: paymentQuestion.id,
-            applicationId: application.id,
-          },
+          questionId: paymentQuestion.id,
+          applicationId: application.id,
+          status: 'ACTIVE',
         },
       })
       if (paymentAnswer) {

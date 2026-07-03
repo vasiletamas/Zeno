@@ -57,7 +57,7 @@ export const previewProductRequirements: ToolHandler = async (args, context) => 
     const activeApp = await loadActiveApplication(context)
     const answers = activeApp
       ? await prisma.answer.findMany({
-          where: { applicationId: activeApp.id, questionId: { in: questionIds } },
+          where: { applicationId: activeApp.id, questionId: { in: questionIds }, status: 'ACTIVE' },
           select: { questionId: true },
         })
       : []

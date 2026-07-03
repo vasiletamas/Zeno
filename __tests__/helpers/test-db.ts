@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/db'
 import { seedProduct } from '@/prisma/seeds/seed-product'
 import { seedQuestions } from '@/prisma/seeds/seed-questions'
+import { seedDependencyEdges } from '@/prisma/seeds/seed-dependency-edges'
+import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 
 /**
  * The ONE truncate list for the real-DB integration ring (plan A2.ADD-1).
@@ -53,10 +55,58 @@ export async function resetDb(): Promise<void> {
   await resetFunnelTables()
   await seedProduct(prisma)
   await seedQuestions(prisma)
+  await seedDependencyEdges(prisma)
 }
 
 export async function createCustomer(data: Record<string, unknown> = {}) {
   return prisma.customer.create({ data: { language: 'ro', ...data } })
+}
+
+/**
+ * Minimal protect fixture for C-block integration tests (C1.4, erratum 4
+ * contract): one Customer + Conversation + OPEN Application against the
+ * seeded protect catalog. Options pre-select coverage facets (tier/level by
+ * CODE, addon boolean). Call resetDb() first — questions/edges come from the
+ * real seed.
+ */
+export async function seedMinimalProtectFixture(options: { tier?: string; level?: string; addon?: boolean } = {}) {
+  const product = await prisma.product.findFirstOrThrow({ where: { code: 'protect' } })
+  const tier = options.tier
+    ? await prisma.pricingTier.findUniqueOrThrow({ where: { productId_code: { productId: product.id, code: options.tier } } })
+    : null
+  const level = options.level
+    ? await prisma.pricingLevel.findUniqueOrThrow({ where: { tierId_code: { tierId: (tier ?? (() => { throw new Error('level requires tier') })()).id, code: options.level } } })
+    : null
+
+  const customer = await prisma.customer.create({ data: { language: 'ro' } })
+  const application = await prisma.application.create({
+    data: {
+      customerId: customer.id,
+      productId: product.id,
+      status: 'OPEN',
+      tierId: tier?.id ?? null,
+      levelId: level?.id ?? null,
+      includesAddon: options.addon ?? false,
+    },
+  })
+  const conversation = await prisma.conversation.create({
+    data: { customerId: customer.id, productId: product.id, activeApplicationId: application.id },
+  })
+  await prisma.application.update({
+    where: { id: application.id },
+    data: { originConversationId: conversation.id },
+  })
+
+  const questions = await prisma.question.findMany({ select: { id: true, code: true } })
+  const questionIdByCode: Record<string, string> = {}
+  for (const q of questions) if (q.code) questionIdByCode[q.code] = q.id
+
+  return { conversationId: conversation.id, applicationId: application.id, customerId: customer.id, questionIdByCode }
+}
+
+/** Erratum 4: thin wrapper over A1's snapshot loader for integration tests. */
+export async function loadSnapshot(conversationId: string) {
+  return loadDomainSnapshot(conversationId)
 }
 
 export async function ensureTestProduct() {

@@ -19,6 +19,7 @@ import {
 } from '@/lib/engines/questionnaire-engine'
 import { resolveGroupCodes, resolveActiveProductId } from '@/lib/engines/question-groups'
 import { canTransition, type AppStatus } from '@/lib/engines/application-rules'
+import { writeRevision } from '@/lib/engines/answer-store'
 import { getIdentityFacts } from '@/lib/customer/profile-service'
 import { deriveIdentityTier } from '@/lib/engines/identity-rules'
 import type { ToolHandler, ToolContext } from '@/lib/tools/types'
@@ -151,10 +152,11 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
     const flagResult = checkForFlags(currentQuestion.validationRules, validation.normalizedValue)
 
     const saveAnswer = () =>
-      context.db.answer.upsert({
-        where: { questionId_applicationId: { questionId: currentQuestion.id, applicationId: application.id } },
-        create: { questionId: currentQuestion.id, applicationId: application.id, value: validation.normalizedValue },
-        update: { value: validation.normalizedValue, answeredAt: new Date() },
+      writeRevision(context.db, {
+        applicationId: application.id,
+        questionId: currentQuestion.id,
+        value: validation.normalizedValue,
+        source: 'USER_ANSWER',
       })
 
     // escalate-class flag: save, pause, surface
@@ -378,7 +380,7 @@ export const getLastApplicationInfo: ToolHandler = async (_args, context) => {
     }
 
     const answers = await context.db.answer.findMany({
-      where: { applicationId: prior.id },
+      where: { applicationId: prior.id, status: 'ACTIVE' },
       include: { question: { select: { code: true } } },
       orderBy: { answeredAt: 'asc' },
     })

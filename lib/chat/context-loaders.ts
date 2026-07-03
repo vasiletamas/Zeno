@@ -424,7 +424,7 @@ export async function loadQuestionnaireContext(
   })
   const answers = conv?.activeApplicationId
     ? await prisma.answer.findMany({
-        where: { applicationId: conv.activeApplicationId, questionId: { in: questionIds } },
+        where: { applicationId: conv.activeApplicationId, questionId: { in: questionIds }, status: 'ACTIVE' },
       })
     : []
 

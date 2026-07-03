@@ -50,7 +50,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     // baseCodes — the addon toggle EXCLUDES it when off (answers retained).
     const groupCodes = application.includesAddon ? baseCodes : baseCodes.filter((c) => c !== 'bd_medical')
     const questions = groupCodes.length > 0 ? await db.question.findMany({ where: { group: { code: { in: groupCodes } } }, select: { id: true, code: true } }) : []
-    const answered = await db.answer.findMany({ where: { applicationId: application.id, questionId: { in: questions.map((q) => q.id) } }, select: { questionId: true } })
+    const answered = await db.answer.findMany({ where: { applicationId: application.id, questionId: { in: questions.map((q) => q.id) }, status: 'ACTIVE' }, select: { questionId: true } })
     const answeredIds = new Set(answered.map((a) => a.questionId))
     const tier = application.tierId ? await db.pricingTier.findUnique({ where: { id: application.tierId } }) : null
     const level = application.levelId ? await db.pricingLevel.findUnique({ where: { id: application.levelId } }) : null

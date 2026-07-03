@@ -40,6 +40,7 @@ export const checkBdEligibility: ToolHandler = async (_args, context) => {
       where: {
         applicationId: application.id,
         questionId: { in: questionIds },
+        status: 'ACTIVE',
       },
     })
 

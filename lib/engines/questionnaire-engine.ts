@@ -409,7 +409,7 @@ export type AnswerScope =
 
 async function loadScopedAnswers(scope: AnswerScope, questionIds: string[]): Promise<Map<string, string>> {
   const rows = scope.kind === 'application'
-    ? await prisma.answer.findMany({ where: { applicationId: scope.applicationId, questionId: { in: questionIds } } })
+    ? await prisma.answer.findMany({ where: { applicationId: scope.applicationId, questionId: { in: questionIds }, status: 'ACTIVE' } })
     : await prisma.dntAnswer.findMany({ where: { sessionId: scope.sessionId, questionId: { in: questionIds } } })
   return new Map(rows.map(a => [a.questionId, a.value]))
 }

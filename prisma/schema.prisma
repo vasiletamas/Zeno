@@ -670,17 +670,39 @@ model Question {
   @@index([groupId, orderIndex])
 }
 
+// C1.4: answers are append-only revisions — writes supersede, cascades
+// invalidate with causality, nothing is destroyed. "At most one ACTIVE row
+// per (questionId, applicationId)" is a raw-SQL partial unique index
+// ("answer_active_unique") in the seed bootstrap; Prisma cannot express it.
 model Answer {
-  id            String   @id @default(cuid())
-  questionId    String
-  applicationId String
-  value         String
-  answeredAt    DateTime @default(now())
+  id                String               @id @default(cuid())
+  questionId        String
+  applicationId     String
+  value             String
+  source            AnswerSource         @default(USER_ANSWER)
+  status            AnswerRevisionStatus @default(ACTIVE)
+  invalidatedReason String?
+  causedByKey       String?
+  commitId          String?
+  answeredAt        DateTime             @default(now())
 
   question    Question    @relation(fields: [questionId], references: [id])
   application Application @relation(fields: [applicationId], references: [id])
 
-  @@unique([questionId, applicationId])
+  @@index([questionId, applicationId, status])
+}
+
+enum AnswerSource {
+  USER_ANSWER
+  PREFILL
+  SELECTION_MIRROR
+  SYSTEM
+}
+
+enum AnswerRevisionStatus {
+  ACTIVE
+  SUPERSEDED
+  INVALIDATED
 }
 
 // ==========================================

@@ -30,6 +30,12 @@ async function main() {
       `CREATE UNIQUE INDEX IF NOT EXISTS "Application_one_open_per_product" ON "Application"("customerId", "productId") WHERE "status" IN ('OPEN','PAUSED','REFERRED')`,
     )
 
+    // C1.4: answers are append-only revisions; at most one ACTIVE revision
+    // per (question, application).
+    await prisma.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "answer_active_unique" ON "Answer"("questionId", "applicationId") WHERE "status" = 'ACTIVE'`,
+    )
+
     await seedProduct(prisma)
     await seedQuestions(prisma)
     await seedDependencyEdges(prisma)
