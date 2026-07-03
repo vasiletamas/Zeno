@@ -11,6 +11,7 @@ import { execSync } from 'node:child_process'
 const ALLOWED = [
   'lib/engines/answer-store.ts',          // the single writer
   'app/api/gdpr/delete-data/route.ts',    // GDPR erasure — owned by M3, audited there
+  'lib/gdpr/erasure.ts',                  // E3.2: the retention-table executor deletes answers under the erase disposition
 ]
 
 describe('answer writer closure', () => {

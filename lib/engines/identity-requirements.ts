@@ -31,6 +31,11 @@ export const IDENTITY_REQUIREMENTS: IdentityRequirementsTable = {
   generate_quote: { minTier: 'anonymous', anyDeclaredOf: ['cnp', 'dateOfBirth'] },
   accept_quote: { minTier: 'verified_channel' },
   ensure_payment_session: { minTier: 'verified_channel', productDocuments: true },
+  // E3 (M3): disclosure demands a proven channel; erasure must stay open to
+  // an anonymous chat user (erratum 6 ruling — the right cannot hide behind
+  // the very identity data it erases).
+  request_data_export: { minTier: 'verified_channel' },
+  request_erasure: { minTier: 'anonymous' },
 }
 
 const TIER_ORDER: Record<IdentityTier, number> = { anonymous: 0, declared: 1, verified_channel: 2 }

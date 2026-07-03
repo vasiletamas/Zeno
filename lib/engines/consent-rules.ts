@@ -16,6 +16,10 @@ const HALT_EXEMPT = new Set([
   'open_dnt_session',
   'write_dnt_answer',
   'sign_dnt',
+  // E3.3/E3.5: GDPR art.15/17 rights SURVIVE a processing-consent
+  // withdrawal — that is precisely when a customer asks for erasure.
+  'request_erasure',
+  'request_data_export',
 ])
 
 export function consentBlocksCommit(

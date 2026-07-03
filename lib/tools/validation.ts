@@ -298,6 +298,12 @@ const toolSchemas: Record<string, ZodType> = {
   activate_policy: activatePolicySchema,
   cancel_submission: cancelSubmissionSchema,
   resolve_work_item: resolveWorkItemSchema,
+
+  // GDPR (E3)
+  request_erasure: z.object({ reason: z.string().max(500).optional() }).strict(),
+  request_data_export: z.object({ reason: z.string().max(500).optional() }).strict(),
+  approve_erasure: z.object({ workItemId: z.string().min(1) }).strict(),
+  approve_export: z.object({ workItemId: z.string().min(1) }).strict(),
 }
 
 // ==============================================

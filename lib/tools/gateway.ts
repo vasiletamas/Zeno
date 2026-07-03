@@ -81,7 +81,7 @@ const REPLAY_EXEMPT = new Set([
  * based legality is REPLACED by the actor gate (operator|system only). The
  * hygiene test excludes them from the registry↔ACTION_RULES parity check.
  */
-export const OPERATOR_TOOLS = new Set(['resolve_referral', 'resolve_work_item', 'mark_submitted', 'activate_policy', 'cancel_submission'])
+export const OPERATOR_TOOLS = new Set(['resolve_referral', 'resolve_work_item', 'mark_submitted', 'activate_policy', 'cancel_submission', 'approve_erasure', 'approve_export'])
 
 export function resolveTargetRef(tool: string, args: Record<string, unknown>, state: DerivedStateV3, conversationId: string): string {
   // repeatable commits — addressed entity from ARGS (erratum 4)
@@ -314,7 +314,17 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
       await writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, lockedPre.state.phase)
       return envelope
     }
-    const post = deriveAndExpose(await loadDomainSnapshot(req.conversationId, tx))
+    let post: ReturnType<typeof deriveAndExpose>
+    try {
+      post = deriveAndExpose(await loadDomainSnapshot(req.conversationId, tx))
+    } catch (e) {
+      // E3 (M3): the ONE legitimate conversation destroyer is the GDPR
+      // erasure apply (never-contracted customers lose the conversation
+      // rows) — the post-state equals the locked pre-state for ledger
+      // purposes. Any other loader failure is a real bug: rethrow.
+      if (req.tool !== 'approve_erasure') throw e
+      post = lockedPre
+    }
     // handler-declared domain effects (B4) merge with the gateway's own
     // advance_phase delta; C1's planner supersedes handler declarations.
     const effects: CommitEffect[] = handlerResult.success ? [...(handlerResult.effects ?? [])] : []

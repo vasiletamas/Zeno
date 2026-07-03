@@ -5,9 +5,9 @@ import { listCommitTools } from '@/lib/tools/registry'
 import { makeSnapshot } from './snapshot-fixtures'
 
 describe('identity-requirements mechanism (contradiction #1)', () => {
-  it('the B3.2 rows are landed — one row per ratified commit gate', () => {
+  it('the B3.2 + E3 rows are landed — one row per ratified commit gate', () => {
     expect(Object.keys(IDENTITY_REQUIREMENTS).sort()).toEqual(
-      ['accept_quote', 'ensure_payment_session', 'generate_quote', 'set_application', 'sign_dnt'],
+      ['accept_quote', 'ensure_payment_session', 'generate_quote', 'request_data_export', 'request_erasure', 'set_application', 'sign_dnt'],
     )
   })
   it('pins the ratified rows (ADD-1, erratum-4a encoding)', () => {
@@ -15,6 +15,11 @@ describe('identity-requirements mechanism (contradiction #1)', () => {
     expect(IDENTITY_REQUIREMENTS.accept_quote).toEqual({ minTier: 'verified_channel' })
     // D3.3: the document requirement rides ensure_payment_session
     expect(IDENTITY_REQUIREMENTS.ensure_payment_session).toEqual({ minTier: 'verified_channel', productDocuments: true })
+    // E3 (M3): export demands a proven channel; erasure stays open to an
+    // anonymous chat user (erratum 6 ruling — the right cannot hide behind
+    // the identity data it erases)
+    expect(IDENTITY_REQUIREMENTS.request_data_export).toEqual({ minTier: 'verified_channel' })
+    expect(IDENTITY_REQUIREMENTS.request_erasure).toEqual({ minTier: 'anonymous' })
   })
   it('every key is a registered commit tool (ADD-1)', () => {
     const commits = new Set(listCommitTools())

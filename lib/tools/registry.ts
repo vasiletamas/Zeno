@@ -38,6 +38,7 @@ import { ensurePaymentSession, getPaymentStatus, changePaymentOption } from './h
 import { resolveReferral, resolveWorkItem } from './handlers/operator-handlers'
 import { markSubmitted, activatePolicy, cancelSubmission } from './handlers/policy-operator-handlers'
 import { getPolicyInfo, requestCancellation } from './handlers/policy-handlers'
+import { requestErasure, requestDataExport, approveErasure, approveExport } from './handlers/gdpr-handlers'
 import { startChannelVerification, confirmChannelVerification, requestDocumentUpload } from './handlers/identity-handlers'
 
 // ==============================================
@@ -1315,6 +1316,78 @@ registerTool('resolve_work_item', {
   allowedRoles: ADMIN_OPERATOR,
   kind: 'commit',
 }, resolveWorkItem)
+
+registerTool('request_erasure', {
+  description:
+    'Record the customer\'s GDPR right-to-erasure request as an operator work item. NOTHING is deleted immediately — an operator reviews and approves; ' +
+    'legally retained records (policies, payments, signed questionnaire) survive per the retention policy. Available even after a consent withdrawal.',
+  parameters: {
+    type: 'object',
+    properties: {
+      reason: { type: 'string', description: 'Optional context from the conversation (why the customer asked).' },
+    },
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: true,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+}, requestErasure)
+
+registerTool('request_data_export', {
+  description:
+    'Record the customer\'s GDPR data-access request (a copy of everything we hold on them) as an operator work item. ' +
+    'Requires a verified channel — the engine answers requires_identity otherwise. The bundle is delivered via the dashboard after operator approval.',
+  parameters: {
+    type: 'object',
+    properties: {
+      reason: { type: 'string', description: 'Optional context from the conversation.' },
+    },
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: true,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  kind: 'commit',
+}, requestDataExport)
+
+registerTool('approve_erasure', {
+  description: 'Operator: approve a GDPR_ERASURE work item — executes the retention-driven erasure job and records the per-class report on the item.',
+  parameters: {
+    type: 'object',
+    properties: {
+      workItemId: { type: 'string', description: 'The GDPR_ERASURE work item to approve.' },
+    },
+    required: ['workItemId'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ADMIN_OPERATOR,
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+}, approveErasure)
+
+registerTool('approve_export', {
+  description: 'Operator: approve a GDPR_EXPORT work item — compiles the versioned data-access bundle and stores it on the item for dashboard download.',
+  parameters: {
+    type: 'object',
+    properties: {
+      workItemId: { type: 'string', description: 'The GDPR_EXPORT work item to approve.' },
+    },
+    required: ['workItemId'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ADMIN_OPERATOR,
+  kind: 'commit',
+}, approveExport)
 
 registerTool('withdraw_consent', {
   description: 'Withdraw a previously granted consent (gdpr_processing, ai_disclosure, or marketing). Data is preserved; processing stops.',
