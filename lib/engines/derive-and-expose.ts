@@ -7,7 +7,7 @@ import { applicationExposure, canTransition, type AppStatus } from './applicatio
 import { acceptQuoteLegality } from './accept-quote-legality'
 import { freeLookDecision } from './policy-machine'
 import { mutationBlockedReason } from './frozen-application'
-import { evaluateEligibility } from './eligibility'
+import { evaluateEligibility, deriveEligibilityBounds } from './eligibility'
 import { evaluateSuitability, type SuitabilityResult } from './suitability'
 
 /**
@@ -87,7 +87,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.30.0' // 1.30.0: request_cancellation exposed via the deterministic free-look rule (D4.5, T9.D2) — outside_free_look precise block; 1.29.0: get_policy_info customer-scoped read + POLICY phase derives from the customer-scoped policy (D4.4, T9.D5/D6); 1.28.0: change_payment_option exposed pre-capture only (D3.4, T8.D5); 1.27.0: ensure_payment_session replaces the legacy initiate tool (D3.3, T8.D4); 1.26.0: get_payment_status read exposed on schedule existence (D3.2); 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application; 1.23.0: acknowledge_disclosures exposed on the live issued quote (D2.3, T7.D2); 1.24.0: accept_quote legality through the pure acceptQuoteLegality predicate (D2.5, T7.D6) — expiry → transition → verified_channel identity → disclosure acks; 1.25.0: the payment commit rides the schedule (D2.8) — due PENDING installment exposes, settled answers no_due_installment, no Policy prerequisite
+export const engineVersion = '1.31.0' // 1.31.0: set_application ineligible block params carry the derived age bounds (E1.6, T11.D4); 1.30.0: request_cancellation exposed via the deterministic free-look rule (D4.5, T9.D2) — outside_free_look precise block; 1.29.0: get_policy_info customer-scoped read + POLICY phase derives from the customer-scoped policy (D4.4, T9.D5/D6); 1.28.0: change_payment_option exposed pre-capture only (D3.4, T8.D5); 1.27.0: ensure_payment_session replaces the legacy initiate tool (D3.3, T8.D4); 1.26.0: get_payment_status read exposed on schedule existence (D3.2); 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application; 1.23.0: acknowledge_disclosures exposed on the live issued quote (D2.3, T7.D2); 1.24.0: accept_quote legality through the pure acceptQuoteLegality predicate (D2.5, T7.D6) — expiry → transition → verified_channel identity → disclosure acks; 1.25.0: the payment commit rides the schedule (D2.8) — due PENDING installment exposes, settled answers no_due_installment, no Policy prerequisite
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -191,7 +191,9 @@ export const ACTION_RULES: ActionRule[] = [
   // failed-rule reason; 'unknown' is normal in discovery and never a wall.
   { action: 'set_application', kind: 'commit', exposedWhen: (s, d) => (s.product !== null || s.candidateProductId !== null) && s.application === null && d.eligibility.verdict !== 'ineligible',
     blockedReason: (s, d) => (
-      d.eligibility.verdict === 'ineligible' ? { reason: (d.eligibility.failedReasons[0] ?? 'not_exposed') as ReasonCode, params: { failedReasons: d.eligibility.failedReasons } }
+      // E1.6 (T11.D4): the block carries the DERIVED bounds so the agent can
+      // speak the eligible range without a second rule read
+      d.eligibility.verdict === 'ineligible' ? { reason: (d.eligibility.failedReasons[0] ?? 'not_exposed') as ReasonCode, params: { failedReasons: d.eligibility.failedReasons, ...(s.product?.eligibilityRules ? (({ minAge, maxAge }) => ({ minAge, maxAge }))(deriveEligibilityBounds(s.product.eligibilityRules)) : {}) } }
       : s.application !== null ? { reason: 'application_already_open', params: { applicationId: s.application.id } }
       : { reason: 'no_candidate_product' }) },
   // B4.2: lifecycle exposure comes from the pure application rules

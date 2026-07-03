@@ -23,6 +23,17 @@ describe('eligibility consumption points', () => {
     expect(unknown.actions.available).toContain('set_application')
   })
 
+  // E1.6 (T11.D4): the blocked entry carries the DERIVED bounds so the agent
+  // can speak the eligible range without a second rule read (deviation from
+  // the plan's blanket ineligible_age recorded: the reason stays the failed
+  // rule's own registered code per C2 erratum 3)
+  it('ineligible block params carry the derived age bounds', () => {
+    const r = deriveAndExpose(makeSnapshot({ eligibilityFacts: { age: 70, residency: 'Romania' } }))
+    expect(r.actions.blocked.find((b) => b.action === 'set_application')?.params).toMatchObject({
+      minAge: 18, maxAge: 64, failedReasons: ['ineligible_age_maximum'],
+    })
+  })
+
   it('gateQuoteEligibility maps verdicts onto the pinned CommitResult vocabulary for D1', () => {
     const rules = parseEligibilityRuleSet(PROTECT_ELIGIBILITY)
     expect(gateQuoteEligibility(rules, { age: 30, residency: 'Romania' }, false)).toEqual({ ok: true })
