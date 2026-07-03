@@ -177,6 +177,14 @@ export interface ToolContext {
     premiumAnnual: number
     paymentFrequency: string | null
   }
+  /** D2.8: the live money truth for the payment phase — present when an
+   *  un-superseded schedule exists (the policy may not exist yet). */
+  schedule?: {
+    frequency: string
+    nextDueAmountMinor: number | null
+    paidCount: number
+    totalInstallments: number
+  }
 }
 
 // ==============================================

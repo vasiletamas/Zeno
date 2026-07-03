@@ -86,7 +86,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.24.0' // 1.21.0: get_quote_details renamed get_quote_info (D1.6); 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application; 1.23.0: acknowledge_disclosures exposed on the live issued quote (D2.3, T7.D2); 1.24.0: accept_quote legality through the pure acceptQuoteLegality predicate (D2.5, T7.D6) — expiry → transition → verified_channel identity → disclosure acks
+export const engineVersion = '1.25.0' // 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application; 1.23.0: acknowledge_disclosures exposed on the live issued quote (D2.3, T7.D2); 1.24.0: accept_quote legality through the pure acceptQuoteLegality predicate (D2.5, T7.D6) — expiry → transition → verified_channel identity → disclosure acks; 1.25.0: initiate_payment rides the schedule (D2.8) — due PENDING installment exposes, settled answers no_due_installment, no Policy prerequisite
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -261,7 +261,12 @@ export const ACTION_RULES: ActionRule[] = [
       : null) },
   // modify_quote died at D1.7 (T13.D2): post-quote mutation is engine-illegal
   // (application_frozen) — cancel_quote + a new application is the change path.
-  { action: 'initiate_payment', kind: 'commit', exposedWhen: (s) => s.policy !== null && s.policy.status === 'PENDING_SUBMISSION' },
+  // D2.8 (contradiction #3/#5): payment rides the SCHEDULE — a due PENDING
+  // installment exposes it; a settled schedule answers precisely; no Policy
+  // prerequisite (the policy does not exist until first capture).
+  { action: 'initiate_payment', kind: 'commit',
+    exposedWhen: (s) => s.schedule.exists && !s.schedule.settled && s.schedule.nextDueAt !== null,
+    blockedReason: (s) => (s.schedule.exists && (s.schedule.settled || s.schedule.nextDueAt === null) ? { reason: 'no_due_installment' } : null) },
 ]
 
 const NEXT_BEST_PRIORITY = ['initiate_payment', 'accept_quote', 'generate_quote', 'select_coverage', 'write_question_answer', 'sign_dnt', 'write_dnt_answer', 'open_dnt_session', 'set_application', 'set_candidate_product', 'list_products']

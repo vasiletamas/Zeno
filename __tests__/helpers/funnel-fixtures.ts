@@ -110,6 +110,34 @@ export async function buildPendingInstallmentPayment(options: { frequency: 'annu
   return { ...fx, scheduleId: schedule.id, ...first, createPendingPaymentForInstallment }
 }
 
+/**
+ * buildAcceptReadyQuote + a real gateway accept_quote at the given frequency
+ * — schedule exists, NO Policy row (D2.8, erratum-8 fixture spec). Options:
+ * settle marks every installment PAID + the schedule COMPLETED (a fully
+ * settled schedule). Returns { ...fx, quoteId, scheduleId,
+ * firstInstallmentId, firstInstallmentAmountMinor }.
+ */
+export async function buildAcceptedQuoteWithSchedule(options: { frequency: 'annual' | 'semi_annual' | 'quarterly'; settle?: boolean }) {
+  const fx = await buildAcceptReadyQuote()
+  const accept = (args: Record<string, unknown>) =>
+    executeCommit({ tool: 'accept_quote', args, actor: 'agent', customerId: fx.customerId, conversationId: fx.conversationId, toolContext: fixtureCtx(fx.customerId, fx.conversationId) })
+  const ask = await accept({ paymentOption: options.frequency })
+  if (ask.outcome !== 'requires_confirmation') throw new Error(`buildAcceptedQuoteWithSchedule: accept ask ${ask.outcome} (${ask.reason})`)
+  const res = await accept({ paymentOption: options.frequency, confirmToken: ask.confirmToken })
+  if (res.outcome !== 'applied') throw new Error(`buildAcceptedQuoteWithSchedule: accept ${res.outcome} (${res.reason})`)
+  const schedule = await prisma.paymentSchedule.findFirstOrThrow({ where: { quoteId: fx.quoteId }, include: { installments: { orderBy: { sequence: 'asc' } } } })
+  if (options.settle) {
+    await prisma.installment.updateMany({ where: { scheduleId: schedule.id }, data: { status: 'PAID', paidAt: new Date() } })
+    await prisma.paymentSchedule.update({ where: { id: schedule.id }, data: { status: 'COMPLETED' } })
+  }
+  return {
+    ...fx,
+    scheduleId: schedule.id,
+    firstInstallmentId: schedule.installments[0].id,
+    firstInstallmentAmountMinor: schedule.installments[0].amountMinor,
+  }
+}
+
 /** buildReadyApplication + a real gateway generate_quote → ISSUED quote. */
 export async function buildIssuedQuote(options: { validUntil?: Date } = {}) {
   const fx = await buildReadyApplication()

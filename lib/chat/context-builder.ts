@@ -101,7 +101,7 @@ export async function buildToolContext(
         premiumMonthly: q.premiumMonthly,
       }
 
-      // Map policy if present on the quote
+      // Map policy if present on the quote (D2: absent until first capture)
       if (q.policy) {
         const pol = q.policy
         ctx.policy = {
@@ -110,6 +110,23 @@ export async function buildToolContext(
           premiumMonthly: pol.premiumMonthly,
           premiumAnnual: pol.premiumAnnual,
           paymentFrequency: pol.paymentFrequency,
+        }
+      }
+
+      // D2.8: the schedule summary is the payment-phase truth — injected
+      // whether or not a policy exists yet (policy-absent PAYMENT is normal).
+      const schedule = await prisma.paymentSchedule.findFirst({
+        where: { quoteId: q.id, status: { in: ['PENDING_FIRST_CAPTURE', 'ACTIVE', 'COMPLETED'] } },
+        include: { installments: { orderBy: { sequence: 'asc' } } },
+        orderBy: { createdAt: 'desc' },
+      })
+      if (schedule) {
+        const nextDue = schedule.installments.find((i) => i.status === 'PENDING') ?? null
+        ctx.schedule = {
+          frequency: schedule.frequency,
+          nextDueAmountMinor: nextDue?.amountMinor ?? null,
+          paidCount: schedule.installments.filter((i) => i.status === 'PAID').length,
+          totalInstallments: schedule.totalInstallments,
         }
       }
     }

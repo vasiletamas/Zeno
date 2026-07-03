@@ -3,9 +3,16 @@
  *
  * Reads PAYMENT_PROVIDER env var and returns a singleton instance
  * of the active payment provider. Defaults to 'mock' if not set.
+ *
+ * Imports are static (D2.8: the old lazy require() broke under the ESM
+ * test runtime); instantiation stays lazy, so providers with env-dependent
+ * constructors are only constructed when selected.
  */
 
 import type { PaymentProvider } from './types'
+import { StripePaymentProvider } from './providers/stripe'
+import { PayUPaymentProvider } from './providers/payu'
+import { MockPaymentProvider } from './providers/mock'
 
 let instance: PaymentProvider | null = null
 
@@ -17,28 +24,15 @@ export function getPaymentProvider(): PaymentProvider {
   ).toLowerCase()
 
   switch (providerName) {
-    case 'stripe': {
-      // Dynamic import to avoid loading Stripe SDK when not needed
-      const { StripePaymentProvider } = require('./providers/stripe') as {
-        StripePaymentProvider: new () => PaymentProvider
-      }
+    case 'stripe':
       instance = new StripePaymentProvider()
       break
-    }
-    case 'payu': {
-      const { PayUPaymentProvider } = require('./providers/payu') as {
-        PayUPaymentProvider: new () => PaymentProvider
-      }
+    case 'payu':
       instance = new PayUPaymentProvider()
       break
-    }
-    case 'mock': {
-      const { MockPaymentProvider } = require('./providers/mock') as {
-        MockPaymentProvider: new () => PaymentProvider
-      }
+    case 'mock':
       instance = new MockPaymentProvider()
       break
-    }
     default:
       throw new Error(
         `Unknown payment provider: "${providerName}". ` +
