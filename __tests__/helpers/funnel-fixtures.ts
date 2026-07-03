@@ -80,6 +80,36 @@ export async function buildAcceptReadyQuote(options: { withoutDisclosureAck?: bo
   return fx
 }
 
+/**
+ * buildAcceptReadyQuote + a real gateway accept_quote (two-step) at the
+ * given frequency, plus one PENDING Payment on installment 1 (D2.6,
+ * erratum-8 fixture spec). Returns { ...fx, quoteId, scheduleId,
+ * installmentId, paymentId, providerPaymentId,
+ * createPendingPaymentForInstallment(sequence) } — the helper mints a fresh
+ * PENDING Payment (unique mock providerPaymentId) for any later installment.
+ */
+export async function buildPendingInstallmentPayment(options: { frequency: 'annual' | 'semi_annual' | 'quarterly' }) {
+  const fx = await buildAcceptReadyQuote()
+  const accept = (args: Record<string, unknown>) =>
+    executeCommit({ tool: 'accept_quote', args, actor: 'agent', customerId: fx.customerId, conversationId: fx.conversationId, toolContext: fixtureCtx(fx.customerId, fx.conversationId) })
+  const ask = await accept({ paymentOption: options.frequency })
+  if (ask.outcome !== 'requires_confirmation') throw new Error(`buildPendingInstallmentPayment: accept ask ${ask.outcome} (${ask.reason})`)
+  const res = await accept({ paymentOption: options.frequency, confirmToken: ask.confirmToken })
+  if (res.outcome !== 'applied') throw new Error(`buildPendingInstallmentPayment: accept ${res.outcome} (${res.reason})`)
+  const schedule = await prisma.paymentSchedule.findFirstOrThrow({ where: { quoteId: fx.quoteId }, include: { installments: { orderBy: { sequence: 'asc' } } } })
+  const createPendingPaymentForInstallment = async (sequence: number) => {
+    const inst = schedule.installments.find((i) => i.sequence === sequence)
+    if (!inst) throw new Error(`no installment with sequence ${sequence}`)
+    const providerPaymentId = `mock_pay_${crypto.randomUUID()}`
+    const payment = await prisma.payment.create({
+      data: { installmentId: inst.id, customerId: fx.customerId, amountMinor: inst.amountMinor, provider: 'MOCK', providerPaymentId, status: 'PENDING' },
+    })
+    return { paymentId: payment.id, providerPaymentId, installmentId: inst.id }
+  }
+  const first = await createPendingPaymentForInstallment(1)
+  return { ...fx, scheduleId: schedule.id, ...first, createPendingPaymentForInstallment }
+}
+
 /** buildReadyApplication + a real gateway generate_quote → ISSUED quote. */
 export async function buildIssuedQuote(options: { validUntil?: Date } = {}) {
   const fx = await buildReadyApplication()
