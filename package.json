@@ -11,7 +11,9 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --project integration",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
-    "simulate": "npx tsx scripts/simulate.ts"
+    "simulate": "npx tsx scripts/simulate.ts",
+    "sims:spec": "tsx scripts/sims/run-spec-sims.ts",
+    "sims:judge": "tsx scripts/sims/run-judge.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
