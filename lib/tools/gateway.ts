@@ -58,6 +58,11 @@ const REPLAY_EXEMPT = new Set([
   // B3.5: a repeated start with identical args is a RESEND — it must issue a
   // fresh challenge (invalidating the prior), never replay the old envelope.
   'start_channel_verification',
+  // C1.9: selection is state-guarded — a cascade may have nulled the facet
+  // between two identical commits (tier change invalidates the level), so a
+  // replayed envelope would lie. Duplicates are answered by the handler's
+  // unchanged path (no-op, no second cascade).
+  'select_coverage',
 ])
 
 /**
@@ -72,7 +77,10 @@ export function resolveTargetRef(tool: string, args: Record<string, unknown>, st
   // repeatable commits — addressed entity from ARGS (erratum 4)
   if (tool === 'collect_customer_field') return `field:${String(args.field ?? 'unknown')}`
   if (tool === 'write_dnt_answer') return `dnt_answer:${String(args.questionCode ?? 'unknown')}`
-  if (tool === 'write_question_answer') return `app_answer:${String(args.field ?? 'auto')}`
+  // C1.9: the addressed entity is the question CODE (like write_dnt_answer) —
+  // without it, a same-value answer to a DIFFERENT question would replay.
+  if (tool === 'write_question_answer') return `app_answer:${String(args.questionCode ?? 'auto')}`
+  if (tool === 'modify_answer') return `app_answer:${String(args.questionCode ?? 'unknown')}`
   if (tool === 'withdraw_consent') return `consent:${String(args.kind ?? 'unknown')}`
   if (OPERATOR_TOOLS.has(tool)) return `work_item:${String(args.workItemId ?? 'unknown')}`
   // one-shot / entity-scoped commits — stable natural key

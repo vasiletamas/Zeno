@@ -93,6 +93,10 @@ const setApplicationSchema = z.object({
 
 const writeQuestionAnswerSchema = z.object({
   answer: z.string().min(1, 'Answer is required'),
+  // C1.9: addresses the commit for replay scope; validated against the
+  // engine's current question when present.
+  questionCode: z.string().optional(),
+  confirmToken: z.string().optional(), // BD questions are CONFIRM_ALWAYS (T6.D3)
 }).strict()
 
 const modifyAnswerSchema = z.object({

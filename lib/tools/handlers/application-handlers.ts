@@ -221,6 +221,13 @@ export const writeQuestionAnswer: ToolHandler = async (args, context) => {
     if (!currentQuestion.code) {
       return { success: false, error: 'invalid_args: the current question has no code — cannot plan consequences.' }
     }
+    // C1.9: when the caller addresses a question explicitly, it must be the
+    // engine's current one — a mismatch means the flow moved (precise
+    // recovery beats silently writing the wrong row).
+    const claimedCode = args.questionCode as string | undefined
+    if (claimedCode && claimedCode !== currentQuestion.code) {
+      return { success: false, error: `invalid_args: the current question is ${currentQuestion.code}, not ${claimedCode} — answer it, or correct a past answer with modify_answer.` }
+    }
 
     // C1.5: ONE planner path — sensitivity confirmation, cascades,
     // eligibility, derived flags/status all come from the plan.

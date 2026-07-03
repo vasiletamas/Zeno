@@ -690,11 +690,15 @@ registerTool('get_next_question', {
 }, getNextQuestionInfo)
 
 registerTool('write_question_answer', {
-  description: 'Save the customer\'s answer to the current application question.',
+  description:
+    'Save the customer\'s answer to the current application question. Pass the question\'s code (from the previous result\'s nextQuestion.code ' +
+    'or get_next_question) so the commit is addressed precisely. Sensitive questions (the BD medical set) require the customer\'s explicit confirmation — resend with confirmToken.',
   parameters: {
     type: 'object',
     properties: {
       answer: { type: 'string', description: 'The customer\'s answer.' },
+      questionCode: { type: 'string', description: 'The code of the question being answered (e.g. BD_CANCER_HISTORY).' },
+      confirmToken: { type: 'string', description: 'Confirmation token from a prior requires_confirmation envelope.' },
     },
     required: ['answer'],
     additionalProperties: false,

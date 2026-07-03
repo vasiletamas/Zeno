@@ -63,10 +63,13 @@ export function adaptAction(action: UIAction): ToolCall | null {
           arguments: { questionCode: String(action.payload.questionCode ?? action.payload.code ?? ''), value: String(action.payload.answer) },
         }
       }
+      // C1.9: the question CODE addresses the commit (replay scope) — a
+      // same-value answer to a DIFFERENT question must never replay.
+      const qCode = action.payload.questionCode ?? action.payload.code
       return {
         id: `action_${Date.now()}`,
         name: 'write_question_answer',
-        arguments: { answer: String(action.payload.answer) },
+        arguments: { answer: String(action.payload.answer), ...(qCode ? { questionCode: String(qCode) } : {}) },
       }
     }
 
