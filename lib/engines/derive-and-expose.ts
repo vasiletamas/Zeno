@@ -5,6 +5,7 @@ import { consentBlocksCommit } from './consent-rules'
 import { dntExposure, type DntFact, type ProductTypeStr } from './dnt-rules'
 import { applicationExposure, canTransition, type AppStatus } from './application-rules'
 import { evaluateEligibility } from './eligibility'
+import { evaluateSuitability, type SuitabilityResult } from './suitability'
 
 /**
  * Adapt the snapshot's DNT aggregate facts to the pure #12 exposure
@@ -86,7 +87,7 @@ export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSub
   return { phase: 'DISCOVERY', subphase: null }
 }
 
-type Derived = { phase: Phase; subphase: AppSubphase | null; eligibility: DerivedStateV3['eligibility'] }
+type Derived = { phase: Phase; subphase: AppSubphase | null; eligibility: DerivedStateV3['eligibility']; suitability: SuitabilityResult | null }
 export interface ActionRule {
   action: string
   kind: 'read' | 'commit'
@@ -94,6 +95,17 @@ export interface ActionRule {
   blockedReason?: (s: DomainSnapshot, d: Derived) => { reason: ReasonCode; params?: Record<string, unknown> } | null
 }
 const always = () => true
+
+/**
+ * The suitability verdict (C3.3, M7): derived ONLY after sign_dnt — before
+ * the signed needs analysis no fit claim is possible — from the product's
+ * typed rules over the signed DNT facts. Null when unsigned or rule-less.
+ */
+export function deriveSuitability(s: DomainSnapshot): SuitabilityResult | null {
+  const rules = s.product?.suitabilityRules
+  if (!rules || !s.dnt.signed) return null
+  return evaluateSuitability(rules, s.dnt.facts)
+}
 
 /**
  * The discovery eligibility verdict (C2.6, #9): ONE evaluator over the
@@ -178,7 +190,7 @@ export const ACTION_RULES: ActionRule[] = [
 const NEXT_BEST_PRIORITY = ['initiate_payment', 'accept_quote', 'generate_quote', 'select_coverage', 'write_question_answer', 'sign_dnt', 'write_dnt_answer', 'open_dnt_session', 'set_application', 'set_candidate_product', 'list_products']
 
 export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequirements?: IdentityRequirementsTable }): DeriveAndExposeResult {
-  const d: Derived = { ...derivePhase(s), eligibility: deriveEligibility(s) }
+  const d: Derived = { ...derivePhase(s), eligibility: deriveEligibility(s), suitability: deriveSuitability(s) }
   const identityTable = config?.identityRequirements ?? IDENTITY_REQUIREMENTS
   const available: string[] = []
   const blocked: BlockedAction[] = []
@@ -218,7 +230,7 @@ export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequiremen
     selection: { tier: s.application?.tier ?? null, level: s.application?.level ?? null, addon: s.application?.addon ?? null },
     identity: s.identity, consents: s.consents, dnt: s.dnt, application: s.application,
     quote: s.quote, schedule: s.schedule, policy: s.policy,
-    eligibility: d.eligibility, suitability: s.suitability, openItems: s.openItems,
+    eligibility: d.eligibility, suitability: d.suitability, openItems: s.openItems,
     flagsForReview,
     nextBestAction: next ? `call ${next}` : 'continue the conversation (no funnel commit is currently available)',
   }

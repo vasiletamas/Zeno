@@ -5,7 +5,7 @@ import { makeSnapshot } from '../engines/snapshot-fixtures'
 
 describe('new (phase,subphase) sections', () => {
   it('dntContext renders DNT progress + consent status during APPLICATION/DNT', () => {
-    const r = deriveAndExpose(makeSnapshot({ application: { id: 'a', status: 'OPEN', tier: null, level: null, addon: null, answeredCount: 0, requiredCount: 6, missingCodes: ['Q1'] }, dnt: { signed: false, valid: false, validUntil: null, coversProductTypes: [], answeredCount: 2, totalCount: 5, sessionActive: true, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0 } }))
+    const r = deriveAndExpose(makeSnapshot({ application: { id: 'a', status: 'OPEN', tier: null, level: null, addon: null, answeredCount: 0, requiredCount: 6, missingCodes: ['Q1'] }, dnt: { signed: false, valid: false, validUntil: null, coversProductTypes: [], answeredCount: 2, totalCount: 5, sessionActive: true, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0, facts: {} } }))
     const text = loadDntContext(r.state)
     expect(text).toContain('DNT progress: 2/5')
     expect(text).toContain('GDPR consent: missing')

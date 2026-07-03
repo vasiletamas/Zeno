@@ -1,4 +1,5 @@
 import type { EligibilityRuleSet } from './eligibility'
+import type { SuitabilityRuleSet, SuitabilityResult } from './suitability'
 
 export const PHASES = ['DISCOVERY', 'APPLICATION', 'QUOTE', 'PAYMENT', 'POLICY'] as const
 export type Phase = (typeof PHASES)[number]
@@ -19,7 +20,7 @@ export type Provenance = 'declared' | 'verified' | 'conflict'
 export interface DomainSnapshot {
   conversationId: string
   customerId: string
-  product: { id: string; code: string; insuranceType: string; eligibilityRules?: EligibilityRuleSet | null } | null // committed > candidate; eligibilityRules = the PARSED typed ruleset (C2.6), null/absent when the row carries no engine-evaluable rules
+  product: { id: string; code: string; insuranceType: string; eligibilityRules?: EligibilityRuleSet | null; suitabilityRules?: SuitabilityRuleSet | null } | null // committed > candidate; eligibilityRules = the PARSED typed ruleset (C2.6), null/absent when the row carries no engine-evaluable rules
   candidateProductId: string | null
   identity: { tier: IdentityTier; fields: Record<string, { provenance: Provenance } | undefined>; verifiedChannels: ('email' | 'sms')[]; pendingChallenge: { channel: 'email' | 'sms' } | null } // tier DERIVED by the loader via identity-rules (B3.2), never stored; pendingChallenge = live unconsumed VerificationChallenge (B3.5 exposure fact)
   consents: { gdprProcessing: boolean; aiDisclosure: boolean; marketing: boolean; gdprWithdrawn: boolean; hasAnyEvents: boolean } // derived from the ConsentEvent ledger (B1); gdprWithdrawn = latest gdpr event is an explicit withdrawal
@@ -32,6 +33,8 @@ export interface DomainSnapshot {
     sessionType: string | null
     sessionAnswered: number
     sessionTotal: number
+    /** C3.3: the SIGNED Dnt's answers (questionCode → value) — the suitability facts. Empty until a Dnt exists. */
+    facts: Record<string, string>
   }
   application: { id: string; status: 'OPEN' | 'PAUSED' | 'REFERRED' | 'COMPLETED' | 'CANCELLED'; tier: string | null; level: string | null; addon: boolean | null; answeredCount: number; requiredCount: number; missingCodes: string[] } | null // full T5.D6 set (B4); the loader nulls CANCELLED pointers
   /**
@@ -50,7 +53,6 @@ export interface DomainSnapshot {
    * derived from a declared/verified CNP). Answer facts ride `answers`.
    */
   eligibilityFacts: Record<string, string | number | boolean>
-  suitability: { verdict: 'suitable' | 'conditionally_suitable' | 'unsuitable' | 'unknown' } // M7 (other block)
   /**
    * B3.7 (#1 productDocuments): per-commit document requirements from
    * Product.verificationRequirements plus the customer's VALIDATED document
@@ -83,7 +85,8 @@ export interface DerivedStateV3 {
   policy: DomainSnapshot['policy']
   /** C2.6: the discovery verdict — DERIVED per turn from the product rules (subject 'product'), never stored. */
   eligibility: { verdict: 'eligible' | 'ineligible' | 'unknown'; missingFacts: string[]; failedReasons: string[] }
-  suitability: DomainSnapshot['suitability']
+  /** C3.3 (M7): derived post-sign_dnt from the product's suitability rules; null before — no fit claims possible. */
+  suitability: SuitabilityResult | null
   openItems: DomainSnapshot['openItems']
   /**
    * Alert-worthy facts the agent should not miss (A3.ADD-1/T13.D8): identity

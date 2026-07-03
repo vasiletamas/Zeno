@@ -5,6 +5,7 @@ import { computeVisibleSet } from '@/lib/engines/dependency-graph'
 import { loadDependencyGraph } from '@/lib/engines/dependency-graph-loader'
 import { getActiveAnswers } from '@/lib/engines/answer-store'
 import { parseEligibilityRuleSet, type EligibilityRuleSet } from '@/lib/engines/eligibility'
+import { parseSuitabilityRuleSet, type SuitabilityRuleSet } from '@/lib/engines/suitability'
 import { getOpenCircuitTools } from '@/lib/tools/circuit-state'
 import { deriveConsents, type ConsentEventLike } from '@/lib/customer/consent'
 import { getIdentityFacts, getAge } from '@/lib/customer/profile-service'
@@ -125,12 +126,24 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   // the product's typed ruleset, parsed once per snapshot (informal legacy
   // Json → null: no engine-evaluable rules)
   let eligibilityRules: EligibilityRuleSet | null = null
+  let suitabilityRules: SuitabilityRuleSet | null = null
   if (prod) {
     try { eligibilityRules = parseEligibilityRuleSet(prod.eligibility) } catch { eligibilityRules = null }
+    try { suitabilityRules = prod.suitabilityRules ? parseSuitabilityRuleSet(prod.suitabilityRules) : null } catch { suitabilityRules = null }
+  }
+  // C3.3: the SIGNED Dnt's answers are the suitability facts (questionCode →
+  // value, via the aggregate's source session)
+  let dntFacts: Record<string, string> = {}
+  if (latestDnt && latestDnt.status === 'ACTIVE') {
+    const signedAnswers = await db.dntAnswer.findMany({
+      where: { sessionId: latestDnt.sourceSessionId },
+      include: { question: { select: { code: true } } },
+    })
+    dntFacts = Object.fromEntries(signedAnswers.filter((a) => a.question.code).map((a) => [a.question.code as string, a.value]))
   }
   return {
     conversationId, customerId: conversation.customerId,
-    product: prod ? { id: prod.id, code: prod.code, insuranceType: prod.insuranceType, eligibilityRules } : null,
+    product: prod ? { id: prod.id, code: prod.code, insuranceType: prod.insuranceType, eligibilityRules, suitabilityRules } : null,
     candidateProductId: conversation.candidateProductId,
     identity: {
       // B3.2: tier DERIVED from the provenance store (+ verified channels),
@@ -149,6 +162,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
       sessionType: activeDntSession?.type ?? null,
       sessionAnswered: sessionCounts.answered,
       sessionTotal: sessionCounts.total,
+      facts: dntFacts,
     },
     application: appState,
     resumableApplication: resumable ? { id: resumable.id, status: resumable.status as 'OPEN' | 'PAUSED' | 'REFERRED' } : null,
@@ -156,7 +170,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     acceptedQuote: accepted ? { id: accepted.id, acceptedAt: accepted.updatedAt.toISOString() } : null,
     schedule: { exists: false, settled: false, nextDueAt: null, lastPaymentStatus: null }, // Block D (PaymentSchedule) re-points
     policy: policy ? { id: policy.id, status: policy.status } : null,
-    eligibilityFacts, suitability: { verdict: 'unknown' },
+    eligibilityFacts,
     documents: {
       requirementsByTool: (prod?.verificationRequirements as Record<string, string[]> | null) ?? {},
       validated: [...new Set(validatedDocs.map((d) => d.kind as string))],

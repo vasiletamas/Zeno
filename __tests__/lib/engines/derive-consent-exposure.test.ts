@@ -22,7 +22,7 @@ it('gdpr-withdrawn snapshot blocks writing commits with gdpr_processing_withdraw
 it('the re-grant floor survives withdrawal: DNT commits + escalate stay available', () => {
   const snap = makeSnapshot({
     consents: deriveConsents([{ kind: 'gdpr_processing', action: 'withdrawn', createdAt: new Date('2026-02-01') }]),
-    dnt: { signed: false, valid: false, validUntil: null, coversProductTypes: [], answeredCount: 0, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0 },
+    dnt: { signed: false, valid: false, validUntil: null, coversProductTypes: [], answeredCount: 0, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0, facts: {} },
   })
   const { actions } = deriveAndExpose(snap)
   expect(actions.available).toContain('open_dnt_session')

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { deriveAndExpose, ACTION_RULES, engineVersion } from '@/lib/engines/derive-and-expose'
 import { makeSnapshot } from './snapshot-fixtures'
 
-const validDnt = { signed: true, valid: true, validUntil: '2027-01-01T00:00:00.000Z', coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0 }
+const validDnt = { signed: true, valid: true, validUntil: '2027-01-01T00:00:00.000Z', coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0, facts: {} }
 // B4: the app stays OPEN through quoting — COMPLETED is terminal (T5.D6)
 const doneApp = { id: 'app-1', status: 'OPEN' as const, tier: 'standard', level: 'l1', addon: false, answeredCount: 6, requiredCount: 6, missingCodes: [] }
 
@@ -32,12 +32,12 @@ describe('deriveAndExpose — exposure over the FULL snapshot (contradiction #12
     expect(r.actions.blocked).toContainEqual(expect.objectContaining({ action: 'generate_quote', reason: 'requires_identity', params: { needs: ['declared:cnp_or_dateOfBirth'] } }))
   })
   it('sign_dnt blocked with dnt_session_incomplete while the ACTIVE session has pending questions (B2)', () => {
-    const s = makeSnapshot({ application: { ...doneApp, status: 'OPEN', missingCodes: ['Q1'] }, dnt: { ...validDnt, signed: false, valid: false, latest: null, activeSessionId: 'sess-1', sessionType: 'NEW', sessionAnswered: 2, sessionTotal: 10 } })
+    const s = makeSnapshot({ application: { ...doneApp, status: 'OPEN', missingCodes: ['Q1'] }, dnt: { ...validDnt, signed: false, valid: false, latest: null, activeSessionId: 'sess-1', sessionType: 'NEW', sessionAnswered: 2, sessionTotal: 10, facts: {} } })
     const r = deriveAndExpose(s)
     expect(r.actions.available).not.toContain('sign_dnt')
     expect(r.actions.blocked).toContainEqual(expect.objectContaining({ action: 'sign_dnt', reason: 'dnt_session_incomplete' }))
     // finished session flips it to available
-    const done = deriveAndExpose(makeSnapshot({ dnt: { ...validDnt, signed: false, valid: false, latest: null, activeSessionId: 'sess-1', sessionType: 'NEW', sessionAnswered: 10, sessionTotal: 10 } }))
+    const done = deriveAndExpose(makeSnapshot({ dnt: { ...validDnt, signed: false, valid: false, latest: null, activeSessionId: 'sess-1', sessionType: 'NEW', sessionAnswered: 10, sessionTotal: 10, facts: {} } }))
     expect(done.actions.available).toContain('sign_dnt')
   })
   it('a circuit-open tool moves to blocked temporarily_unavailable (M10)', () => {
