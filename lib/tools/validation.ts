@@ -299,6 +299,9 @@ const toolSchemas: Record<string, ZodType> = {
   cancel_submission: cancelSubmissionSchema,
   resolve_work_item: resolveWorkItemSchema,
 
+  // E4: the ONE list read
+  get_open_items: z.object({}).strict(),
+
   // GDPR (E3)
   request_erasure: z.object({ reason: z.string().max(500).optional() }).strict(),
   request_data_export: z.object({ reason: z.string().max(500).optional() }).strict(),

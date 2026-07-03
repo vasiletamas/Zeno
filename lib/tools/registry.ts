@@ -39,6 +39,7 @@ import { resolveReferral, resolveWorkItem } from './handlers/operator-handlers'
 import { markSubmitted, activatePolicy, cancelSubmission } from './handlers/policy-operator-handlers'
 import { getPolicyInfo, requestCancellation } from './handlers/policy-handlers'
 import { requestErasure, requestDataExport, approveErasure, approveExport } from './handlers/gdpr-handlers'
+import { getOpenItems } from './handlers/open-items-handlers'
 import { startChannelVerification, confirmChannelVerification, requestDocumentUpload } from './handlers/identity-handlers'
 
 // ==============================================
@@ -1316,6 +1317,26 @@ registerTool('resolve_work_item', {
   allowedRoles: ADMIN_OPERATOR,
   kind: 'commit',
 }, resolveWorkItem)
+
+// E4.3 (M2 spec amendment): get_open_items is the ONE list read —
+// get_application_list and get_quote_list are NOT registered.
+registerTool('get_open_items', {
+  description:
+    "List the customer's open items — paused applications, pending quotes, due installments, expiring DNT, policies in progress — each with the next available action.",
+  parameters: {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffects: false,
+  // Not cacheable: output depends on live state.
+  cacheable: false,
+  kind: 'read',
+}, getOpenItems)
 
 registerTool('request_erasure', {
   description:
