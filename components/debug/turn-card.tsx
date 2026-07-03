@@ -14,6 +14,13 @@ interface TurnCardProps {
   defaultOpen: boolean
 }
 
+interface TurnAnomaly {
+  severity?: 'info' | 'warning' | 'critical'
+  message?: string
+}
+
+const SEVERITY_RANK = { info: 0, warning: 1, critical: 2 } as const
+
 export function TurnCard({ turn, previousTurn, defaultOpen }: TurnCardProps) {
   const [openIdentity, setOpenIdentity] = useState(defaultOpen)
   const [openGate, setOpenGate] = useState(defaultOpen)
@@ -27,11 +34,36 @@ export function TurnCard({ turn, previousTurn, defaultOpen }: TurnCardProps) {
       ? turn.userMessage.slice(0, 57) + '...'
       : turn.userMessage
 
+  // F2.4: anomaly chip — count colored by worst severity, codes in the title.
+  const anomalies = (turn.totals?.anomalies ?? []) as TurnAnomaly[]
+  const worst = anomalies.reduce<'info' | 'warning' | 'critical'>(
+    (acc, a) =>
+      SEVERITY_RANK[a.severity ?? 'info'] > SEVERITY_RANK[acc] ? (a.severity ?? 'info') : acc,
+    'info',
+  )
+  const anomalyColor =
+    worst === 'critical'
+      ? 'bg-red-100 text-red-700'
+      : worst === 'warning'
+        ? 'bg-amber-100 text-amber-700'
+        : 'bg-gray-100 text-gray-600'
+
   return (
     <div className="border border-black/10 rounded-md bg-white">
       <div className="px-3 py-2 border-b border-black/5">
-        <p className="text-xs font-mono">
-          <span className="text-gray-500">#{turn.messageIndex}</span> {preview}
+        <p className="text-xs font-mono flex items-center justify-between gap-2">
+          <span>
+            <span className="text-gray-500">#{turn.messageIndex}</span> {preview}
+          </span>
+          {anomalies.length > 0 && (
+            <span
+              data-testid="anomaly-badge"
+              title={anomalies.map((a) => a.message ?? 'unknown').join('\n')}
+              className={`shrink-0 px-1 rounded text-[11px] ${anomalyColor}`}
+            >
+              {anomalies.length} ⚠
+            </span>
+          )}
         </p>
         {latency != null && (
           <p className="text-[10px] text-gray-500 font-mono mt-1">

@@ -33,6 +33,7 @@ import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
 import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, loadDntContext, loadPaymentContext, loadPolicyContext, getLastInjectedProductContentVersions, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
 import { buildTurnTools, DEGRADED_FLOOR } from './turn-tools'
 import { shouldRefreshExposure, formatRoundRefreshMessage } from './round-refresh'
+import { evaluateTurnInvariants, recommendedActionsFromBriefing } from '@/lib/monitors/turn-invariants'
 import { loadTurnContext, reactivateIfArchived, type TurnContext } from './turn-context'
 import { inferCandidate, hasAnyCategoryKeyword } from './candidate-inference'
 import { resolveAgent } from './agent-resolver'
@@ -44,7 +45,7 @@ import { isContextLengthError, parseTokenDeficit } from '@/lib/llm/errors'
 import { logError, logWarn, logFatal } from '@/lib/errors/logger'
 import { extractAndPersistInsights } from '@/lib/insights/extractor'
 import { CircuitOpenError, TimeoutError } from '@/lib/errors/types'
-import { eventBus, initObservability, getTurnCost, getTurnAnomalies, getTurnToolHistory } from '@/lib/events'
+import { eventBus, initObservability, getTurnCost, getTurnAnomalies, getTurnToolHistory, recordTurnAnomaly } from '@/lib/events'
 import { validateSideEffectClaims } from './side-effect-validator'
 import { detectToolNarration, type ToolNarrationResult } from './tool-narration-detector'
 import { debugYield, isDev, buildIdentityPayload, buildLegalityPayload, recordDebugEvent, type DebugEvent, type DebugGatePayload } from './debug'
@@ -744,6 +745,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // model gets the explicit degraded floor — reads + escape hatch.
   let tools: LLMToolDefinition[] = exposure ? buildTurnTools(exposure.actions) : getToolsForLLM([...DEGRADED_FLOOR])
   let finalContent = ''
+  // F2.4: per-turn facts for the runtime invariant monitors
+  const turnEnvelopes: import('@/lib/engines/domain-types').CommitResult[] = []
+  const turnWritingResults: { tool: string; hasEnvelope: boolean }[] = []
+  const turnExecutorRejections: { tool: string; reason: string }[] = []
   let lastStatusMessage: string | undefined
 
   if (input.syntheticToolCall) {
@@ -877,6 +882,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     }
   } else {
     // ----- Standard chat path with tool loop -----
+    // F2.4: per-turn facts for the runtime invariant monitors
     let round = 0
 
     while (round <= MAX_TOOL_ROUNDS) {
@@ -1207,6 +1213,18 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       const roundEnvelopes = roundToolCalls
         .map((tc) => resultMap.get(tc.id)?.pipelineResult.toolResult.envelope)
         .filter((e): e is NonNullable<typeof e> => e !== undefined)
+      turnEnvelopes.push(...roundEnvelopes)
+      for (const tc of roundToolCalls) {
+        const entry = resultMap.get(tc.id)
+        if (!entry) continue
+        if (getToolDefinition(tc.name)?.kind === 'commit') {
+          turnWritingResults.push({ tool: tc.name, hasEnvelope: entry.pipelineResult.toolResult.envelope !== undefined })
+        }
+        const env = entry.pipelineResult.toolResult.envelope
+        if (env?.outcome === 'rejected' && env.reason === 'not_exposed') {
+          turnExecutorRejections.push({ tool: tc.name, reason: 'not_exposed' })
+        }
+      }
       if (shouldRefreshExposure(roundEnvelopes)) {
         try {
           const refreshSnap = await loadDomainSnapshot(state.conversationId)
@@ -1416,6 +1434,25 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   state.phases['agentExtensibility'] = {
     conversationMode: state.conversationMode,
     complianceResult: state.complianceResult,
+  }
+
+  // F2.4 (T14.D3): mechanical invariant monitors — findings become turn
+  // anomalies, flowing into TurnTrace, the turn:end event, TurnDebug and
+  // the drawer badge below.
+  try {
+    const findings = evaluateTurnInvariants({
+      briefingRecommendedActions: recommendedActionsFromBriefing(exposure?.state.nextBestAction),
+      availableActions: exposure?.actions.available ?? [],
+      executorRejections: turnExecutorRejections,
+      writingToolResults: turnWritingResults,
+      ledgerDispositions: turnEnvelopes.map((e) => e.disposition).filter((d): d is 'fresh' | 'replay' => d !== undefined),
+      confirmTokenReissues: turnEnvelopes.filter((e) => e.outcome === 'requires_confirmation').length,
+    })
+    for (const f of findings) {
+      recordTurnAnomaly(state.traceId, { type: 'behavioral', severity: f.severity, message: f.code, metadata: f.detail })
+    }
+  } catch (err) {
+    logWarn({ layer: 'orchestrator', category: 'invariant_monitor', message: 'invariant evaluation failed', context: { conversationId: state.conversationId }, error: err })
   }
 
   void prisma.turnTrace.create({

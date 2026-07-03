@@ -52,6 +52,15 @@ export function getTurnAnomalies(traceId: string): Anomaly[] {
   return turnAnomalies.get(traceId) ?? []
 }
 
+/**
+ * F2.4: public entry for the orchestrator's runtime invariant monitors —
+ * findings join the same per-turn store the drawer badges and TurnDebug/
+ * TurnTrace rows read.
+ */
+export function recordTurnAnomaly(traceId: string, anomaly: Anomaly): void {
+  addAnomaly(traceId, anomaly)
+}
+
 export function getTurnToolHistory(
   traceId: string,
 ): Array<{ name: string; success: boolean }> {
