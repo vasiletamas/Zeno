@@ -183,6 +183,21 @@ export class PayUPaymentProvider implements PaymentProvider {
     }
   }
 
+  async refundPayment(providerPaymentId: string, amountMinor: number): Promise<{ providerRefundId: string }> {
+    const { merchantId, secretKey } = getPayUConfig()
+    const accessToken = await getAccessToken(merchantId, secretKey)
+    const response = await fetch(`${PAYU_API_BASE}/api/v2_1/orders/${providerPaymentId}/refunds`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ refund: { description: 'Free-look / pre-activation refund', amount: String(amountMinor) } }),
+    })
+    if (!response.ok) {
+      throw new Error(`PayU refund failed: ${response.status} ${response.statusText}`)
+    }
+    const data = (await response.json()) as { refund?: { refundId?: string } }
+    return { providerRefundId: data.refund?.refundId ?? `payu_refund_${providerPaymentId}` }
+  }
+
   async handleWebhook(
     payload: unknown,
     signature: string,

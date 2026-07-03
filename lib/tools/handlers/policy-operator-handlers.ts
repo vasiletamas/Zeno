@@ -20,6 +20,7 @@
  * refund system-effect at D4.5 (contradiction #5's second trigger).
  */
 import { canPolicyTransition, type PolicyStatusV3 } from '@/lib/engines/policy-machine'
+import { executeFullRefund } from '@/lib/payments/refunds'
 import type { ToolHandler } from '@/lib/tools/types'
 
 export const markSubmitted: ToolHandler = async (args, context) => {
@@ -75,13 +76,19 @@ export const cancelSubmission: ToolHandler = async (args, context) => {
       return { success: false, error: `illegal_status_transition: ${policy.status} → CANCELLED is not an operator transition (post-activation cancellation is the engine's free-look).` }
     }
     await context.db.policy.update({ where: { id: policy.id }, data: { status: 'CANCELLED' } })
-    // D4.5 attaches executeFullRefund here (contradiction #5: pre-activation
-    // cancellation / Allianz rejection refunds every captured payment).
+    // contradiction #5, second trigger: pre-activation cancellation /
+    // Allianz rejection refunds every captured payment of the schedule.
+    const schedule = await context.db.paymentSchedule.findFirst({
+      where: { quoteId: policy.quoteId, status: { in: ['PENDING_FIRST_CAPTURE', 'ACTIVE', 'COMPLETED'] } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    })
+    const refunded = schedule ? await executeFullRefund(context.db, schedule.id) : { refundedCount: 0 }
     return {
       success: true,
       effects: ['terminal'],
-      data: { policyId: policy.id, status: 'CANCELLED' },
-      message: 'Policy submission cancelled.',
+      data: { policyId: policy.id, status: 'CANCELLED', refundedCount: refunded.refundedCount },
+      message: `Policy submission cancelled; ${refunded.refundedCount} captured payment(s) refunded.`,
     }
   } catch (error) {
     return { success: false, error: String(error) }

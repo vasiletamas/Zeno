@@ -8,6 +8,8 @@
  * 'paid_processing', codes only — A4's POLICY section localizes).
  */
 import { deriveSchedulePosition } from '@/lib/engines/payment-position'
+import { canPolicyTransition, freeLookDecision, type PolicyStatusV3 } from '@/lib/engines/policy-machine'
+import { executeFullRefund } from '@/lib/payments/refunds'
 import type { ToolHandler } from '@/lib/tools/types'
 
 /** M6: statusCode contract consumed by A4's POLICY prompt section. */
@@ -70,6 +72,48 @@ export const getPolicyInfo: ToolHandler = async (_args, context) => {
         documents: documents.map((d) => ({ kind: d.kind, version: d.version, language: d.language, url: `/api/documents/${d.id}` })),
       },
       message: `Policy status code: ${statusCode}.`,
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
+
+/**
+ * request_cancellation (D4.5, T9.D2): the free-look cancellation — the ONE
+ * engine-owned policy transition. Legality (the deterministic window rule)
+ * lives in deriveAndExpose; the apply keeps the CAS + the refund system
+ * effect: every captured payment of the policy's schedule is refunded at
+ * the provider and marked REFUNDED, inside the gateway transaction.
+ */
+export const requestCancellation: ToolHandler = async (_args, context) => {
+  try {
+    const policy = await context.db.policy.findFirst({
+      where: { customerId: context.customerId, status: 'ACTIVE' },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!policy) {
+      return { success: false, error: 'no_policy: no active policy exists for this customer.' }
+    }
+    // belt — legality is the wall (engine rule over the frozen window)
+    const decision = freeLookDecision({ status: policy.status, freeLookEndsAt: policy.freeLookEndsAt }, new Date())
+    if (decision === 'outside_window') {
+      return { success: false, error: 'outside_free_look: the free-look window has ended.' }
+    }
+    if (decision === 'not_cancellable' || !canPolicyTransition(policy.status as PolicyStatusV3, 'CANCELLED', 'engine')) {
+      return { success: false, error: 'illegal_status_transition: the policy is not in a cancellable state.' }
+    }
+    await context.db.policy.update({ where: { id: policy.id }, data: { status: 'CANCELLED' } })
+    const schedule = await context.db.paymentSchedule.findFirst({
+      where: { quoteId: policy.quoteId, status: { in: ['PENDING_FIRST_CAPTURE', 'ACTIVE', 'COMPLETED'] } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    })
+    const refunded = schedule ? await executeFullRefund(context.db, schedule.id) : { refundedCount: 0 }
+    return {
+      success: true,
+      effects: ['terminal'],
+      data: { policyId: policy.id, status: 'CANCELLED', refundedCount: refunded.refundedCount },
+      message: `Policy cancelled within the free-look window; ${refunded.refundedCount} captured payment(s) refunded.`,
     }
   } catch (error) {
     return { success: false, error: String(error) }

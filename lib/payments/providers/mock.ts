@@ -50,6 +50,10 @@ export class MockPaymentProvider implements PaymentProvider {
     // mock intents hold no provider state — cancellation is a no-op
   }
 
+  async refundPayment(providerPaymentId: string, _amountMinor: number): Promise<{ providerRefundId: string }> {
+    return { providerRefundId: `refund_${providerPaymentId}` }
+  }
+
   async handleWebhook(
     payload: unknown,
     signature: string,

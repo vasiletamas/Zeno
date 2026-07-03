@@ -218,7 +218,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     quote: issued ? { id: issued.id, status: issued.status, premiumAnnual: issued.premiumAnnual, validUntil: issued.validUntil.toISOString(), expired: isExpired({ status: issued.status as QuoteStatusV3, validUntil: issued.validUntil }, new Date()), disclosuresRequired: quoteDisclosuresRequired } : null,
     acceptedQuote: accepted ? { id: accepted.id, acceptedAt: accepted.updatedAt.toISOString() } : null,
     schedule: scheduleSlice,
-    policy: policy ? { id: policy.id, status: policy.status } : null,
+    policy: policy ? { id: policy.id, status: policy.status, freeLookEndsAt: policy.freeLookEndsAt?.toISOString() ?? null } : null,
     eligibilityFacts, suitabilityAcks,
     documents: {
       requirementsByTool: (prod?.verificationRequirements as Record<string, string[]> | null) ?? {},

@@ -45,5 +45,9 @@ export interface PaymentProvider {
    *  capturable sessions — the single-open-attempt invariant. */
   cancelPaymentIntent(providerPaymentId: string): Promise<void>
 
+  /** D4.5: refund a captured payment — the payment-module system effect
+   *  behind free-look cancellation and pre-activation rejection (#5). */
+  refundPayment(providerPaymentId: string, amountMinor: number): Promise<{ providerRefundId: string }>
+
   handleWebhook(payload: unknown, signature: string): Promise<WebhookEvent>
 }

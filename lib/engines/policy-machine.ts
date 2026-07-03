@@ -27,3 +27,18 @@ export const POLICY_TRANSITIONS: PolicyTransition[] = [
 export function canPolicyTransition(from: PolicyStatusV3, to: PolicyStatusV3, owner: TransitionOwner): boolean {
   return POLICY_TRANSITIONS.some((t) => t.from === from && t.to === to && t.owner === owner)
 }
+
+/**
+ * The deterministic free-look rule (D4.5, T9.D2): decided against the
+ * FROZEN per-policy freeLookEndsAt — inclusive at the boundary. Registered
+ * as an exposure-predicate input consumed by deriveAndExpose (erratum-1
+ * pattern) — never re-decided in handlers.
+ */
+export function freeLookDecision(
+  p: { status: string; freeLookEndsAt: Date | null },
+  now: Date,
+): 'in_window' | 'outside_window' | 'not_cancellable' {
+  if (p.status !== 'ACTIVE') return 'not_cancellable'
+  if (p.freeLookEndsAt !== null && now.getTime() <= p.freeLookEndsAt.getTime()) return 'in_window'
+  return 'outside_window'
+}

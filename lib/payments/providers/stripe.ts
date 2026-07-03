@@ -119,6 +119,11 @@ export class StripePaymentProvider implements PaymentProvider {
     await this.stripe.paymentIntents.cancel(providerPaymentId)
   }
 
+  async refundPayment(providerPaymentId: string, amountMinor: number): Promise<{ providerRefundId: string }> {
+    const refund = await this.stripe.refunds.create({ payment_intent: providerPaymentId, amount: amountMinor })
+    return { providerRefundId: refund.id }
+  }
+
   async handleWebhook(
     payload: unknown,
     signature: string,

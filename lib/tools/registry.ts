@@ -33,7 +33,7 @@ import { escalateToHuman } from './handlers/utility-handlers'
 import { ensurePaymentSession, getPaymentStatus, changePaymentOption } from './handlers/payment-handlers'
 import { resolveReferral, resolveWorkItem } from './handlers/operator-handlers'
 import { markSubmitted, activatePolicy, cancelSubmission } from './handlers/policy-operator-handlers'
-import { getPolicyInfo } from './handlers/policy-handlers'
+import { getPolicyInfo, requestCancellation } from './handlers/policy-handlers'
 import { startChannelVerification, confirmChannelVerification, requestDocumentUpload } from './handlers/identity-handlers'
 
 // ==============================================
@@ -1120,6 +1120,24 @@ registerTool('get_policy_info', {
   allowedRoles: ALL_ROLES,
   kind: 'read',
 }, getPolicyInfo)
+
+registerTool('request_cancellation', {
+  description:
+    'Cancel the ACTIVE policy within the free-look window (two-step: the gateway returns a confirmation request first; re-call with the token). ' +
+    'Terminal: the policy is cancelled and every captured payment is refunded. Outside the window this is rejected — offer escalation to a colleague instead.',
+  parameters: {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: true,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+  requiresConfirmation: true,
+}, requestCancellation)
 
 registerTool('mark_submitted', {
   description: 'Operator: mark a paid policy as submitted to the insurer (PENDING_SUBMISSION → SUBMITTED).',
