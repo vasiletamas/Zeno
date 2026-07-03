@@ -415,6 +415,9 @@ model Customer {
   isAnonymous        Boolean   @default(true)
   mergedIntoId       String?
   mergedAt           DateTime?
+  // E3.2 (M3): tombstone marker set by the erasure executor — aligns with
+  // B0's pseudonymized-customer tombstone (claim-and-merge).
+  erasedAt           DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
