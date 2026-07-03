@@ -15,6 +15,8 @@ import type { RawCustomerInsight } from './context-loaders'
 import type { DerivedStateV3, ExposedActions } from '@/lib/engines/domain-types'
 import { calculateAge } from './age'
 import { writeDebugEvent } from './debug-persistence'
+import { redactSnapshot } from '@/lib/debug/redact'
+import { engineVersion } from '@/lib/engines/derive-and-expose'
 
 // ==============================================
 // DEBUG EVENT PAYLOADS
@@ -135,6 +137,16 @@ export interface DebugLegalityPayload {
   snapshot: unknown
   state: DerivedStateV3
   actions: ExposedActions
+}
+
+/**
+ * Pure builder (F2.2, mirroring buildIdentityPayload): stamps the LIVE
+ * engine version and redacts the snapshot; state/actions pass verbatim.
+ * The engine version comes from Block A's derive-and-expose stamp — no
+ * second version constant to drift (plan's version.ts skipped by design).
+ */
+export function buildLegalityPayload(input: Omit<DebugLegalityPayload, 'engineVersion'>): DebugLegalityPayload {
+  return { ...input, engineVersion, snapshot: redactSnapshot(input.snapshot) }
 }
 
 export interface DebugIdentityMemoryEntry {

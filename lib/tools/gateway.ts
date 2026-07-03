@@ -150,16 +150,25 @@ async function findFreshApplied(db: Db, conversationId: string, tool: string, ke
   })
 }
 
-async function writeLedger(db: Db, req: CommitRequest, targetRef: string, argsHash: string, envelope: CommitResult, phaseFrom: string, phaseTo: string, id?: string): Promise<void> {
+/**
+ * F2.2 (erratum 2): the row id is minted here and STAMPED into the envelope
+ * before the write, so the stored envelope and the returned envelope carry
+ * the same ledgerId — the deterministic turn↔ledger join key the legality
+ * snapshots and the assertion library use. Returns the stamped envelope.
+ */
+async function writeLedger(db: Db, req: CommitRequest, targetRef: string, argsHash: string, envelope: CommitResult, phaseFrom: string, phaseTo: string, id?: string): Promise<CommitResult> {
+  const rowId = id ?? crypto.randomUUID()
+  const stamped: CommitResult = { ...envelope, ledgerId: rowId, disposition: 'fresh' }
   await db.commitLedger.create({
     data: {
-      ...(id ? { id } : {}),
+      id: rowId,
       conversationId: req.conversationId, customerId: req.customerId, actor: req.actor, tool: req.tool,
-      targetRef, argsHash, outcome: envelope.outcome, effects: envelope.effects,
-      reasonCode: envelope.reason ?? null, phaseFrom, phaseTo,
-      idempotencyDisposition: 'fresh', envelope: envelope as unknown as Prisma.InputJsonValue,
+      targetRef, argsHash, outcome: stamped.outcome, effects: stamped.effects,
+      reasonCode: stamped.reason ?? null, phaseFrom, phaseTo,
+      idempotencyDisposition: 'fresh', envelope: stamped as unknown as Prisma.InputJsonValue,
     },
   })
+  return stamped
 }
 
 async function writeReplayRow(db: Db, req: CommitRequest, prior: CommitLedger): Promise<CommitResult> {
@@ -171,8 +180,10 @@ async function writeReplayRow(db: Db, req: CommitRequest, prior: CommitLedger): 
       idempotencyDisposition: 'replay', envelope: prior.envelope as Prisma.InputJsonValue,
     },
   })
-  // The ORIGINAL envelope, verbatim — a replay never recomputes.
-  return prior.envelope as unknown as CommitResult
+  // The ORIGINAL envelope, verbatim — a replay never recomputes. Only the
+  // disposition marker changes so callers can count replays (F2.4); the
+  // ledgerId stays the ORIGINAL applied row's id (the semantic join target).
+  return { ...(prior.envelope as unknown as CommitResult), disposition: 'replay' }
 }
 
 /**
@@ -191,9 +202,7 @@ async function persistQuoteExpiry(db: Db, state: DerivedStateV3): Promise<void> 
 }
 
 async function ledgeredReject(db: Db, req: CommitRequest, targetRef: string, argsHash: string, reason: ReasonCode, phase: string): Promise<CommitResult> {
-  const envelope: CommitResult = { outcome: 'rejected', reason, effects: [] }
-  await writeLedger(db, req, targetRef, argsHash, envelope, phase, phase)
-  return envelope
+  return writeLedger(db, req, targetRef, argsHash, { outcome: 'rejected', reason, effects: [] }, phase, phase)
 }
 
 export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
@@ -229,8 +238,7 @@ export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
     const reason = blocked?.reason ?? 'not_exposed'
     if (reason === 'quote_expired') await persistQuoteExpiry(prisma, pre.state)
     const envelope: CommitResult = { outcome: outcomeForBlocked(reason), reason, effects: [], needs: blocked?.params?.needs as string[] | undefined }
-    await writeLedger(prisma, req, targetRef, argsHash, envelope, pre.state.phase, pre.state.phase)
-    return envelope
+    return writeLedger(prisma, req, targetRef, argsHash, envelope, pre.state.phase, pre.state.phase)
   }
 
   // (4) confirm token — stale/missing → (re-)issue against a fresh state
@@ -252,8 +260,7 @@ export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
         confirmToken: issueConfirmToken(confirmSecret(), req.conversationId, req.tool, argsHash, fp),
         data: { preview: { phase: pre.state.phase, quote: pre.state.quote } },
       }
-      await writeLedger(prisma, req, targetRef, argsHash, envelope, pre.state.phase, pre.state.phase)
-      return envelope
+      return writeLedger(prisma, req, targetRef, argsHash, envelope, pre.state.phase, pre.state.phase)
     }
   }
 
@@ -291,8 +298,7 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
       const reason = blocked?.reason ?? 'not_exposed'
       if (reason === 'quote_expired') await persistQuoteExpiry(tx, lockedPre.state)
       const envelope: CommitResult = { outcome: outcomeForBlocked(reason), reason, effects: [] }
-      await writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, lockedPre.state.phase)
-      return envelope
+      return writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, lockedPre.state.phase)
     }
     const effectiveArgs = { ...validatedArgs, ...(requiresConfirmation ? CONFIRM_ARG_INJECTION[req.tool] ?? {} : {}) }
     // C1.5: the ledger row id is minted BEFORE the handler runs so answer
@@ -311,8 +317,7 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
         confirmToken: issueConfirmToken(confirmSecret(), req.conversationId, req.tool, argsHash, stateFingerprint(lockedPre.state)),
         data: { preview: handlerResult.requiresConfirmation.preview },
       }
-      await writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, lockedPre.state.phase)
-      return envelope
+      return writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, lockedPre.state.phase)
     }
     let post: ReturnType<typeof deriveAndExpose>
     try {
@@ -348,7 +353,6 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
         ? { outcome: 'referred', reason: handlerResult.referred.reason as ReasonCode, effects, phaseDelta, data: { ...handlerResult.data, _message: handlerResult.message } }
         : { outcome: 'applied', effects, phaseDelta, data: { ...handlerResult.data, _uiAction: handlerResult.uiAction, _confirmation: handlerResult.confirmation, _message: handlerResult.message } }
       : { outcome: spokenReason ? outcomeForBlocked(spokenReason) : 'rejected', reason: spokenReason ?? 'handler_rejected', effects: [], needs: handlerNeeds, data: { error: handlerResult.error } }
-    await writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, post.state.phase, handlerResult.success ? commitId : undefined)
-    return envelope
+    return writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, post.state.phase, handlerResult.success ? commitId : undefined)
   })
 }

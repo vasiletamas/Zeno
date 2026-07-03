@@ -30,7 +30,7 @@ import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { deriveAndExpose, engineVersion } from '@/lib/engines/derive-and-expose'
 import type { DeriveAndExposeResult } from '@/lib/engines/domain-types'
 import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
-import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, loadDntContext, loadPaymentContext, loadPolicyContext, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
+import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, loadDntContext, loadPaymentContext, loadPolicyContext, getLastInjectedProductContentVersions, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
 import { buildTurnTools, DEGRADED_FLOOR } from './turn-tools'
 import { shouldRefreshExposure, formatRoundRefreshMessage } from './round-refresh'
 import { loadTurnContext, reactivateIfArchived, type TurnContext } from './turn-context'
@@ -47,7 +47,7 @@ import { CircuitOpenError, TimeoutError } from '@/lib/errors/types'
 import { eventBus, initObservability, getTurnCost, getTurnAnomalies, getTurnToolHistory } from '@/lib/events'
 import { validateSideEffectClaims } from './side-effect-validator'
 import { detectToolNarration, type ToolNarrationResult } from './tool-narration-detector'
-import { debugYield, isDev, buildIdentityPayload, recordDebugEvent, type DebugEvent, type DebugGatePayload } from './debug'
+import { debugYield, isDev, buildIdentityPayload, buildLegalityPayload, recordDebugEvent, type DebugEvent, type DebugGatePayload } from './debug'
 import { serializeToolResultForModel } from './tool-result-serializer'
 import { persistTurnDebug } from './turn-debug-persistence'
 
@@ -406,14 +406,18 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     exposure: DeriveAndExposeResult | null
     gateSelection: GateSelection
     gateDebug: Omit<DebugGatePayload, 'traceId'>
+    snapshot: unknown
   }> => {
     eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'reasoning_gate', timestamp: Date.now() })
     const start = Date.now()
     let exposure: DeriveAndExposeResult | null = null
     let gateSelection: GateSelection
     let gateDebug: Omit<DebugGatePayload, 'traceId'>
+    let snapshot: unknown = null
     try {
-      exposure = deriveAndExpose(await loadDomainSnapshot(state.conversationId))
+      const snap = await loadDomainSnapshot(state.conversationId)
+      snapshot = snap
+      exposure = deriveAndExpose(snap)
       gateSelection = { requiredSections: getRequiredSectionsFor(exposure.state.phase, exposure.state.subphase), excludedSections: [], confidence: 1 }
       state.phases['reasoningGate'] = { durationMs: Date.now() - start, derivedPhase: exposure.state.phase }
       gateDebug = { skipped: false, derivedPhase: exposure.state.phase, derivedState: exposure.state, actions: exposure.actions, engineVersion, durationMs: Date.now() - start }
@@ -425,7 +429,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     }
     state.phases['step3_reasoning_gate'] = Date.now() - start
     eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'reasoning_gate', durationMs: Date.now() - start })
-    return { exposure, gateSelection, gateDebug }
+    return { exposure, gateSelection, gateDebug, snapshot }
   })()
 
   // --- contextPromise: Step 4 — Context assembly (without situationalBriefing, patched after gate) ---
@@ -540,6 +544,23 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     event: 'debug:gate',
     data: { ...gateResult.gateDebug, traceId: state.traceId },
   })
+
+  // F2.2 (T14.D2): the per-turn legality snapshot — deriveAndExpose INPUT
+  // (redacted) + OUTPUT + version stamps. contentVersions reflect the last
+  // productContext load (fresh for this turn when a product is in focus).
+  if (exposure && gateResult.snapshot) {
+    yield* recordAndYield({
+      event: 'debug:legality',
+      data: buildLegalityPayload({
+        traceId: state.traceId,
+        point: 'turn_start',
+        contentVersions: getLastInjectedProductContentVersions(),
+        snapshot: gateResult.snapshot,
+        state: exposure.state,
+        actions: exposure.actions,
+      }),
+    })
+  }
 
   // Patch situationalBriefing from the derived state (phase/subphase + next best action)
   sections.situationalBriefing = exposure ? formatDerivedBriefing(exposure.state, exposure.actions) : null
@@ -1188,12 +1209,30 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         .filter((e): e is NonNullable<typeof e> => e !== undefined)
       if (shouldRefreshExposure(roundEnvelopes)) {
         try {
-          const refreshed = deriveAndExpose(await loadDomainSnapshot(state.conversationId))
+          const refreshSnap = await loadDomainSnapshot(state.conversationId)
+          const refreshed = deriveAndExpose(refreshSnap)
           tools = buildTurnTools(refreshed.actions)
           toolContext = await buildToolContext(state.customerId, state.conversationId, state.language)
           toolContext.actor = 'agent'
           toolContext.exposedTools = refreshed.actions.available
           messages.push({ role: 'system', content: formatRoundRefreshMessage(refreshed.state, refreshed.actions) })
+          // F2.2: one post_commit legality entry per APPLIED envelope this
+          // round, joined to its ledger row by the stamped ledgerId
+          // (erratum 2); state/actions are the post-round recompute.
+          for (const env of roundEnvelopes.filter((e) => e.outcome === 'applied')) {
+            yield* recordAndYield({
+              event: 'debug:legality',
+              data: buildLegalityPayload({
+                traceId: state.traceId,
+                point: 'post_commit',
+                commitLedgerId: env.ledgerId,
+                contentVersions: getLastInjectedProductContentVersions(),
+                snapshot: refreshSnap,
+                state: refreshed.state,
+                actions: refreshed.actions,
+              }),
+            })
+          }
         } catch (err: unknown) {
           logWarn({ layer: 'orchestrator', category: 'derive_state', message: 'post-round re-derivation failed — keeping previous exposure', context: { conversationId: state.conversationId }, error: err })
         }

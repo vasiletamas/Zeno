@@ -112,4 +112,12 @@ export interface CommitResult {
   data?: unknown
   confirmToken?: string
   needs?: string[]
+  /**
+   * F2.2 (erratum 2): the CommitLedger row id, stamped at write time so the
+   * stored and returned envelopes agree — the deterministic turn↔ledger join
+   * key. On a replay this stays the ORIGINAL applied row's id.
+   */
+  ledgerId?: string
+  /** 'replay' when the ledger answered instead of the handler (F2.4 counter). */
+  disposition?: 'fresh' | 'replay'
 }
