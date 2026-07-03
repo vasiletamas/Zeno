@@ -727,8 +727,9 @@ registerTool('modify_answer', {
 
 registerTool('select_coverage', {
   description:
-    'Choose or change the coverage: pricing tier (e.g. "standard", "optim"), premium level (e.g. "level_1") and the add-on. ' +
-    'THE only way to set them — they are not questionnaire questions. ' +
+    'Choose or change the coverage: pricing tier (e.g. "standard", "optim"), premium level (e.g. "level_1") or the add-on. ' +
+    'THE only way to set them — they are not questionnaire questions. ONE facet per call (tier, then level, then addon): ' +
+    'each change carries its own consequences (a tier change invalidates the level; the addon toggle adds/removes the medical questionnaire). ' +
     'Re-selecting under an existing quote expires it (a fresh quote is needed).',
   parameters: {
     type: 'object',

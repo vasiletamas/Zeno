@@ -66,13 +66,13 @@ export async function buildPlannerSnapshot(db: Db, conversationId: string): Prom
   }
   if (!application || application.status === 'CANCELLED') return empty
 
-  const [tier, level, liveQuote] = await Promise.all([
-    application.tierId ? db.pricingTier.findUnique({ where: { id: application.tierId } }) : null,
-    application.levelId ? db.pricingLevel.findUnique({ where: { id: application.levelId } }) : null,
-    db.quote.findFirst({
-      where: { applicationId: application.id, OR: [{ status: 'ACCEPTED' }, { status: 'DRAFT', validUntil: { gt: new Date() } }] },
-    }),
-  ])
+  // sequential on purpose: db may be the gateway's tx client, which cannot
+  // run concurrent queries on its single connection
+  const tier = application.tierId ? await db.pricingTier.findUnique({ where: { id: application.tierId } }) : null
+  const level = application.levelId ? await db.pricingLevel.findUnique({ where: { id: application.levelId } }) : null
+  const liveQuote = await db.quote.findFirst({
+    where: { applicationId: application.id, OR: [{ status: 'ACCEPTED' }, { status: 'DRAFT', validUntil: { gt: new Date() } }] },
+  })
 
   const groupCodes = (await resolveGroupCodes(application.productId, 'application', db)) ?? []
   const questions = groupCodes.length > 0

@@ -108,13 +108,16 @@ async function main() {
     complete.actions.blocked.find((b) => b.action === 'generate_quote')?.reason === 'selection_incomplete',
     JSON.stringify({ missing: complete.state.application?.missingCodes, blocked: complete.actions.blocked.find((b) => b.action === 'generate_quote') }))
 
-  // leg 5: select_coverage (sole writer) then quote
-  const sel = await commit('select_coverage', { tier: 'standard', level: 'level_1' }, customer.id, conv.id, 'gui')
+  // leg 5: select_coverage (sole writer, ONE facet per commit — C1.6) then quote
+  const multi = await commit('select_coverage', { tier: 'standard', level: 'level_1' }, customer.id, conv.id, 'gui')
+  const selTier = await commit('select_coverage', { tier: 'standard' }, customer.id, conv.id, 'gui')
+  const selLevel = await commit('select_coverage', { level: 'level_1' }, customer.id, conv.id, 'gui')
   const quote = await commit('generate_quote', {}, customer.id, conv.id)
-  check('select_coverage applies (no Answer rows) and generate_quote issues',
-    sel.outcome === 'applied' && quote.outcome === 'applied' &&
+  check('select_coverage: multi-facet rejected (one_facet_per_commit); sequential facets apply (no Answer rows) and generate_quote issues',
+    multi.outcome === 'rejected' && multi.reason === 'one_facet_per_commit' &&
+    selTier.outcome === 'applied' && selLevel.outcome === 'applied' && quote.outcome === 'applied' &&
     (await prisma.answer.count({ where: { applicationId: app.id, question: { code: { in: ['PACKAGE_CHOICE', 'PREMIUM_LEVEL', 'BD_ADDON_INTEREST'] } } } })) === 0,
-    JSON.stringify({ sel: sel.outcome, quote: quote.outcome }))
+    JSON.stringify({ multi: multi.outcome, selTier: selTier.outcome, selLevel: selLevel.outcome, quote: quote.outcome }))
 
   // leg 6: re-select under the quote → re_rating + expiry
   const resel = await commit('select_coverage', { level: 'level_2' }, customer.id, conv.id, 'gui')
