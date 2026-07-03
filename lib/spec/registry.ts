@@ -19,13 +19,17 @@ export function spec(id: string): string {
 const CALL_RE = /\bspec\(\s*['"]([^'"]+)['"]/g
 
 /** Static scan — vitest runs files in isolated workers, so a runtime registry
- * cannot aggregate; the literal spec('...') call sites ARE the registry. */
+ * cannot aggregate; the literal spec('...') call sites ARE the registry.
+ * A file containing the pragma `spec-scan-ignore` is skipped — for test
+ * files whose spec('...') literals are fixtures ABOUT the scanner, not
+ * registrations (e.g. the registry's own test). */
 export function scanSpecRegistrations(rootDir: string): Map<string, string[]> {
   const out = new Map<string, string[]>()
   for (const e of fs.readdirSync(rootDir, { recursive: true, withFileTypes: true })) {
     if (!e.isFile() || !e.name.endsWith('.test.ts')) continue
     const parent = (e as unknown as { parentPath?: string; path: string }).parentPath ?? (e as unknown as { path: string }).path
     const src = fs.readFileSync(path.join(parent, e.name), 'utf8')
+    if (src.includes('spec-scan-ignore')) continue
     for (const m of src.matchAll(CALL_RE)) {
       if (!out.has(m[1])) out.set(m[1], [])
       out.get(m[1])!.push(path.join(parent, e.name))

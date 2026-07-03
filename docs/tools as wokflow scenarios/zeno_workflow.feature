@@ -38,7 +38,7 @@ Feature: The agent is a client of the domain (no privileged access)
     Then the change goes through an action present in available_actions
     And the agent has no operation a GUI client could not also call
 
-  @id:contract/failed-commit-surfaced-not-narrated @agent
+  @id:contract/failed-commit-surfaced-not-narrated @agent @backlog
   Scenario: A commit that fails is surfaced, never narrated as success
     Given the engine returns "rejected" for an attempted commit
     Then the agent tells the customer the action did not complete and why
@@ -50,24 +50,24 @@ Feature: The agent is a client of the domain (no privileged access)
     Then the agent states the block reason from the engine
     And the agent does not invent an alternative path or fabricate progress
 
-  @id:contract/every-demanded-action-maps-to-exposed-tool @engine
+  @id:contract/every-demanded-action-maps-to-exposed-tool @engine @backlog
   Scenario: Every demanded action maps to an exposed tool
     When the engine indicates a next action
     Then a tool exists and is exposed for that action
     And the agent is never instructed to call a tool it does not have
 
-  @id:contract/never-advance-phase-by-narration @agent
+  @id:contract/never-advance-phase-by-narration @agent @backlog
   Scenario: The agent never advances a phase by narration
     When no committing action has returned "advance_phase"
     Then the agent does not tell the customer the phase has moved on
 
-  @id:contract/idempotent-on-double-submit @engine
+  @id:contract/idempotent-on-double-submit @engine @backlog
   Scenario: A committing action is idempotent on double-submit
     When the same commit is submitted twice for the same target
     Then the engine applies it once
     And no duplicate effect (e.g. double charge) occurs
 
-  @id:contract/concurrent-gui-and-agent-consistent @engine
+  @id:contract/concurrent-gui-and-agent-consistent @engine @backlog
   Scenario: Concurrent GUI and agent actions stay consistent
     Given a GUI button and the agent act in the same session
     When both submit operations
@@ -105,21 +105,21 @@ Feature: Discovery and consultancy
     And does not ask the customer to approve the candidate
     And every product-scoped read uses the candidate id
 
-  @id:discovery/switching-candidate-updates-cleanly @engine
+  @id:discovery/switching-candidate-updates-cleanly @engine @backlog
   Scenario: Switching the product in focus updates the candidate cleanly
     Given a candidate product is set
     When the customer pivots to a different product
     Then Zeno calls set_candidate_product again
     And no application exists yet, so nothing else must be torn down
 
-  @id:discovery/example-prices-only-from-product-data @agent
+  @id:discovery/example-prices-only-from-product-data @agent @backlog
   Scenario: Example prices are quoted only from product data
     When the customer asks roughly what it costs
     Then Zeno presents figures from pricing_examples
     And requests any parameter pricing depends on (e.g. age)
     And never computes or invents a price
 
-  @id:discovery/early-eligibility-signal-before-funnel @engine
+  @id:discovery/early-eligibility-signal-before-funnel @engine @backlog
   Scenario: Early eligibility signal before the funnel
     Given the product's eligibility_bounds are known
     When the customer's situation falls outside them
@@ -139,7 +139,7 @@ Feature: Discovery and consultancy
     Then set_application returns "requires_identity"
     And Zeno routes the customer through identify_customer first
 
-  @id:discovery/starting-application-from-candidate @engine
+  @id:discovery/starting-application-from-candidate @engine @backlog
   Scenario: Starting an application from the candidate
     Given a candidate product is set and the customer is identified
     When the customer wants an exact quote or to buy
@@ -165,7 +165,7 @@ Feature: DNT - needs analysis, session, and consent gate
     Then sign_dnt and open_dnt_session are not offered
     And the underwriting questionnaire becomes available
 
-  @id:dnt/active-session-resumed-not-restarted @engine
+  @id:dnt/active-session-resumed-not-restarted @engine @backlog
   Scenario: An active DNT session is resumed, not restarted
     Given get_dnt_state reports session_active true with a session id
     Then Zeno continues that session via get_dnt_next_question
@@ -173,7 +173,7 @@ Feature: DNT - needs analysis, session, and consent gate
 
   # ---- starting a new DNT ---------------------------------------------------
 
-  @id:dnt/no-valid-dnt-starts-new-session @engine
+  @id:dnt/no-valid-dnt-starts-new-session @engine @backlog
   Scenario: No valid DNT and no active session starts a new DNT session
     Given get_dnt_state reports no valid DNT and no active session
     Then the underwriting questionnaire is blocked with reason "requires_consent"
@@ -181,7 +181,7 @@ Feature: DNT - needs analysis, session, and consent gate
     Then a new-type session is created, populated with the DNT questions
     And Zeno proceeds to answer them
 
-  @id:dnt/start-refuses-second-active-session @engine
+  @id:dnt/start-refuses-second-active-session @engine @backlog
   Scenario: open_dnt_session refuses to create a second active session
     Given an active DNT session already exists
     When open_dnt_session is called
@@ -190,7 +190,7 @@ Feature: DNT - needs analysis, session, and consent gate
 
   # ---- answering the DNT ----------------------------------------------------
 
-  @id:dnt/walking-questions-one-at-a-time @engine
+  @id:dnt/walking-questions-one-at-a-time @engine @backlog
   Scenario: Walking the DNT questions one at a time
     Given an active DNT session
     When Zeno requests the next step
@@ -198,13 +198,13 @@ Feature: DNT - needs analysis, session, and consent gate
     When the customer answers
     Then write_dnt_answer records it and returns the next question
 
-  @id:dnt/last-answer-returns-finish-signal @engine
+  @id:dnt/last-answer-returns-finish-signal @engine @backlog
   Scenario: The last DNT answer returns a finish signal
     Given the final DNT question is answered
     Then write_dnt_answer returns a finish signal
     And sign_dnt becomes available
 
-  @id:dnt/preview-form-without-session @engine
+  @id:dnt/preview-form-without-session @engine @backlog
   Scenario: Previewing the full DNT form without starting a session
     When the customer asks what the DNT will ask for
     Then Zeno uses get_dnt_questions to list the questions
@@ -232,7 +232,7 @@ Feature: DNT - needs analysis, session, and consent gate
     And the engine reads the answers it already holds and signs the DNT
     And the underwriting questionnaire becomes available
 
-  @id:dnt/refused-consent-blocks-funnel @engine @judge:refusal-explained
+  @id:dnt/refused-consent-blocks-funnel @engine @judge:refusal-explained @backlog
   Scenario: Refused consent blocks the funnel
     When the customer declines consent at sign_dnt
     Then sign_dnt returns "requires_consent"
@@ -255,14 +255,14 @@ Feature: DNT - needs analysis, session, and consent gate
     Then it returns an error
     And Zeno finishes or cancels the new session first
 
-  @id:dnt/dnt-not-covering-product-triggers-fresh-session @engine
+  @id:dnt/dnt-not-covering-product-triggers-fresh-session @engine @backlog
   Scenario: A DNT not covering the product type triggers a fresh session
     Given get_dnt_state reports a DNT that does not cover the application's product type
     Then open_dnt_session is offered for the current product type
 
   # ---- withdrawal -----------------------------------------------------------
 
-  @id:dnt/consent-withdrawn-halts-processing @engine
+  @id:dnt/consent-withdrawn-halts-processing @engine @backlog
   Scenario: Consent withdrawn mid-flow halts processing
     Given consent was previously given
     When the customer withdraws consent
@@ -302,7 +302,7 @@ Feature: Underwriting questionnaire
     And Zeno asks again rather than recording it
 
   # Extend this table as the consequence rules grow.
-  @id:questionnaire/modify-answer-consequence @engine
+  @id:questionnaire/modify-answer-consequence @engine @backlog
   Scenario Outline: Modifying an earlier answer carries its consequence
     Given the application is incomplete
     When the customer changes the answer to "<question>"
@@ -336,7 +336,7 @@ Feature: Underwriting questionnaire
     Then cancel_application returns a consequences field
     And Zeno explains them and confirms before the terminal action
 
-  @id:questionnaire/all-answered-enables-generation @engine
+  @id:questionnaire/all-answered-enables-generation @engine @backlog
   Scenario: All questions answered enables quote generation
     Given every required question is answered
     Then generate_quote becomes available
@@ -348,7 +348,7 @@ Feature: Quote generation (deterministic engine)
   Background:
     Given the underwriting questionnaire is fully answered
 
-  @id:quote_generation/successful-quote-completes-application @engine
+  @id:quote_generation/successful-quote-completes-application @engine @backlog
   Scenario: A successful quote completes the application
     When generate_quote runs and the customer is eligible
     Then a quote is issued
@@ -356,7 +356,7 @@ Feature: Quote generation (deterministic engine)
     And the phase advances to "quote"
 
   # Extend with each real rejection/refer reason.
-  @id:quote_generation/can-reject-or-refer-with-reason @engine
+  @id:quote_generation/can-reject-or-refer-with-reason @engine @backlog
   Scenario Outline: Generation can reject or refer with a reason
     When generate_quote runs
     Then it returns "<outcome>" with reason "<reason>"
@@ -384,7 +384,7 @@ Feature: Quote review and acceptance
     Given Zeno is in the "quote" phase with an issued quote
     And get_quote_info provides status, validity, premium, coverage and payment_options
 
-  @id:quote/disclosures-precede-acceptance @engine
+  @id:quote/disclosures-precede-acceptance @engine @backlog
   Scenario: Mandatory disclosures precede acceptance
     Given the IDD/IPID disclosures are not yet acknowledged
     Then accept_quote is blocked with reason "requires_disclosures"
@@ -398,7 +398,7 @@ Feature: Quote review and acceptance
     Then accept_quote is called with the chosen option
     And the engine returns "advance_phase" to "payment"
 
-  @id:quote/expired-quote-cannot-be-accepted @engine
+  @id:quote/expired-quote-cannot-be-accepted @engine @backlog
   Scenario: An expired quote cannot be accepted
     Given the quote validity has passed
     When the customer tries to accept
@@ -425,7 +425,7 @@ Feature: Payment (Stripe handles card entry; Zeno monitors and re-engages)
   Background:
     Given Zeno is in the "payment" phase after an accepted quote
 
-  @id:payment/agent-never-handles-card-data @agent
+  @id:payment/agent-never-handles-card-data @agent @backlog
   Scenario: The agent never handles card data
     When payment is being collected
     Then Zeno hands off to the secure payment UI
@@ -493,20 +493,20 @@ Feature: Policy and post-sale
 @lifecycle @regression
 Feature: Regression guards derived from the failed replay
 
-  @id:lifecycle/never-deadlocks-on-missing-action @engine
+  @id:lifecycle/never-deadlocks-on-missing-action @engine @backlog
   Scenario: The funnel never deadlocks on a missing action
     Given the engine's next action is a real exposed tool
     When the customer agrees to proceed
     Then Zeno advances by calling that tool
     And never loops by inventing questions to fill a missing action
 
-  @id:lifecycle/one-application-one-quote @engine
+  @id:lifecycle/one-application-one-quote @engine @backlog
   Scenario: One application yields one quote
     Given a quote has been issued for an application
     Then that application accepts no further answers or quotes
     And further changes require a new application
 
-  @id:lifecycle/candidate-single-source-of-product @engine
+  @id:lifecycle/candidate-single-source-of-product @engine @backlog
   Scenario: The candidate product is the single source of product-in-focus
     When the product in focus changes during discovery
     Then only set_candidate_product records it

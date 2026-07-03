@@ -1,3 +1,6 @@
+/* spec-scan-ignore — the spec('...') literals below are scanner fixtures,
+ * not scenario registrations; without this pragma the traceability
+ * meta-test would report them as orphans. */
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
