@@ -104,7 +104,7 @@ async function main() {
     JSON.stringify(goodExposed.state.suitability))
 
   const quote = await prisma.quote.create({
-    data: { applicationId: good.application.id, productId: product.id, customerId: good.customer.id, premiumAnnual: 190, premiumMonthly: 15.83, coverages: {}, status: 'DRAFT', validUntil: new Date(Date.now() + 30 * 86400e3) },
+    data: { applicationId: good.application.id, productId: product.id, customerId: good.customer.id, premiumAnnual: 190, premiumMonthly: 15.83, coverages: {}, status: 'ISSUED', validUntil: new Date(Date.now() + 30 * 86400e3) },
   })
   const report = await generateSuitabilityReport(quote.id)
   const docRow = await prisma.document.findUnique({ where: { id: report.documentId } })

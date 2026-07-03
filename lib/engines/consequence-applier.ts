@@ -62,7 +62,7 @@ export async function buildPlannerSnapshot(db: Db, conversationId: string): Prom
   const tier = application.tierId ? await db.pricingTier.findUnique({ where: { id: application.tierId } }) : null
   const level = application.levelId ? await db.pricingLevel.findUnique({ where: { id: application.levelId } }) : null
   const liveQuote = await db.quote.findFirst({
-    where: { applicationId: application.id, OR: [{ status: 'ACCEPTED' }, { status: 'DRAFT', validUntil: { gt: new Date() } }] },
+    where: { applicationId: application.id, OR: [{ status: 'ACCEPTED' }, { status: 'ISSUED', validUntil: { gt: new Date() } }] },
   })
 
   const groupCodes = (await resolveGroupCodes(application.productId, 'application', db)) ?? []

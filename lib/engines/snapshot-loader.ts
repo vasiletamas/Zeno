@@ -113,7 +113,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   }
   // quotes: issued (today: DRAFT, non-expired) and accepted — only for a
   // live (non-CANCELLED) application slice
-  const issued = appState && application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'DRAFT' }, orderBy: { createdAt: 'desc' } }) : null
+  const issued = appState && application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'ISSUED' }, orderBy: { createdAt: 'desc' } }) : null
   const accepted = appState && application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'ACCEPTED' } }) : null
   const policy = accepted ? await db.policy.findUnique({ where: { quoteId: accepted.id } }) : null
   // C2.6: identity-class eligibility facts — age via the B0 derivation

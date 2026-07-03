@@ -35,7 +35,7 @@ it('invalid level for tier → rejected(invalid_level_for_tier); re-invocation w
   expect(bad).toMatchObject({ outcome: 'rejected', reason: 'invalid_level_for_tier' })
   await executeCommit({ tool: 'select_coverage', args: { level: 'level_1' }, actor: 'agent', customerId: c.id, conversationId: conv.id, toolContext: ctx(c.id, conv.id) })
   const app = await prisma.application.findFirstOrThrow({ where: { customerId: c.id } })
-  await prisma.quote.create({ data: { applicationId: app.id, productId: app.productId, customerId: c.id, premiumAnnual: 100, premiumMonthly: 9, coverages: {}, status: 'DRAFT', validUntil: new Date(Date.now() + 86400e3) } })
+  await prisma.quote.create({ data: { applicationId: app.id, productId: app.productId, customerId: c.id, premiumAnnual: 100, premiumMonthly: 9, coverages: {}, status: 'ISSUED', validUntil: new Date(Date.now() + 86400e3) } })
   const r2 = await executeCommit({ tool: 'select_coverage', args: { level: 'level_2' }, actor: 'agent', customerId: c.id, conversationId: conv.id, toolContext: ctx(c.id, conv.id) })
   expect(r2.effects).toContain('re_rating')
   expect((await prisma.quote.findFirstOrThrow({ where: { applicationId: app.id } })).status).toBe('EXPIRED')

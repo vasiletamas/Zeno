@@ -174,7 +174,7 @@ export async function issueTestQuote(fx: { customerId: string; applicationId: st
       premiumAnnual: 190,
       premiumMonthly: 15.83,
       coverages: {},
-      status: 'DRAFT',
+      status: 'ISSUED',
       validUntil: new Date(Date.now() + 30 * 86400e3),
     },
   })

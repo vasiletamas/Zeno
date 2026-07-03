@@ -25,12 +25,12 @@ describe('derivePhase — pinned #10 table', () => {
   })
   it('QUOTE: an issued, unexpired quote exists', () => {
     const done = { ...openApp, status: 'COMPLETED' as const, answeredCount: 6, missingCodes: [] }
-    const s = makeSnapshot({ application: done, dnt: validDnt, quote: { id: 'q1', status: 'DRAFT', premiumAnnual: 500, validUntil: '2027-01-01T00:00:00.000Z', expired: false } })
+    const s = makeSnapshot({ application: done, dnt: validDnt, quote: { id: 'q1', status: 'ISSUED', premiumAnnual: 500, validUntil: '2027-01-01T00:00:00.000Z', expired: false } })
     expect(derivePhase(s)).toEqual({ phase: 'QUOTE', subphase: null })
   })
   it('expired issued quote falls back to QUOTE_GENERATION (regenerate-loop killed)', () => {
     const done = { ...openApp, status: 'COMPLETED' as const, answeredCount: 6, missingCodes: [] }
-    const s = makeSnapshot({ application: done, dnt: validDnt, quote: { id: 'q1', status: 'DRAFT', premiumAnnual: 500, validUntil: '2024-01-01T00:00:00.000Z', expired: true } })
+    const s = makeSnapshot({ application: done, dnt: validDnt, quote: { id: 'q1', status: 'ISSUED', premiumAnnual: 500, validUntil: '2024-01-01T00:00:00.000Z', expired: true } })
     expect(derivePhase(s)).toEqual({ phase: 'APPLICATION', subphase: 'QUOTE_GENERATION' })
   })
   it('PAYMENT: accepted quote + schedule exists, no Policy row', () => {

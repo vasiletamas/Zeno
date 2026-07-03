@@ -205,7 +205,7 @@ export const generateQuote: ToolHandler = async (_args, context) => {
       addonsSelected: application.includesAddon
         ? JSON.parse(JSON.stringify({ included: true, addonPremiumAnnual: result.addonPremiumAnnual }))
         : undefined,
-      status: 'DRAFT' as const,
+      status: 'ISSUED' as const,
       validUntil: result.validUntil,
     }
     const quote = await context.db.quote.upsert({
@@ -333,7 +333,7 @@ export const acceptQuote: ToolHandler = async (args, context) => {
       return { success: false, error: 'No quote found.' }
     }
 
-    if (quote.status !== 'DRAFT') {
+    if (quote.status !== 'ISSUED') {
       return { success: false, error: `Quote is not in DRAFT status (current: ${quote.status}).` }
     }
 

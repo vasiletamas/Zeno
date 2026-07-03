@@ -52,10 +52,13 @@ enum WorkItemPriority {
   URGENT
 }
 
+// D1.1 (T7): the quote is the immutable priced artifact — ISSUED at
+// creation (freeze-at-issue), ACCEPTED/EXPIRED/CANCELLED terminal.
 enum QuoteStatus {
-  DRAFT
+  ISSUED
   ACCEPTED
   EXPIRED
+  CANCELLED
 }
 
 enum PolicyStatus {
@@ -746,6 +749,10 @@ model Application {
   currentQuestionIndex Int               @default(0)
   totalQuestions        Int               @default(0)
   flagsForReview       Json?
+  // D1 (T7.D1/T7.D4): set in the SAME transaction as Quote creation; the
+  // generate_quote decision audit {outcome, reason, decidedAt}.
+  frozenAt             DateTime?
+  quoteDecision        Json?
   completedAt          DateTime?
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
@@ -812,7 +819,7 @@ model Quote {
   currency          String      @default("RON")
   coverages      Json
   addonsSelected Json?
-  status         QuoteStatus @default(DRAFT)
+  status         QuoteStatus @default(ISSUED)
   validUntil     DateTime
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt

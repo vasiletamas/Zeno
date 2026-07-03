@@ -69,7 +69,7 @@ export const selectCoverage: ToolHandler = async (args, context) => {
 
     // any real change under a live DRAFT quote expires it (re_rating is
     // already in the plan's effects)
-    const draft = await context.db.quote.findFirst({ where: { applicationId: application.id, status: 'DRAFT' } })
+    const draft = await context.db.quote.findFirst({ where: { applicationId: application.id, status: 'ISSUED' } })
     if (draft) {
       await context.db.quote.update({ where: { id: draft.id }, data: { status: 'EXPIRED' } })
     }

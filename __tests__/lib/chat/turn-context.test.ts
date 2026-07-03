@@ -33,7 +33,7 @@ const baseApplication = {
   currentQuestionIndex: 2,
   totalQuestions: 10,
   quote: {
-    status: 'DRAFT',
+    status: 'ISSUED',
     premiumAnnual: 1200,
     policy: { id: 'pol-1' },
   },
