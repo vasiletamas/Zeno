@@ -42,6 +42,31 @@ function fires(rule: SuitabilityRule, fact: string | undefined): boolean {
   }
 }
 
+export type SuitabilityGate =
+  | { ok: true }
+  | { ok: false; outcome: 'rejected' | 'requires_disclosures'; reason: string; params: { mismatches: string[]; ruleSetVersion: number } }
+
+/**
+ * Final gate inside generate_quote (C3.5 — D1 wires it; compliance_block
+ * finally has a source, M7.2b). Mirrors the C3.4 exposure predicate: ONE
+ * predicate, two hosts — a stale-version ack never satisfies it.
+ */
+export function gateSuitability(
+  ruleSet: SuitabilityRuleSet,
+  dntFacts: Record<string, string>,
+  acks: { ruleSetVersion: number }[],
+): SuitabilityGate {
+  const result = evaluateSuitability(ruleSet, dntFacts)
+  if (result.verdict === 'suitable') return { ok: true }
+  const params = { mismatches: result.mismatches.map(m => m.reason), ruleSetVersion: ruleSet.version }
+  if (ruleSet.mode === 'hard_block' && result.verdict === 'unsuitable') {
+    return { ok: false, outcome: 'rejected', reason: result.mismatches[0].reason, params }
+  }
+  const acked = acks.some(a => a.ruleSetVersion === ruleSet.version)
+  if (!acked) return { ok: false, outcome: 'requires_disclosures', reason: 'suitability_warning_unacknowledged', params }
+  return { ok: true }
+}
+
 export function evaluateSuitability(
   ruleSet: SuitabilityRuleSet,
   dntFacts: Record<string, string>,
