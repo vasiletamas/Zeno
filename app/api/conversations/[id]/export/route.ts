@@ -17,6 +17,7 @@ import {
   buildConversationExport,
   type ConversationExportMeta,
   type ConversationExportMessage,
+  type CommitLedgerExportRow,
 } from '@/lib/debug/conversation-export'
 
 const isoOrNull = (d: Date | null | undefined): string | null => (d ? d.toISOString() : null)
@@ -51,7 +52,7 @@ export async function GET(
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
 
-    const [messageRows, turnRows] = await Promise.all([
+    const [messageRows, turnRows, ledgerRows] = await Promise.all([
       prisma.message.findMany({
         where: { conversationId: id },
         orderBy: { createdAt: 'asc' },
@@ -61,6 +62,14 @@ export async function GET(
         where: { conversationId: id },
         orderBy: { createdAt: 'asc' },
         select: { payload: true },
+      }),
+      prisma.commitLedger.findMany({
+        where: { conversationId: id },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true, tool: true, actor: true, outcome: true, effects: true, reasonCode: true,
+          phaseFrom: true, phaseTo: true, idempotencyDisposition: true, targetRef: true, createdAt: true,
+        },
       }),
     ])
 
@@ -87,11 +96,26 @@ export async function GET(
 
     const turns = turnRows.map((r) => r.payload as unknown as DebugTurn)
 
+    const ledger: CommitLedgerExportRow[] = ledgerRows.map((r) => ({
+      id: r.id,
+      tool: r.tool,
+      actor: r.actor,
+      outcome: r.outcome,
+      effects: r.effects,
+      reasonCode: r.reasonCode,
+      phaseFrom: r.phaseFrom,
+      phaseTo: r.phaseTo,
+      idempotencyDisposition: r.idempotencyDisposition,
+      targetRef: r.targetRef,
+      createdAt: r.createdAt.toISOString(),
+    }))
+
     const bundle = buildConversationExport({
       exportedAt: new Date().toISOString(),
       conversation: conversationMeta,
       messages,
       turns,
+      ledger,
     })
 
     return NextResponse.json(bundle)
