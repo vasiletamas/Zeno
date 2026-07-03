@@ -51,12 +51,10 @@ export async function seedReferredApplication() {
   const appQuestions = groupCodes.length > 0
     ? await prisma.question.findMany({ where: { group: { code: { in: groupCodes } } } })
     : []
-  const valueFor = (code: string): string => {
-    if (code === 'PAYMENT_FREQUENCY') return 'annual'
-    return 'true' // HEALTH_DECLARATION_CONFIRM and future booleans
-  }
+  // D1.8: PAYMENT_FREQUENCY left the questionnaire — every remaining
+  // application question is boolean (HEALTH_DECLARATION_CONFIRM and future).
   await prisma.answer.createMany({
-    data: appQuestions.map((q) => ({ questionId: q.id, applicationId: app.id, value: valueFor(q.code ?? '') })),
+    data: appQuestions.map((q) => ({ questionId: q.id, applicationId: app.id, value: 'true' })),
   })
   await prisma.application.update({
     where: { id: app.id },

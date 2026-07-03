@@ -32,8 +32,7 @@ export async function buildReadyApplication(options: { escalationFlag?: string; 
     ? await prisma.question.findMany({ where: { group: { code: { in: groupCodes.filter((c) => c !== 'bd_medical') } } } })
     : []
   for (const q of questions) {
-    const value = q.code === 'PAYMENT_FREQUENCY' ? 'annual' : 'true'
-    await writeRevision(prisma, { applicationId: fx.applicationId, questionId: q.id, value, source: 'USER_ANSWER' })
+    await writeRevision(prisma, { applicationId: fx.applicationId, questionId: q.id, value: 'true', source: 'USER_ANSWER' })
   }
   if (options.escalationFlag) {
     // the C1 pause → customer-resumed path leaves the derived escalate flag

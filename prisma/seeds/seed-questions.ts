@@ -607,25 +607,12 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       // B4/T5.D2: PACKAGE_CHOICE, PREMIUM_LEVEL and BD_ADDON_INTEREST left
       // the questionnaire — selection is select_coverage's Application
-      // columns, the sole writer. PAYMENT_FREQUENCY moves in Block D.
-      {
-        code: 'PAYMENT_FREQUENCY',
-        text: {
-          en: 'How would you like to pay?',
-          ro: 'Cum doriți să plătiți?',
-        },
-        type: 'DROPDOWN',
-        orderIndex: 5,
-        options: [
-          { value: 'annual', label: { en: 'Annually', ro: 'Anual' } },
-          { value: 'semi_annual', label: { en: 'Semi-annually', ro: 'Semestrial' } },
-          { value: 'quarterly', label: { en: 'Quarterly', ro: 'Trimestrial' } },
-        ],
-      },
+      // columns, the sole writer. D1.8 (T7.D3): PAYMENT_FREQUENCY left too —
+      // the contract frequency is elected at accept_quote, never asked here.
     ],
   )
   void appResult
-  console.log('    application: 5 questions')
+  console.log('    application: 4 questions')
 
   // ── 8. bd_medical — BD Medical Questionnaire (6 questions) ────────
   await seedGroup(

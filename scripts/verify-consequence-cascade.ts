@@ -101,7 +101,8 @@ async function main() {
   // CONFIRM_ALWAYS two-step (T6.D3 — even first writes confirm). Answers
   // are ADDRESSED by question code (replay scope — a same-value answer to
   // a different question must never replay).
-  for (const [questionCode, answer] of [['HEALTH_DECLARATION_CONFIRM', 'true'], ['PAYMENT_FREQUENCY', 'annual']]) {
+  // D1.8: PAYMENT_FREQUENCY left the questionnaire (elected at accept_quote)
+  for (const [questionCode, answer] of [['HEALTH_DECLARATION_CONFIRM', 'true']]) {
     const r = await commit('write_question_answer', { questionCode, answer }, customer.id, conv.id)
     if (r.outcome !== 'applied') throw new Error(`write(${questionCode}): ${JSON.stringify(r)}`)
   }
