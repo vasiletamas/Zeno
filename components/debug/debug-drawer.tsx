@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useDebug } from './debug-provider'
 import { TurnCard } from './turn-card'
 
@@ -24,6 +24,21 @@ function DebugDrawerInner({ open, onOpenChange }: DebugDrawerProps) {
   }, [open, onOpenChange])
 
   const conversationId = turns[0]?.conversationId ?? null
+
+  // F2.3: recompute-and-diff over the stored legality snapshots; red iff any
+  // same-version drift (a determinism bug), gray for cross-version changes.
+  const [replay, setReplay] = useState<{ total: number; drift: number } | null>(null)
+  async function runReplay() {
+    if (!conversationId) return
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/replay`)
+      if (!res.ok) return
+      const data = (await res.json()) as { diffs: { kind: string }[] }
+      setReplay({ total: data.diffs.length, drift: data.diffs.filter((d) => d.kind === 'same_version_drift').length })
+    } catch {
+      /* best-effort; ignore */
+    }
+  }
 
   async function downloadExport() {
     if (!conversationId) return
@@ -70,6 +85,24 @@ function DebugDrawerInner({ open, onOpenChange }: DebugDrawerProps) {
           >
             download
           </button>
+          <button
+            type="button"
+            onClick={runReplay}
+            disabled={!conversationId}
+            title={conversationId ? 'Recompute deriveAndExpose over the stored legality snapshots and diff' : 'Send a message first'}
+            className="text-[11px] font-mono underline hover:no-underline disabled:opacity-40 disabled:no-underline"
+          >
+            recompute
+          </button>
+          {replay && (
+            <span
+              data-testid="replay-badge"
+              title={`${replay.total} diff(s), ${replay.drift} same-version drift`}
+              className={`text-[11px] font-mono px-1 rounded ${replay.drift > 0 ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}
+            >
+              {replay.total === 0 ? '✓ 0' : `${replay.total}${replay.drift > 0 ? ' ⚠' : ''}`}
+            </span>
+          )}
           <button
             type="button"
             onClick={clearLog}
