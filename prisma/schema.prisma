@@ -118,6 +118,22 @@ enum ProposalStatus {
   REJECTED
 }
 
+// C1 (contradiction #4): ONE typed dependency graph spanning answers and
+// selection, in node-key form ('answer:<code>' | 'selection:<facet>').
+enum DependencyKind {
+  VISIBILITY
+  VALIDITY
+  ELIGIBILITY
+}
+
+// T6.D3: typed sensitivity — CONFIRM_ON_MODIFY guards corrections,
+// CONFIRM_ALWAYS guards even first writes (bd declarations, CNP).
+enum QuestionSensitivity {
+  NONE
+  CONFIRM_ON_MODIFY
+  CONFIRM_ALWAYS
+}
+
 // ==========================================
 // DOMAIN: CORE PRODUCT
 // ==========================================
@@ -330,6 +346,19 @@ model Customer {
 enum VerificationChannel {
   email
   sms
+}
+
+model QuestionDependency {
+  id           String         @id @default(cuid())
+  productId    String?
+  subjectKey   String
+  dependsOnKey String
+  kind         DependencyKind
+  predicate    Json
+  createdAt    DateTime       @default(now())
+
+  @@unique([subjectKey, dependsOnKey, kind])
+  @@index([dependsOnKey])
 }
 
 model VerificationChallenge {
@@ -626,6 +655,7 @@ model Question {
   insightKey       String?
   parentQuestionId String?
   showWhenValue    String?
+  sensitivity      QuestionSensitivity @default(NONE) // T6.D3 (C1.2)
   orderIndex       Int
   isRequired       Boolean  @default(true)
   createdAt        DateTime @default(now())

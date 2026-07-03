@@ -38,6 +38,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       isRequired?: boolean
       parentQuestionCode?: string | null
       showWhenValue?: string | null
+      sensitivity?: 'NONE' | 'CONFIRM_ON_MODIFY' | 'CONFIRM_ALWAYS'
     }>,
   ) {
     const group = await prisma.questionGroup.upsert({
@@ -90,6 +91,7 @@ export async function seedQuestions(prisma: PrismaClient) {
             isRequired: q.isRequired ?? true,
             parentQuestionId,
             showWhenValue: q.showWhenValue ?? null,
+            sensitivity: q.sensitivity ?? 'NONE',
           },
         })
         questionIdMap[q.code] = existing.id
@@ -109,6 +111,7 @@ export async function seedQuestions(prisma: PrismaClient) {
             isRequired: q.isRequired ?? true,
             parentQuestionId,
             showWhenValue: q.showWhenValue ?? null,
+            sensitivity: q.sensitivity ?? 'NONE',
           },
         })
         questionIdMap[q.code] = created.id
@@ -197,6 +200,7 @@ export async function seedQuestions(prisma: PrismaClient) {
     [
       {
         code: 'DNT_CNP',
+        sensitivity: 'CONFIRM_ALWAYS',
         text: {
           en: 'Please enter your CNP (Personal Numeric Code)',
           ro: 'Te rugăm să introduci CNP-ul tău (Codul Numeric Personal)',
@@ -638,6 +642,7 @@ export async function seedQuestions(prisma: PrismaClient) {
     [
       {
         code: 'HEALTH_DECLARATION_CONFIRM',
+        sensitivity: 'CONFIRM_ON_MODIFY',
         text: {
           en: 'I confirm that I am in good health and have no known medical conditions that would affect this insurance',
           ro: 'Confirm că sunt sănătos/sănătoasă și nu am afecțiuni medicale cunoscute care ar afecta această asigurare',
@@ -684,6 +689,7 @@ export async function seedQuestions(prisma: PrismaClient) {
     [
       {
         code: 'BD_CANCER_HISTORY',
+        sensitivity: 'CONFIRM_ALWAYS', // erratum 7: T6.D3 explicit-affirmation, engine-enforced
         text: {
           en: 'Have you ever been diagnosed with or treated for cancer, pre-cancerous conditions, or tumors?',
           ro: 'Ați fost vreodată diagnosticat(ă) sau tratat(ă) pentru cancer, stări pre-canceroase sau tumori?',
@@ -696,6 +702,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'BD_CARDIOVASCULAR',
+        sensitivity: 'CONFIRM_ALWAYS', // erratum 7: T6.D3 explicit-affirmation, engine-enforced
         text: {
           en: 'Have you been diagnosed with or treated for cardiovascular conditions requiring surgery?',
           ro: 'Ați fost diagnosticat(ă) sau tratat(ă) pentru afecțiuni cardiovasculare care necesită intervenție chirurgicală?',
@@ -708,6 +715,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'BD_NEUROLOGICAL',
+        sensitivity: 'CONFIRM_ALWAYS', // erratum 7: T6.D3 explicit-affirmation, engine-enforced
         text: {
           en: 'Have you been diagnosed with or treated for neurological conditions requiring neurosurgery?',
           ro: 'Ați fost diagnosticat(ă) sau tratat(ă) pentru afecțiuni neurologice care necesită neurochirurgie?',
@@ -720,6 +728,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'BD_TRANSPLANT',
+        sensitivity: 'CONFIRM_ALWAYS', // erratum 7: T6.D3 explicit-affirmation, engine-enforced
         text: {
           en: 'Have you ever required or been evaluated for organ or bone marrow transplant?',
           ro: 'Ați necesitat vreodată sau ați fost evaluat(ă) pentru transplant de organe sau măduvă osoasă?',
@@ -732,6 +741,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'BD_CHRONIC_CONDITIONS',
+        sensitivity: 'CONFIRM_ALWAYS', // erratum 7: T6.D3 explicit-affirmation, engine-enforced
         text: {
           en: 'Do you have any chronic medical conditions currently under treatment?',
           ro: 'Aveți afecțiuni medicale cronice aflate în prezent sub tratament?',
@@ -744,6 +754,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'BD_HOSPITALIZATION_RECENT',
+        sensitivity: 'CONFIRM_ALWAYS', // erratum 7: T6.D3 explicit-affirmation, engine-enforced
         text: {
           en: 'Have you been hospitalized in the last 12 months for any reason other than accidents?',
           ro: 'Ați fost internat(ă) în ultimele 12 luni din alte motive decât accidente?',
