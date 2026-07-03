@@ -56,6 +56,8 @@
     "seed": "tsx prisma/seeds/index.ts"
   },
   "devDependencies": {
+    "@cucumber/gherkin": "^41.0.0",
+    "@cucumber/messages": "^33.0.4",
     "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4",
     "@types/bcryptjs": "^2.4.6",
