@@ -19,8 +19,10 @@ import {
 import { resolveGroupCodes, resolveActiveProductId } from '@/lib/engines/question-groups'
 import { canTransition, type AppStatus } from '@/lib/engines/application-rules'
 import { computeConsequences, type ConsequencePlan } from '@/lib/engines/consequence-planner'
-import { computeVisibleSet } from '@/lib/engines/dependency-graph'
+import { computeVisibleSet, type DependencyEdge, type GraphFacts } from '@/lib/engines/dependency-graph'
 import { applyConsequencePlan, buildPlannerSnapshot, loadDependencyGraph } from '@/lib/engines/consequence-applier'
+import { getActiveAnswers } from '@/lib/engines/answer-store'
+import { buildBranchingMetadata } from '@/lib/engines/branching-provenance'
 import { getIdentityFacts } from '@/lib/customer/profile-service'
 import { deriveIdentityTier } from '@/lib/engines/identity-rules'
 import type { ToolHandler, ToolContext } from '@/lib/tools/types'
@@ -215,6 +217,17 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
     const lang = context.language ?? 'ro'
     const nq = nextResult.question
     const nqText = nq.text as { en: string; ro: string }
+    // C1.7: structured provenance — why this question appeared (which edge
+    // fired on which value) and whether THIS commit added it.
+    const postSelection = {
+      tier: plan.selectionPatch.tier !== undefined ? plan.selectionPatch.tier : snapshot.selection.tier,
+      level: plan.selectionPatch.level !== undefined ? plan.selectionPatch.level : snapshot.selection.level,
+      addon: plan.selectionPatch.addon !== undefined ? plan.selectionPatch.addon : postApp.includesAddon,
+    }
+    const postAnswers = await getActiveAnswers(context.db, application.id)
+    const branchingMetadata = nq.code
+      ? await buildQuestionProvenance(context, graph, { answers: postAnswers, selection: postSelection }, { id: nq.id, code: nq.code }, plan.questionsAdded)
+      : null
     return {
       success: true,
       effects: plan.effects,
@@ -228,6 +241,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
           helpText: nq.helpText ? (nq.helpText as { en: string; ro: string })[lang] : null,
           type: nq.type,
           options: nq.options,
+          branching_metadata: branchingMetadata,
         },
         progress: nextResult.progress,
         ...planData(plan),
@@ -245,6 +259,37 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
   } catch (error) {
     return { success: false, error: String(error) }
   }
+}
+
+/**
+ * C1.7: build the next question's branching_metadata — the graph edges that
+ * made it visible, localized gate texts (never paraphrased from memory) and
+ * whether the last commit's cascade added it.
+ */
+async function buildQuestionProvenance(
+  context: ToolContext,
+  graph: DependencyEdge[],
+  facts: GraphFacts,
+  question: { id: string; code: string },
+  lastCommitQuestionsAdded: string[],
+) {
+  const meta = await context.db.question.findUnique({ where: { id: question.id }, include: { group: true } })
+  const gateCodes = graph
+    .filter((e) => e.subjectKey === `answer:${question.code}` && e.dependsOnKey.startsWith('answer:'))
+    .map((e) => e.dependsOnKey.slice('answer:'.length))
+  const gates = gateCodes.length > 0
+    ? await context.db.question.findMany({ where: { code: { in: gateCodes } }, select: { code: true, text: true } })
+    : []
+  const questionTexts = Object.fromEntries(gates.filter((g) => g.code).map((g) => [g.code as string, g.text as { en: string; ro: string }]))
+  return buildBranchingMetadata({
+    graph,
+    questionCode: question.code,
+    facts,
+    questionTexts,
+    lastCommitQuestionsAdded,
+    groupCode: meta?.group.code ?? '',
+    groupName: (meta?.group.name as { en: string; ro: string }) ?? { en: '', ro: '' },
+  })
 }
 
 /** The planner outputs every answer-commit envelope carries (erratum 8). */

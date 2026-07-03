@@ -18,9 +18,13 @@ import { deriveFlags } from './questionnaire-engine'
 import { resolveGroupCodes } from './question-groups'
 import { parseEligibilityRuleSet, type EligibilityRuleSet } from './eligibility'
 import { getIdentityFacts } from '@/lib/customer/profile-service'
-import type { DependencyEdge, DependencyKind, EdgePredicate } from './dependency-graph'
+import { loadDependencyGraph } from './dependency-graph-loader'
 import type { ConsequencePlan, PlannerSnapshot, QuestionSensitivityStr } from './consequence-planner'
 import type { AppStatus } from './application-rules'
+
+// callers historically import the graph loader from here (C1.5); its home
+// is dependency-graph-loader.ts so the questionnaire engine can share it
+export { loadDependencyGraph }
 
 type Db = typeof prisma | Prisma.TransactionClient
 
@@ -28,19 +32,6 @@ export interface ApplyContext {
   conversationId: string
   applicationId: string
   commitId: string
-}
-
-/** The typed dependency graph from its single store (T6.D1). */
-export async function loadDependencyGraph(db: Db, productId?: string | null): Promise<DependencyEdge[]> {
-  const rows = await db.questionDependency.findMany({
-    where: productId ? { OR: [{ productId }, { productId: null }] } : {},
-  })
-  return rows.map((r) => ({
-    subjectKey: r.subjectKey as DependencyEdge['subjectKey'],
-    dependsOnKey: r.dependsOnKey as DependencyEdge['dependsOnKey'],
-    kind: r.kind as DependencyKind,
-    predicate: r.predicate as unknown as EdgePredicate,
-  }))
 }
 
 /**

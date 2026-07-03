@@ -2,6 +2,9 @@ import { prisma } from '@/lib/db'
 import type { Prisma } from '@/lib/generated/prisma/client'
 import { resolveGroupCodes } from '@/lib/engines/question-groups'
 import { shouldShowQuestion } from '@/lib/engines/questionnaire-engine'
+import { computeVisibleSet } from '@/lib/engines/dependency-graph'
+import { loadDependencyGraph } from '@/lib/engines/dependency-graph-loader'
+import { getActiveAnswers } from '@/lib/engines/answer-store'
 import { getOpenCircuitTools } from '@/lib/tools/circuit-state'
 import { deriveConsents, type ConsentEventLike } from '@/lib/customer/consent'
 import { getIdentityFacts } from '@/lib/customer/profile-service'
@@ -45,20 +48,29 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   })
   let appState: DomainSnapshot['application'] = null
   if (application && application.status !== 'CANCELLED') {
-    const baseCodes = (await resolveGroupCodes(application.productId, 'application', db)) ?? []
-    // #4: bd_medical is phase 'application' in the seeds, so it arrives IN
-    // baseCodes — the addon toggle EXCLUDES it when off (answers retained).
-    const groupCodes = application.includesAddon ? baseCodes : baseCodes.filter((c) => c !== 'bd_medical')
+    // C1.7: ONE canonical visible set — the FULL application phase
+    // (bd_medical included) filtered by computeVisibleSet over the typed
+    // graph. The addon toggle hides/reveals BD questions via VISIBILITY
+    // edges (answers retained), replacing the B4 group-exclusion special
+    // case; progress, missingCodes and branching_metadata share this source.
+    const groupCodes = (await resolveGroupCodes(application.productId, 'application', db)) ?? []
     const questions = groupCodes.length > 0 ? await db.question.findMany({ where: { group: { code: { in: groupCodes } } }, select: { id: true, code: true } }) : []
-    const answered = await db.answer.findMany({ where: { applicationId: application.id, questionId: { in: questions.map((q) => q.id) }, status: 'ACTIVE' }, select: { questionId: true } })
-    const answeredIds = new Set(answered.map((a) => a.questionId))
     const tier = application.tierId ? await db.pricingTier.findUnique({ where: { id: application.tierId } }) : null
     const level = application.levelId ? await db.pricingLevel.findUnique({ where: { id: application.levelId } }) : null
+    const activeAnswers = await getActiveAnswers(db, application.id)
+    const graph = await loadDependencyGraph(db, application.productId)
+    const visible = computeVisibleSet(
+      graph,
+      questions.map((q) => q.code).filter((c): c is string => c !== null),
+      { answers: activeAnswers, selection: { tier: tier?.code ?? null, level: level?.code ?? null, addon: application.includesAddon } },
+    )
+    const visibleCodes = questions.map((q) => q.code).filter((c): c is string => c !== null && visible.has(c))
+    const answeredCodes = visibleCodes.filter((c) => activeAnswers[c] !== undefined)
     appState = {
       id: application.id, status: application.status,
       tier: tier?.code ?? null, level: level?.code ?? null, addon: application.includesAddon,
-      answeredCount: answeredIds.size, requiredCount: questions.length,
-      missingCodes: questions.filter((q) => !answeredIds.has(q.id)).map((q) => q.code ?? q.id),
+      answeredCount: answeredCodes.length, requiredCount: visibleCodes.length,
+      missingCodes: visibleCodes.filter((c) => activeAnswers[c] === undefined),
     }
   }
   // DNT facts. Legacy conversation-stamp semantics survive until B2.6; the
