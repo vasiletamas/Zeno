@@ -28,16 +28,23 @@ export function parseEligibilityRuleSet(raw: unknown): EligibilityRuleSet {
   return EligibilityRuleSetSchema.parse(raw)
 }
 
+export interface EligibilityBounds { minAge: number | null; maxAge: number | null; otherRuleCodes: string[] }
+
 /**
- * Presentation age bounds DERIVED from the product rules (C2.3, #9 rule 3):
- * the numbers customers see are the numbers the engine enforces — no
- * authored numeric shadow copy to drift.
+ * Presentation age bounds DERIVED from the product rules (C2.3 + E1.5,
+ * #9 rule 3): the numbers customers see are the numbers the engine
+ * enforces — no authored numeric shadow copy to drift. Non-age PRODUCT
+ * rules are listed by rule id so presentation can name them without
+ * restating their logic; addon rules stay out (they gate the addon,
+ * not the product).
  */
-export function deriveEligibilityBounds(ruleSet: EligibilityRuleSet): { minAge: number | null; maxAge: number | null } {
+export function deriveEligibilityBounds(ruleSet: EligibilityRuleSet): EligibilityBounds {
   let minAge: number | null = null
   let maxAge: number | null = null
+  const otherRuleCodes: string[] = []
   for (const r of ruleSet.rules) {
-    if (r.subject !== 'product' || r.fact !== 'age') continue
+    if (r.subject !== 'product') continue
+    if (r.fact !== 'age') { otherRuleCodes.push(r.id); continue }
     if (r.op === 'gte') minAge = Math.max(minAge ?? -Infinity, Number(r.value))
     if (r.op === 'lte') maxAge = Math.min(maxAge ?? Infinity, Number(r.value))
     if (r.op === 'between') {
@@ -46,7 +53,7 @@ export function deriveEligibilityBounds(ruleSet: EligibilityRuleSet): { minAge: 
       maxAge = Math.min(maxAge ?? Infinity, hi)
     }
   }
-  return { minAge, maxAge }
+  return { minAge, maxAge, otherRuleCodes }
 }
 
 /**

@@ -8,7 +8,7 @@ describe('protect eligibility seed', () => {
   })
   it('preserves the existing business content: ages 18..64, Romania residency', () => {
     const rs = parseEligibilityRuleSet(PROTECT_ELIGIBILITY)
-    expect(deriveEligibilityBounds(rs)).toEqual({ minAge: 18, maxAge: 64 })
+    expect(deriveEligibilityBounds(rs)).toEqual({ minAge: 18, maxAge: 64, otherRuleCodes: ['residency'] })
     expect(evaluateEligibility(rs, { age: 30, residency: 'Romania' }, 'product').verdict).toBe('eligible')
     expect(evaluateEligibility(rs, { age: 17, residency: 'Romania' }, 'product').verdict).toBe('ineligible')
     expect(evaluateEligibility(rs, { age: 30, residency: 'Germany' }, 'product').verdict).toBe('ineligible')

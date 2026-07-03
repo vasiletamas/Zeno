@@ -108,7 +108,7 @@ describe('shapeProductInfo', () => {
     // C2.3 (#9 rule 3): bounds DERIVED from the rules; narrative passes as
     // prose; raw rule Json never rides the payload
     expect(out.eligibility).toEqual({
-      eligibility_bounds: { minAge: 18, maxAge: 64 },
+      eligibility_bounds: { minAge: 18, maxAge: 64, otherRuleCodes: ['residency'] },
       narrative: { notes: 'Maximum cumulative sum at risk: 50,000 EUR' },
     })
     expect(json).not.toContain('ineligible_age_minimum')
