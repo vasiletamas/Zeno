@@ -17,6 +17,8 @@
 import { prisma } from '@/lib/db'
 import type { Prisma } from '@/lib/generated/prisma/client'
 import { createWorkItem } from '@/lib/work-items/service'
+import { jsPDF } from 'jspdf'
+import { createDocument } from '@/lib/documents/registry'
 import { getEmailProvider } from '@/lib/email'
 import { issueChallenge } from '@/lib/customer/verification-service'
 import { purchaseConfirmationEmail } from '@/lib/email/templates/purchase-confirmation'
@@ -147,6 +149,16 @@ export async function settlePaymentEvent(e: SettlementEvent): Promise<Settlement
     return { disposition: 'applied' as const, firstCapture: isFirstCapture, paymentId: payment.id }
   })
 
+  if (result.disposition === 'applied' && result.paymentId && e.event === 'payment_succeeded') {
+    // D4.6: a PAYMENT_RECEIPT registers at EVERY successful capture
+    await createPaymentReceipt(result.paymentId).catch((error) => {
+      logError({
+        layer: 'tool', category: 'settlement',
+        message: `payment receipt generation failed for ${result.paymentId} (settlement stands)`,
+        context: { paymentId: result.paymentId }, error,
+      })
+    })
+  }
   if (result.disposition === 'applied' && result.firstCapture && result.paymentId) {
     await runFirstCaptureSideEffects(result.paymentId).catch((error) => {
       logError({
@@ -225,4 +237,33 @@ async function runFirstCaptureSideEffects(paymentId: string): Promise<void> {
     language: customerLanguage,
   })
   await getEmailProvider().send({ to: customer.email, subject, html })
+}
+
+/** D4.6: a small receipt PDF (amount, installment, date, provider ref) into
+ *  the Document registry at each successful capture — post-tx, best-effort. */
+async function createPaymentReceipt(paymentId: string): Promise<void> {
+  const payment = await prisma.payment.findUniqueOrThrow({
+    where: { id: paymentId },
+    include: { installment: { include: { schedule: true } }, customer: { select: { language: true } } },
+  })
+  const lang = payment.customer.language === 'en' ? 'en' : 'ro'
+  const doc = new jsPDF()
+  doc.setFontSize(16)
+  doc.text(lang === 'ro' ? 'Chitanță de plată' : 'Payment receipt', 14, 20)
+  doc.setFontSize(11)
+  const lines = [
+    `${lang === 'ro' ? 'Suma' : 'Amount'}: ${(payment.amountMinor / 100).toFixed(2)} ${payment.currency}`,
+    `${lang === 'ro' ? 'Rata' : 'Installment'}: ${payment.installment.sequence}/${payment.installment.schedule.totalInstallments}`,
+    `${lang === 'ro' ? 'Data' : 'Date'}: ${(payment.paidAt ?? new Date()).toISOString()}`,
+    `${lang === 'ro' ? 'Referință procesator' : 'Provider reference'}: ${payment.providerPaymentId ?? '-'}`,
+  ]
+  lines.forEach((l, i) => doc.text(l, 14, 32 + i * 7))
+  await createDocument({
+    kind: 'PAYMENT_RECEIPT',
+    language: lang,
+    bytes: Buffer.from(doc.output('arraybuffer')),
+    source: 'GENERATED',
+    customerId: payment.customerId,
+    quoteId: payment.installment.schedule.quoteId,
+  })
 }

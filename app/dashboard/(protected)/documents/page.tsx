@@ -54,9 +54,7 @@ export default async function DocumentsPage() {
         </div>
       ) : (
         <DocumentList
-          policyActive={isActive}
-          policyId={latestPolicy.id}
-          suitabilityReportPath={latestPolicy.suitabilityReportPath}
+          documents={(await prisma.document.findMany({ where: { customerId: latestPolicy.customerId }, orderBy: { generatedAt: 'desc' } })).map((d) => ({ id: d.id, kind: d.kind, version: d.version, language: d.language, generatedAt: d.generatedAt.toISOString() }))}
         />
       )}
     </div>

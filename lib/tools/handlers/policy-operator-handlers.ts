@@ -19,8 +19,10 @@
  * changes never move a sold policy's window. cancel_submission gains the
  * refund system-effect at D4.5 (contradiction #5's second trigger).
  */
+import { jsPDF } from 'jspdf'
 import { canPolicyTransition, type PolicyStatusV3 } from '@/lib/engines/policy-machine'
 import { executeFullRefund } from '@/lib/payments/refunds'
+import { createDocument } from '@/lib/documents/registry'
 import type { ToolHandler } from '@/lib/tools/types'
 
 export const markSubmitted: ToolHandler = async (args, context) => {
@@ -56,6 +58,37 @@ export const activatePolicy: ToolHandler = async (args, context) => {
       // issuedAt untouched — single-meaning: first capture (D2.6)
       data: { status: 'ACTIVE', allianzPolicyNumber, activatedAt, effectiveFrom: activatedAt, effectiveUntil, freeLookEndsAt },
     })
+    // D4.6: the POLICY_SCHEDULE document registers with the activation —
+    // coverages, premium, Allianz number, effective dates
+    try {
+      const full = await context.db.policy.findUniqueOrThrow({ where: { id: policy.id }, include: { customer: { select: { language: true } } } })
+      const lang = full.customer.language === 'en' ? 'en' : 'ro'
+      const pdf = new jsPDF()
+      pdf.setFontSize(16)
+      pdf.text(lang === 'ro' ? 'Specificația poliței' : 'Policy schedule', 14, 20)
+      pdf.setFontSize(11)
+      const lines = [
+        `${lang === 'ro' ? 'Număr poliță Allianz' : 'Allianz policy number'}: ${allianzPolicyNumber}`,
+        `${lang === 'ro' ? 'Primă anuală' : 'Annual premium'}: ${full.premiumAnnual} ${full.currency}`,
+        `${lang === 'ro' ? 'Valabilă de la' : 'Effective from'}: ${activatedAt.toISOString().split('T')[0]}`,
+        `${lang === 'ro' ? 'Valabilă până la' : 'Effective until'}: ${effectiveUntil.toISOString().split('T')[0]}`,
+        `${lang === 'ro' ? 'Drept de renunțare până la' : 'Free-look until'}: ${freeLookEndsAt.toISOString().split('T')[0]}`,
+      ]
+      lines.forEach((l, i) => pdf.text(l, 14, 32 + i * 7))
+      pdf.text(JSON.stringify(full.coverageSummary).slice(0, 180), 14, 75, { maxWidth: 180 })
+      await createDocument({
+        kind: 'POLICY_SCHEDULE',
+        language: lang,
+        bytes: Buffer.from(pdf.output('arraybuffer')),
+        source: 'GENERATED',
+        customerId: full.customerId,
+        policyId: full.id,
+        quoteId: full.quoteId,
+      }, context.db)
+    } catch {
+      // document failure never blocks activation — the registry can be
+      // backfilled by an operator re-run
+    }
     return {
       success: true,
       effects: ['terminal'],

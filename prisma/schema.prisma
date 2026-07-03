@@ -875,7 +875,6 @@ model Policy {
   paymentFrequency    String?
   currency            String       @default("RON")
   coverageSummary         Json
-  suitabilityReportPath  String? // dies at D4.6 with its dashboard consumers (erratum 1 ordering)
   issuedAt               DateTime? // single-meaning: FIRST CAPTURE, written only by settlement (D2.6)
   activatedAt            DateTime?
   freeLookEndsAt         DateTime? // frozen per-policy snapshot at activation (T9.D2)
