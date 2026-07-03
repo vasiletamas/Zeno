@@ -183,7 +183,9 @@ async function main() {
     console.log(`  => ${sc.key}: ${passes}/${trials} ${ok ? 'PASS (n-of-m met)' : 'FAIL (below threshold)'}`)
     if (!ok) anyFailed = true
   }
-  await prisma.$disconnect()
+  // exit BEFORE $disconnect — live handles (event-bus timers) can wedge the
+  // disconnect and the verdicts are already flushed; the process dying is
+  // the disconnect
   process.exit(anyFailed ? 1 : 0)
 }
 
