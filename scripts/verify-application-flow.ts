@@ -4,9 +4,10 @@
  * Drives the ratified flow through the gateway: candidate →
  * set_application WITHOUT a DNT (T5.D1) → questionnaire blocked
  * requires_consent(valid_dnt) → DNT via the B2 surface → answers →
- * select_coverage → quote → re-select under the quote (re_rating + expiry)
- * → cancel with confirmation (terminal CANCELLED) → re-apply with
- * prefill-as-proposals. Prints PASS/FAIL per leg; exits non-zero on failure.
+ * select_coverage → quote → re-select under the quote (application_frozen,
+ * D1) → cancel_quote with confirmation (terminal, pointer released) →
+ * re-apply with prefill-as-proposals. Prints PASS/FAIL per leg; exits
+ * non-zero on failure.
  *
  * Usage: npx tsx scripts/verify-application-flow.ts
  */
@@ -119,25 +120,30 @@ async function main() {
     (await prisma.answer.count({ where: { applicationId: app.id, question: { code: { in: ['PACKAGE_CHOICE', 'PREMIUM_LEVEL', 'BD_ADDON_INTEREST'] } } } })) === 0,
     JSON.stringify({ multi: multi.outcome, selTier: selTier.outcome, selLevel: selLevel.outcome, quote: quote.outcome }))
 
-  // leg 6: re-select under the quote → re_rating + expiry
+  // leg 6 (D1.7, T7.D1): re-selection under the quote is engine-illegal —
+  // application_frozen, quote untouched (the immutable priced artifact)
   const resel = await commit('select_coverage', { level: 'level_2' }, customer.id, conv.id, 'gui')
-  const expired = await prisma.quote.findFirstOrThrow({ where: { applicationId: app.id } })
-  check('re-selection under the quote carries re_rating and expires it',
-    resel.outcome === 'applied' && resel.effects.includes('re_rating') && expired.status === 'EXPIRED',
-    JSON.stringify({ effects: resel.effects, quote: expired.status }))
+  const stillIssued = await prisma.quote.findFirstOrThrow({ where: { applicationId: app.id } })
+  check('re-selection under the quote is rejected application_frozen; quote stays ISSUED (D1)',
+    resel.outcome === 'rejected' && resel.reason === 'application_frozen' && stillIssued.status === 'ISSUED',
+    JSON.stringify({ outcome: resel.outcome, reason: resel.reason, quote: stillIssued.status }))
 
-  // leg 7: cancel with confirmation → terminal CANCELLED
-  const c1 = await commit('cancel_application', { reason: 'verify-script' }, customer.id, conv.id)
+  // leg 7 (D1.5, T13.D2): the recovery path is cancel_QUOTE — two-step token,
+  // terminal CAS CANCELLED, pointer released; the frozen COMPLETED
+  // application stays as the audit record of what was priced
+  const c1 = await commit('cancel_quote', {}, customer.id, conv.id)
   const c2 = c1.outcome === 'requires_confirmation' && c1.confirmToken
-    ? await commit('cancel_application', { reason: 'verify-script' }, customer.id, conv.id, 'agent', c1.confirmToken)
+    ? await commit('cancel_quote', {}, customer.id, conv.id, 'agent', c1.confirmToken)
     : c1
-  const cancelled = await prisma.application.findUniqueOrThrow({ where: { id: app.id } })
-  check('cancel: confirmation round-trip → terminal CANCELLED (≠ COMPLETED), pointer released',
-    c1.outcome === 'requires_confirmation' && c2.outcome === 'applied' && c2.effects.includes('terminal') && cancelled.status === 'CANCELLED',
-    JSON.stringify({ first: c1.outcome, second: c2.outcome, status: cancelled.status }))
+  const cancelledQuote = await prisma.quote.findFirstOrThrow({ where: { applicationId: app.id } })
+  const pointer = (await prisma.conversation.findUniqueOrThrow({ where: { id: conv.id } })).activeApplicationId
+  check('cancel_quote: confirmation round-trip → terminal, quote CANCELLED, pointer released',
+    c1.outcome === 'requires_confirmation' && c2.outcome === 'applied' && c2.effects.includes('terminal') &&
+    cancelledQuote.status === 'CANCELLED' && pointer === null,
+    JSON.stringify({ first: c1.outcome, second: c2.outcome, quote: cancelledQuote.status, pointer }))
 
-  // leg 8: re-apply — the CANCELLED slot is free; prior answers surface as proposals
-  await prisma.application.update({ where: { id: app.id }, data: { status: 'COMPLETED', completedAt: new Date() } }) // simulate a COMPLETED history for proposals
+  // leg 8: re-apply — the pointer is free and the COMPLETED history exists;
+  // prior answers surface as proposals
   const reopened = await commit('set_application', {}, customer.id, conv.id)
   const info = await getLastApplicationInfo({}, ctx)
   const proposals = (info.data as { proposals: Array<{ questionCode: string }> }).proposals
