@@ -6,8 +6,15 @@
 import type { ConversationExport } from '@/lib/debug/conversation-export'
 import type { DiagnosticCheck, Finding } from './types'
 import * as basic from './checks-basic'
+import * as behavioral from './checks-behavioral'
 
-export const CHECK_CATALOG: DiagnosticCheck[] = Object.values(basic)
+const isCheck = (v: unknown): v is DiagnosticCheck =>
+  typeof v === 'object' && v !== null && 'id' in v && 'run' in v
+
+export const CHECK_CATALOG: DiagnosticCheck[] = [
+  ...Object.values(basic),
+  ...Object.values(behavioral).filter(isCheck), // skips the exported trigramSimilarity helper
+]
 
 export function runDiagnostics(e: ConversationExport, catalog: DiagnosticCheck[] = CHECK_CATALOG): Finding[] {
   return catalog.flatMap((c) => c.run(e))
