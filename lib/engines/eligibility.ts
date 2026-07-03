@@ -49,6 +49,25 @@ export function deriveEligibilityBounds(ruleSet: EligibilityRuleSet): { minAge: 
   return { minAge, maxAge }
 }
 
+/**
+ * The addon age rule DERIVED from the seeded AddonPricingRule bands (C2.4):
+ * a no-match age is an INELIGIBILITY fact, never a silent price 0. Bands
+ * must be contiguous — an envelope over gapped bands would silently declare
+ * hole-ages eligible (erratum 4), so gaps are a hard authoring error.
+ */
+export function deriveAddonAgeRules(bands: { minAge: number; maxAge: number }[]): EligibilityRule[] {
+  if (bands.length === 0) return []
+  const sorted = [...bands].sort((a, b) => a.minAge - b.minAge)
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].minAge !== sorted[i - 1].maxAge + 1) {
+      throw new Error(`addon age bands are not contiguous: ${sorted[i - 1].minAge}-${sorted[i - 1].maxAge} then ${sorted[i].minAge}-${sorted[i].maxAge} — the derived envelope would declare hole-ages eligible`)
+    }
+  }
+  const lo = sorted[0].minAge
+  const hi = sorted[sorted.length - 1].maxAge
+  return [{ id: 'addon_age_band', subject: 'addon', fact: 'age', op: 'between', value: [lo, hi], reason: 'addon_age_band_unavailable' }]
+}
+
 export type EligibilityVerdict = 'eligible' | 'ineligible' | 'unknown'
 export type KnownFacts = Record<string, string | number | boolean | null | undefined>
 export interface EligibilityResult {
