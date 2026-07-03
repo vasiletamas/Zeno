@@ -28,7 +28,7 @@ export interface DomainSnapshot {
     // legacy conversation-stamp semantics — retired at B2.6 with the columns
     signed: boolean; valid: boolean; validUntil: string | null; coversProductTypes: string[]; answeredCount: number; totalCount: number; sessionActive: boolean
     // B2 aggregate facts (customer-scoped)
-    latest: { status: string; signedAt: string; validUntil: string; productTypesCovered: string[] } | null
+    latest: { id?: string; status: string; signedAt: string; validUntil: string; productTypesCovered: string[] } | null // id (E4.2) = open-item refId
     activeSessionId: string | null
     sessionType: string | null
     sessionAnswered: number
@@ -36,17 +36,17 @@ export interface DomainSnapshot {
     /** C3.3: the SIGNED Dnt's answers (questionCode → value) — the suitability facts. Empty until a Dnt exists. */
     facts: Record<string, string>
   }
-  application: { id: string; status: 'OPEN' | 'PAUSED' | 'REFERRED' | 'COMPLETED' | 'CANCELLED'; tier: string | null; level: string | null; addon: boolean | null; answeredCount: number; requiredCount: number; missingCodes: string[]; frozen: boolean } | null // frozen (D1, T7.D1): frozenAt set OR a Quote row exists in ANY state — post-quote mutation is engine-illegal // full T5.D6 set (B4); the loader nulls CANCELLED pointers
+  application: { id: string; status: 'OPEN' | 'PAUSED' | 'REFERRED' | 'COMPLETED' | 'CANCELLED'; tier: string | null; level: string | null; addon: boolean | null; answeredCount: number; requiredCount: number; missingCodes: string[]; frozen: boolean; createdAt?: string } | null // frozen (D1, T7.D1): frozenAt set OR a Quote row exists in ANY state — post-quote mutation is engine-illegal // full T5.D6 set (B4); the loader nulls CANCELLED pointers; createdAt (E4.2) feeds open-item age
   /**
    * B4.6 cross-conversation resume (T5.D4): the customer's live application
    * ANYWHERE — present even when this conversation carries no pointer yet,
    * so resume_application can be exposed in a fresh conversation.
    */
   resumableApplication: { id: string; status: 'OPEN' | 'PAUSED' | 'REFERRED' } | null
-  quote: { id: string; status: string; premiumAnnual: number; validUntil: string; expired: boolean; disclosuresRequired?: { kind: string; version: number; language: string }[] } | null // issued, unaccepted; disclosuresRequired (D2.5, T7.D2) = current disclosure docs lacking an exact-identity ack — the loader always sets it; undefined ≡ [] keeps pre-D2 test literals compiling
+  quote: { id: string; status: string; premiumAnnual: number; validUntil: string; expired: boolean; disclosuresRequired?: { kind: string; version: number; language: string }[]; createdAt?: string } | null // issued, unaccepted; disclosuresRequired (D2.5, T7.D2) = current disclosure docs lacking an exact-identity ack — the loader always sets it; undefined ≡ [] keeps pre-D2 test literals compiling; createdAt (E4.2) feeds open-item age
   acceptedQuote: { id: string; acceptedAt: string | null } | null
-  schedule: { exists: boolean; settled: boolean; nextDueAt: string | null; lastPaymentStatus: string | null; capturedCount?: number } // D2.5 live; capturedCount (D3.4) = PAID installments — gates change_payment_option pre-capture only
-  policy: { id: string; status: string; freeLookEndsAt?: string | null } | null // freeLookEndsAt (D4.5): the FROZEN per-policy window feeding the free-look exposure rule
+  schedule: { exists: boolean; settled: boolean; nextDueAt: string | null; lastPaymentStatus: string | null; capturedCount?: number; id?: string | null } // D2.5 live; capturedCount (D3.4) = PAID installments — gates change_payment_option pre-capture only; id (E4.2) = open-item refId
+  policy: { id: string; status: string; freeLookEndsAt?: string | null; createdAt?: string } | null // freeLookEndsAt (D4.5): the FROZEN per-policy window feeding the free-look exposure rule; createdAt (E4.2) feeds open-item age
   /**
    * C2.6: identity-class eligibility facts (age from the B0 derivation —
    * DOB or declaredAge, NEVER a stored snapshot or a 30-fallback; residency

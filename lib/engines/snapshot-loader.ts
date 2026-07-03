@@ -81,6 +81,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
       answeredCount: answeredCodes.length, requiredCount: visibleCodes.length,
       missingCodes: visibleCodes.filter((c) => activeAnswers[c] === undefined),
       frozen: application.frozenAt !== null || quoteCount > 0,
+      createdAt: application.createdAt.toISOString(), // E4.2: open-item age
     }
   }
   // DNT facts. Legacy conversation-stamp semantics survive until B2.6; the
@@ -157,6 +158,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     nextDueAt: nextPending?.dueAt.toISOString() ?? null,
     lastPaymentStatus: null as string | null, // D2.6 settlement wires this
     capturedCount: scheduleRow?.installments.filter((i) => i.status === 'PAID').length ?? 0,
+    id: scheduleRow?.id ?? null, // E4.2: open-item refId
   }
   // C2.6: identity-class eligibility facts — age via the B0 derivation
   // (DOB or declaredAge, NEVER a 30-fallback), residency from a
@@ -205,7 +207,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     consents,
     dnt: {
       signed: latestDnt !== null && latestDnt.status !== 'WITHDRAWN', valid: dntValid, validUntil: latestDnt?.validUntil.toISOString() ?? null, coversProductTypes: dntValid ? latestDnt!.productTypesCovered : [], answeredCount: sessionCounts.answered, totalCount: sessionCounts.total, sessionActive: activeDntSession !== null,
-      latest: latestDnt ? { status: latestDnt.status, signedAt: latestDnt.signedAt.toISOString(), validUntil: latestDnt.validUntil.toISOString(), productTypesCovered: latestDnt.productTypesCovered } : null,
+      latest: latestDnt ? { id: latestDnt.id, status: latestDnt.status, signedAt: latestDnt.signedAt.toISOString(), validUntil: latestDnt.validUntil.toISOString(), productTypesCovered: latestDnt.productTypesCovered } : null,
       activeSessionId: activeDntSession?.id ?? null,
       sessionType: activeDntSession?.type ?? null,
       sessionAnswered: sessionCounts.answered,
@@ -215,10 +217,10 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     application: appState,
     resumableApplication: resumable ? { id: resumable.id, status: resumable.status as 'OPEN' | 'PAUSED' | 'REFERRED' } : null,
     // T7.D5: expiry via the ONE pure predicate — never an inline comparison
-    quote: issued ? { id: issued.id, status: issued.status, premiumAnnual: issued.premiumAnnual, validUntil: issued.validUntil.toISOString(), expired: isExpired({ status: issued.status as QuoteStatusV3, validUntil: issued.validUntil }, new Date()), disclosuresRequired: quoteDisclosuresRequired } : null,
+    quote: issued ? { id: issued.id, status: issued.status, premiumAnnual: issued.premiumAnnual, validUntil: issued.validUntil.toISOString(), expired: isExpired({ status: issued.status as QuoteStatusV3, validUntil: issued.validUntil }, new Date()), disclosuresRequired: quoteDisclosuresRequired, createdAt: issued.createdAt.toISOString() } : null,
     acceptedQuote: accepted ? { id: accepted.id, acceptedAt: accepted.updatedAt.toISOString() } : null,
     schedule: scheduleSlice,
-    policy: policy ? { id: policy.id, status: policy.status, freeLookEndsAt: policy.freeLookEndsAt?.toISOString() ?? null } : null,
+    policy: policy ? { id: policy.id, status: policy.status, freeLookEndsAt: policy.freeLookEndsAt?.toISOString() ?? null, createdAt: policy.createdAt.toISOString() } : null,
     eligibilityFacts, suitabilityAcks,
     documents: {
       requirementsByTool: (prod?.verificationRequirements as Record<string, string[]> | null) ?? {},
