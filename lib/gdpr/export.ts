@@ -56,7 +56,7 @@ export async function compileCustomerExport(customerId: string, db: Db = prisma)
   })
   const applications = await db.application.findMany({
     where: { customerId },
-    include: { answers: { where: { status: 'ACTIVE' }, select: { questionId: true, value: true, createdAt: true } } },
+    include: { answers: { where: { status: 'ACTIVE' }, select: { questionId: true, value: true, answeredAt: true } } },
   })
   const quotes = await db.quote.findMany({ where: { customerId } })
   const payments = await db.payment.findMany({ where: { customerId } })

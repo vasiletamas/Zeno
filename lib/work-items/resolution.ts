@@ -56,6 +56,24 @@ export async function resolveWorkItemDecision(input: {
     return { outcome: 'applied', effects: ['terminal' as CommitEffect], data: { workItemId: input.workItemId } }
   }
 
+  // E3 (erratum 8): GDPR approvals from the queue run the SAME gateway
+  // commits the tests/scripts use — approval was never meant to be
+  // reachable only via direct executeCommit calls.
+  if (item.kind === 'GDPR_ERASURE' && input.decision === 'approve') {
+    return executeCommit({
+      tool: 'approve_erasure', actor: 'operator', conversationId, customerId,
+      args: { workItemId: input.workItemId },
+      toolContext,
+    })
+  }
+  if (item.kind === 'GDPR_EXPORT' && input.decision === 'approve') {
+    return executeCommit({
+      tool: 'approve_export', actor: 'operator', conversationId, customerId,
+      args: { workItemId: input.workItemId },
+      toolContext,
+    })
+  }
+
   if (input.decision === 'resolve' || input.decision === 'dismiss') {
     return executeCommit({
       tool: 'resolve_work_item', actor: 'operator', conversationId, customerId,

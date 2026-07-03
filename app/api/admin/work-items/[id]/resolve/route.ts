@@ -12,12 +12,14 @@ import { verifyToken, COOKIE_NAME } from '@/lib/auth/jwt'
 import { prisma } from '@/lib/db'
 import { resolveWorkItemDecision } from '@/lib/work-items/resolution'
 
-/** Decisions each kind accepts. GDPR kinds are wired by E3's resolution flow. */
+/** Decisions each kind accepts. GDPR approvals run the E3 gateway commits. */
 const DECISIONS_BY_KIND: Record<string, string[]> = {
   REFERRAL: ['approve', 'reject'],
   ESCALATION: ['resolve', 'dismiss'],
   DOCUMENT_REVIEW: ['resolve', 'dismiss'],
   ALERT_FLAG: ['resolve', 'dismiss'],
+  GDPR_ERASURE: ['approve', 'dismiss'],
+  GDPR_EXPORT: ['approve', 'dismiss'],
 }
 
 export async function POST(
@@ -41,9 +43,6 @@ export async function POST(
     const item = await prisma.workItem.findUnique({ where: { id } })
     if (!item) {
       return NextResponse.json({ error: 'Work item not found' }, { status: 404 })
-    }
-    if (item.kind === 'GDPR_ERASURE' || item.kind === 'GDPR_EXPORT') {
-      return NextResponse.json({ error: 'use_gdpr_resolution' }, { status: 400 })
     }
     if (!decision || !DECISIONS_BY_KIND[item.kind]?.includes(decision)) {
       return NextResponse.json({ error: 'invalid_decision_for_kind' }, { status: 400 })

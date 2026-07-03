@@ -77,14 +77,20 @@ describe('admin work-items API', () => {
     expect((await res.json()).error).toBe('invalid_decision_for_kind')
   })
 
-  it('400s GDPR kinds until E3 wires them (negative)', async () => {
+  it('E3 (erratum 8): approving a GDPR_ERASURE item from the queue executes the erasure through the gateway', async () => {
     const item = await seedEscalation('GDPR_ERASURE')
+    const refs = item.refs as { customerId: string }
+    await prisma.customer.update({ where: { id: refs.customerId }, data: { name: 'Ion Q', email: 'q@x.ro' } })
     const token = await signToken({ userId: 'op1', email: 'op@x.ro', role: 'OPERATOR' }, '1h')
     const res = await resolveRoute(
       req(`/api/admin/work-items/${item.id}/resolve`, { token, method: 'POST', body: { decision: 'approve' } }),
       { params: Promise.resolve({ id: item.id }) },
     )
-    expect(res.status).toBe(400)
-    expect((await res.json()).error).toBe('use_gdpr_resolution')
+    expect(res.status).toBe(200)
+    const after = await prisma.customer.findUniqueOrThrow({ where: { id: refs.customerId } })
+    expect(after.name).toBeNull()
+    expect(after.erasedAt).not.toBeNull()
+    expect((await prisma.workItem.findUniqueOrThrow({ where: { id: item.id } })).status).toBe('RESOLVED')
+    expect(await prisma.commitLedger.count({ where: { tool: 'approve_erasure', outcome: 'applied' } })).toBe(1)
   })
 })

@@ -20,6 +20,17 @@ const DECISIONS_BY_KIND: Record<string, { decision: string; label: string; destr
     { decision: 'resolve', label: 'Resolve' },
     { decision: 'dismiss', label: 'Dismiss', destructive: true },
   ],
+  // E3 (erratum 8): GDPR approvals run the gateway commits
+  // (approve_erasure executes the retention-driven job; approve_export
+  // compiles and stores the bundle) — dismiss closes without action.
+  GDPR_ERASURE: [
+    { decision: 'approve', label: 'Approve — execute erasure', destructive: true },
+    { decision: 'dismiss', label: 'Dismiss' },
+  ],
+  GDPR_EXPORT: [
+    { decision: 'approve', label: 'Approve — compile export bundle' },
+    { decision: 'dismiss', label: 'Dismiss', destructive: true },
+  ],
 }
 
 export default function WorkItemActions({ id, kind, open }: { id: string; kind: string; open: boolean }) {
@@ -31,7 +42,7 @@ export default function WorkItemActions({ id, kind, open }: { id: string; kind: 
 
   if (!open) return null
   if (!actions) {
-    return <p className="text-sm text-muted">This item is handled by the GDPR resolution flow.</p>
+    return <p className="text-sm text-muted">No resolution actions are defined for this kind.</p>
   }
 
   async function submit(decision: string) {
