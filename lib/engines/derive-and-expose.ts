@@ -4,6 +4,7 @@ import { checkIdentityRequirement, IDENTITY_REQUIREMENTS, type IdentityRequireme
 import { consentBlocksCommit } from './consent-rules'
 import { dntExposure, type DntFact, type ProductTypeStr } from './dnt-rules'
 import { applicationExposure, canTransition, type AppStatus } from './application-rules'
+import { evaluateEligibility } from './eligibility'
 
 /**
  * Adapt the snapshot's DNT aggregate facts to the pure #12 exposure
@@ -71,7 +72,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.16.0' // 1.14.0: resume_application exposed cross-conversation via the customer-scoped resumable fact, REFERRED answers with_underwriter (B4.6); 1.15.0: modify_answer exposed on OPEN/PAUSED apps with answers behind the DNT gate (C1.5, erratum 10); 1.16.0: pinned questionnaire surface (C1.ADD-1/2) — write_question_answer renames the save commit, get_next_question read with branching provenance, check_bd_eligibility retired (bd rule = ELIGIBILITY edges)
+export const engineVersion = '1.17.0' // 1.15.0: modify_answer exposed on OPEN/PAUSED apps with answers behind the DNT gate (C1.5, erratum 10); 1.16.0: pinned questionnaire surface (C1.ADD-1/2) — write_question_answer renames the save commit, get_next_question read with branching provenance, check_bd_eligibility retired; 1.17.0: discovery eligibility verdict DERIVED per turn (C2.6) — DerivedStateV3.eligibility from the typed rules, INELIGIBLE blocks set_application with the failed-rule reason (erratum 3), unknown never a wall
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -85,7 +86,7 @@ export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSub
   return { phase: 'DISCOVERY', subphase: null }
 }
 
-type Derived = { phase: Phase; subphase: AppSubphase | null }
+type Derived = { phase: Phase; subphase: AppSubphase | null; eligibility: DerivedStateV3['eligibility'] }
 export interface ActionRule {
   action: string
   kind: 'read' | 'commit'
@@ -93,6 +94,23 @@ export interface ActionRule {
   blockedReason?: (s: DomainSnapshot, d: Derived) => { reason: ReasonCode; params?: Record<string, unknown> } | null
 }
 const always = () => true
+
+/**
+ * The discovery eligibility verdict (C2.6, #9): ONE evaluator over the
+ * product's typed rules — subject 'product' (addon rules are the consequence
+ * planner's and the D1 gate's business). Facts = identity-class facts from
+ * the B0 derivation plus prefixed active-answer facts. No rules → unknown.
+ */
+export function deriveEligibility(s: DomainSnapshot): DerivedStateV3['eligibility'] {
+  const rules = s.product?.eligibilityRules
+  if (!rules) return { verdict: 'unknown', missingFacts: [], failedReasons: [] }
+  const facts = {
+    ...s.eligibilityFacts,
+    ...Object.fromEntries(Object.entries(s.answers).map(([c, v]) => [`answer:${c}`, v])),
+  }
+  const r = evaluateEligibility(rules, facts, 'product')
+  return { verdict: r.verdict, missingFacts: r.missingFacts, failedReasons: r.failedRules.map((f) => f.reason) }
+}
 
 export const ACTION_RULES: ActionRule[] = [
   { action: 'list_products', kind: 'read', exposedWhen: always },
@@ -124,9 +142,14 @@ export const ACTION_RULES: ActionRule[] = [
   { action: 'request_document_upload', kind: 'commit', exposedWhen: (s) => Object.values(s.documents.requirementsByTool).flat().some((k) => !s.documents.validated.includes(k)) },
   dntRule('sign_dnt', 'commit'),
   // B4.3: set_application freezes PRODUCT only — NO DNT pre-gate (T5.D1);
-  // the questionnaire exposure below carries the DNT ordering flip.
-  { action: 'set_application', kind: 'commit', exposedWhen: (s) => (s.product !== null || s.candidateProductId !== null) && s.application === null,
-    blockedReason: (s) => (s.application !== null ? { reason: 'application_already_open', params: { applicationId: s.application.id } } : { reason: 'no_candidate_product' }) },
+  // the questionnaire exposure below carries the DNT ordering flip. C2.6
+  // (erratum 3, T11.D4): a decided INELIGIBLE verdict blocks with the first
+  // failed-rule reason; 'unknown' is normal in discovery and never a wall.
+  { action: 'set_application', kind: 'commit', exposedWhen: (s, d) => (s.product !== null || s.candidateProductId !== null) && s.application === null && d.eligibility.verdict !== 'ineligible',
+    blockedReason: (s, d) => (
+      d.eligibility.verdict === 'ineligible' ? { reason: (d.eligibility.failedReasons[0] ?? 'not_exposed') as ReasonCode, params: { failedReasons: d.eligibility.failedReasons } }
+      : s.application !== null ? { reason: 'application_already_open', params: { applicationId: s.application.id } }
+      : { reason: 'no_candidate_product' }) },
   // B4.2: lifecycle exposure comes from the pure application rules
   appRule('write_question_answer'),
   appRule('modify_answer'),
@@ -155,7 +178,7 @@ export const ACTION_RULES: ActionRule[] = [
 const NEXT_BEST_PRIORITY = ['initiate_payment', 'accept_quote', 'generate_quote', 'select_coverage', 'write_question_answer', 'sign_dnt', 'write_dnt_answer', 'open_dnt_session', 'set_application', 'set_candidate_product', 'list_products']
 
 export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequirements?: IdentityRequirementsTable }): DeriveAndExposeResult {
-  const d = derivePhase(s)
+  const d: Derived = { ...derivePhase(s), eligibility: deriveEligibility(s) }
   const identityTable = config?.identityRequirements ?? IDENTITY_REQUIREMENTS
   const available: string[] = []
   const blocked: BlockedAction[] = []
@@ -195,7 +218,7 @@ export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequiremen
     selection: { tier: s.application?.tier ?? null, level: s.application?.level ?? null, addon: s.application?.addon ?? null },
     identity: s.identity, consents: s.consents, dnt: s.dnt, application: s.application,
     quote: s.quote, schedule: s.schedule, policy: s.policy,
-    eligibility: s.eligibility, suitability: s.suitability, openItems: s.openItems,
+    eligibility: d.eligibility, suitability: s.suitability, openItems: s.openItems,
     flagsForReview,
     nextBestAction: next ? `call ${next}` : 'continue the conversation (no funnel commit is currently available)',
   }

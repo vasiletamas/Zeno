@@ -119,8 +119,8 @@ export async function getProfile(customerId: string) {
   return { customerId, fields, conflicts: rows.filter(r => r.provenance === 'conflict').map(r => r.field) }
 }
 
-export async function getAge(customerId: string, now = new Date()): Promise<number | null> {
-  const dob = await existingRecord(prisma, customerId, 'dateOfBirth')
+export async function getAge(customerId: string, now = new Date(), db: Db = prisma): Promise<number | null> {
+  const dob = await existingRecord(db, customerId, 'dateOfBirth')
   if (dob) {
     const d = new Date(dob.value)
     let a = now.getFullYear() - d.getFullYear()
@@ -128,6 +128,6 @@ export async function getAge(customerId: string, now = new Date()): Promise<numb
     if (m < 0 || (m === 0 && now.getDate() < d.getDate())) a--
     return a
   }
-  const decl = await existingRecord(prisma, customerId, 'declaredAge')
+  const decl = await existingRecord(db, customerId, 'declaredAge')
   return decl ? Number(decl.value) : null
 }

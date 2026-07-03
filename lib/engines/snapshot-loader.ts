@@ -4,9 +4,10 @@ import { resolveGroupCodes } from '@/lib/engines/question-groups'
 import { computeVisibleSet } from '@/lib/engines/dependency-graph'
 import { loadDependencyGraph } from '@/lib/engines/dependency-graph-loader'
 import { getActiveAnswers } from '@/lib/engines/answer-store'
+import { parseEligibilityRuleSet, type EligibilityRuleSet } from '@/lib/engines/eligibility'
 import { getOpenCircuitTools } from '@/lib/tools/circuit-state'
 import { deriveConsents, type ConsentEventLike } from '@/lib/customer/consent'
-import { getIdentityFacts } from '@/lib/customer/profile-service'
+import { getIdentityFacts, getAge } from '@/lib/customer/profile-service'
 import { deriveIdentityTier } from '@/lib/engines/identity-rules'
 import type { DomainSnapshot } from './domain-types'
 
@@ -46,6 +47,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     select: { id: true, status: true },
   })
   let appState: DomainSnapshot['application'] = null
+  let appAnswers: Record<string, string> = {}
   if (application && application.status !== 'CANCELLED') {
     // C1.7: ONE canonical visible set — the FULL application phase
     // (bd_medical included) filtered by computeVisibleSet over the typed
@@ -57,6 +59,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     const tier = application.tierId ? await db.pricingTier.findUnique({ where: { id: application.tierId } }) : null
     const level = application.levelId ? await db.pricingLevel.findUnique({ where: { id: application.levelId } }) : null
     const activeAnswers = await getActiveAnswers(db, application.id)
+    appAnswers = activeAnswers
     const graph = await loadDependencyGraph(db, application.productId)
     const visible = computeVisibleSet(
       graph,
@@ -112,9 +115,22 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   const issued = appState && application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'DRAFT' }, orderBy: { createdAt: 'desc' } }) : null
   const accepted = appState && application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'ACCEPTED' } }) : null
   const policy = accepted ? await db.policy.findUnique({ where: { quoteId: accepted.id } }) : null
+  // C2.6: identity-class eligibility facts — age via the B0 derivation
+  // (DOB or declaredAge, NEVER a 30-fallback), residency from a
+  // declared/verified CNP (a Romanian personal code implies RO residence).
+  const eligibilityFacts: Record<string, string | number | boolean> = {}
+  const age = await getAge(conversation.customerId, new Date(), db)
+  if (age !== null) eligibilityFacts.age = age
+  if (identityFacts.fields.cnp && identityFacts.fields.cnp.provenance !== 'conflict') eligibilityFacts.residency = 'Romania'
+  // the product's typed ruleset, parsed once per snapshot (informal legacy
+  // Json → null: no engine-evaluable rules)
+  let eligibilityRules: EligibilityRuleSet | null = null
+  if (prod) {
+    try { eligibilityRules = parseEligibilityRuleSet(prod.eligibility) } catch { eligibilityRules = null }
+  }
   return {
     conversationId, customerId: conversation.customerId,
-    product: prod ? { id: prod.id, code: prod.code, insuranceType: prod.insuranceType } : null,
+    product: prod ? { id: prod.id, code: prod.code, insuranceType: prod.insuranceType, eligibilityRules } : null,
     candidateProductId: conversation.candidateProductId,
     identity: {
       // B3.2: tier DERIVED from the provenance store (+ verified channels),
@@ -140,7 +156,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     acceptedQuote: accepted ? { id: accepted.id, acceptedAt: accepted.updatedAt.toISOString() } : null,
     schedule: { exists: false, settled: false, nextDueAt: null, lastPaymentStatus: null }, // Block D (PaymentSchedule) re-points
     policy: policy ? { id: policy.id, status: policy.status } : null,
-    eligibility: { verdict: 'unknown' }, suitability: { verdict: 'unknown' },
+    eligibilityFacts, suitability: { verdict: 'unknown' },
     documents: {
       requirementsByTool: (prod?.verificationRequirements as Record<string, string[]> | null) ?? {},
       validated: [...new Set(validatedDocs.map((d) => d.kind as string))],
@@ -148,6 +164,6 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     openItems: [], // M2 (Block B) wires openItems
     circuit: { openTools: getOpenCircuitTools() }, // M10 degraded-mode input (A2.7)
     degraded: [], // backend circuits land with their blocks (payment provider in D3)
-    answers: {},
+    answers: appAnswers, // C2.6: ACTIVE application answers (code → value) feed the eligibility answer-facts
   }
 }

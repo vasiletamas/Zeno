@@ -98,6 +98,42 @@ function ruleHolds(rule: EligibilityRule, fact: string | number | boolean): bool
   }
 }
 
+export type QuoteEligibilityGate =
+  | { ok: true }
+  | { ok: false; outcome: 'rejected'; reason: string; params: Record<string, unknown> }
+  | { ok: false; outcome: 'requires_identity'; reason: 'eligibility_facts_missing'; params: { needs: string[] } }
+
+/**
+ * Final-authority gate for generate_quote (C2.6 — D1 is the host; this is
+ * the whole decision). Erratum 2: missing IDENTITY-class facts (age,
+ * residency) demand identity; missing 'answer:*' facts are questionnaire
+ * incompleteness and REJECT (defense-in-depth — legality already keeps
+ * generate_quote unexposed while the questionnaire is incomplete).
+ */
+export function gateQuoteEligibility(
+  ruleSet: EligibilityRuleSet,
+  knownFacts: KnownFacts,
+  includesAddon: boolean,
+): QuoteEligibilityGate {
+  const product = evaluateEligibility(ruleSet, knownFacts, 'product')
+  if (product.verdict === 'ineligible') {
+    return { ok: false, outcome: 'rejected', reason: product.failedRules[0].reason, params: { failedRules: product.failedRules.map(f => f.rule.id) } }
+  }
+  const addon = includesAddon ? evaluateEligibility(ruleSet, knownFacts, 'addon') : null
+  if (addon?.verdict === 'ineligible') {
+    return { ok: false, outcome: 'rejected', reason: addon.failedRules[0].reason, params: { failedRules: addon.failedRules.map(f => f.rule.id) } }
+  }
+  const missing = [...new Set([...product.missingFacts, ...(addon?.missingFacts ?? [])])]
+  const identityNeeds = missing.filter((f) => !f.startsWith('answer:'))
+  if (identityNeeds.length > 0) {
+    return { ok: false, outcome: 'requires_identity', reason: 'eligibility_facts_missing', params: { needs: identityNeeds } }
+  }
+  if (missing.length > 0) {
+    return { ok: false, outcome: 'rejected', reason: 'eligibility_facts_missing', params: { needs: missing } }
+  }
+  return { ok: true }
+}
+
 /**
  * Three-valued: a failed rule wins over missing facts (ineligible beats
  * unknown — early decisive signal); unknown NEVER falls back to a silent

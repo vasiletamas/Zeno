@@ -60,6 +60,7 @@ export const translations: Record<Language, TranslationTable> = {
       ineligible_residency: 'Produsul este disponibil doar pentru rezidenții din România.',
       addon_age_band_unavailable: 'Opțiunea de tratament în străinătate nu este disponibilă pentru această vârstă.',
       one_facet_per_commit: 'Schimbăm pe rând: întâi pachetul, apoi nivelul, apoi opțiunea suplimentară.',
+      eligibility_facts_missing: 'Mai avem nevoie de câteva date pentru a verifica eligibilitatea (de exemplu vârsta).',
     },
     // Hero section
     hero_headline: 'Dacă mâine primești un diagnostic grav, ai fi pregătit?',
@@ -203,6 +204,7 @@ export const translations: Record<Language, TranslationTable> = {
       ineligible_residency: 'The product is only available to residents of Romania.',
       addon_age_band_unavailable: 'The treatment-abroad option is not available for this age.',
       one_facet_per_commit: 'One change at a time: first the package, then the level, then the add-on.',
+      eligibility_facts_missing: 'A few more details are needed to check eligibility (for example your age).',
     },
     // Hero section
     hero_headline:

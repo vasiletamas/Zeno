@@ -1,3 +1,5 @@
+import type { EligibilityRuleSet } from './eligibility'
+
 export const PHASES = ['DISCOVERY', 'APPLICATION', 'QUOTE', 'PAYMENT', 'POLICY'] as const
 export type Phase = (typeof PHASES)[number]
 export const APP_SUBPHASES = ['DNT', 'QUESTIONNAIRE', 'QUOTE_GENERATION'] as const
@@ -8,7 +10,7 @@ export const COMMIT_OUTCOMES = ['applied', 'rejected', 'referred', 'pending', 'u
 export type CommitOutcome = (typeof COMMIT_OUTCOMES)[number]
 export const COMMIT_EFFECTS = ['advance_phase', 're_rating', 'cascade_invalidate', 'cascade_expand', 'questions_removed', 'eligibility_recheck', 'terminal'] as const
 export type CommitEffect = (typeof COMMIT_EFFECTS)[number]
-export const REASON_CODES = ['no_product_in_focus', 'no_open_application', 'application_already_open', 'application_paused', 'no_candidate_product', 'invalid_level_for_tier', 'illegal_status_transition', 'with_underwriter', 'requires_consent', 'gdpr_processing_withdrawn', 'dnt_not_signed', 'dnt_incomplete', 'dnt_expired', 'dnt_session_already_active', 'dnt_session_incomplete', 'no_active_dnt_session', 'questionnaire_incomplete', 'selection_incomplete', 'quote_already_issued', 'no_issued_quote', 'quote_expired', 'quote_already_accepted', 'requires_confirmation', 'requires_identity', 'requires_disclosures', 'already_applied', 'stale_confirm_token', 'invalid_args', 'handler_rejected', 'temporarily_unavailable', 'degraded_mode', 'no_policy', 'payment_not_pending', 'actor_not_permitted', 'work_item_not_found', 'work_item_not_open', 'permission_denied', 'not_exposed', 'validity_dependency_changed', 'removed_by_branch', 'addon_ineligible_medical_history', 'ineligible_age_minimum', 'ineligible_age_maximum', 'ineligible_residency', 'addon_age_band_unavailable', 'one_facet_per_commit'] as const
+export const REASON_CODES = ['no_product_in_focus', 'no_open_application', 'application_already_open', 'application_paused', 'no_candidate_product', 'invalid_level_for_tier', 'illegal_status_transition', 'with_underwriter', 'requires_consent', 'gdpr_processing_withdrawn', 'dnt_not_signed', 'dnt_incomplete', 'dnt_expired', 'dnt_session_already_active', 'dnt_session_incomplete', 'no_active_dnt_session', 'questionnaire_incomplete', 'selection_incomplete', 'quote_already_issued', 'no_issued_quote', 'quote_expired', 'quote_already_accepted', 'requires_confirmation', 'requires_identity', 'requires_disclosures', 'already_applied', 'stale_confirm_token', 'invalid_args', 'handler_rejected', 'temporarily_unavailable', 'degraded_mode', 'no_policy', 'payment_not_pending', 'actor_not_permitted', 'work_item_not_found', 'work_item_not_open', 'permission_denied', 'not_exposed', 'validity_dependency_changed', 'removed_by_branch', 'addon_ineligible_medical_history', 'ineligible_age_minimum', 'ineligible_age_maximum', 'ineligible_residency', 'addon_age_band_unavailable', 'one_facet_per_commit', 'eligibility_facts_missing'] as const
 export type ReasonCode = (typeof REASON_CODES)[number]
 
 export type CommitActor = 'agent' | 'gui' | 'system' | 'operator'
@@ -17,7 +19,7 @@ export type Provenance = 'declared' | 'verified' | 'conflict'
 export interface DomainSnapshot {
   conversationId: string
   customerId: string
-  product: { id: string; code: string; insuranceType: string } | null // committed > candidate
+  product: { id: string; code: string; insuranceType: string; eligibilityRules?: EligibilityRuleSet | null } | null // committed > candidate; eligibilityRules = the PARSED typed ruleset (C2.6), null/absent when the row carries no engine-evaluable rules
   candidateProductId: string | null
   identity: { tier: IdentityTier; fields: Record<string, { provenance: Provenance } | undefined>; verifiedChannels: ('email' | 'sms')[]; pendingChallenge: { channel: 'email' | 'sms' } | null } // tier DERIVED by the loader via identity-rules (B3.2), never stored; pendingChallenge = live unconsumed VerificationChallenge (B3.5 exposure fact)
   consents: { gdprProcessing: boolean; aiDisclosure: boolean; marketing: boolean; gdprWithdrawn: boolean; hasAnyEvents: boolean } // derived from the ConsentEvent ledger (B1); gdprWithdrawn = latest gdpr event is an explicit withdrawal
@@ -42,7 +44,12 @@ export interface DomainSnapshot {
   acceptedQuote: { id: string; acceptedAt: string | null } | null
   schedule: { exists: boolean; settled: boolean; nextDueAt: string | null; lastPaymentStatus: string | null } // Block D re-points; loader stubs exists:false
   policy: { id: string; status: string } | null
-  eligibility: { verdict: 'eligible' | 'ineligible' | 'unknown' } // engine lands per contradiction #9 (other block)
+  /**
+   * C2.6: identity-class eligibility facts (age from the B0 derivation —
+   * DOB or declaredAge, NEVER a stored snapshot or a 30-fallback; residency
+   * derived from a declared/verified CNP). Answer facts ride `answers`.
+   */
+  eligibilityFacts: Record<string, string | number | boolean>
   suitability: { verdict: 'suitable' | 'conditionally_suitable' | 'unsuitable' | 'unknown' } // M7 (other block)
   /**
    * B3.7 (#1 productDocuments): per-commit document requirements from
@@ -74,7 +81,8 @@ export interface DerivedStateV3 {
   quote: DomainSnapshot['quote']
   schedule: DomainSnapshot['schedule']
   policy: DomainSnapshot['policy']
-  eligibility: DomainSnapshot['eligibility']
+  /** C2.6: the discovery verdict — DERIVED per turn from the product rules (subject 'product'), never stored. */
+  eligibility: { verdict: 'eligible' | 'ineligible' | 'unknown'; missingFacts: string[]; failedReasons: string[] }
   suitability: DomainSnapshot['suitability']
   openItems: DomainSnapshot['openItems']
   /**
