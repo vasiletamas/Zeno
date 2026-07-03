@@ -293,6 +293,7 @@ export function RichContent({
           paymentId={p.paymentId as string}
           policyDescription={p.policyDescription as string}
           redirectUrl={p.redirectUrl as string | null | undefined}
+          mode={(p.mode as 'started' | 'resumed' | 'retried' | undefined) ?? 'started'}
           onPaymentComplete={(paymentId) =>
             onAction({
               type: 'payment_complete',

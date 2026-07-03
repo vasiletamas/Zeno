@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import type { Language } from '@/lib/i18n/translations'
+import { t, type Language } from '@/lib/i18n/translations'
 
 /* ── Stripe imports (loaded dynamically) ─────────────── */
 
@@ -103,6 +103,9 @@ interface PaymentCardProps {
   paymentId: string
   policyDescription: string
   redirectUrl?: string | null
+  /** D3.5 (M4): engine-determined session mode — keys the card's action
+   *  label (payment_mode_* translations); codes only, localized here (M6). */
+  mode?: 'started' | 'resumed' | 'retried'
   onPaymentComplete: (paymentId: string) => void
   language: Language
   isAnswered: boolean
@@ -237,6 +240,7 @@ export function PaymentCard({
   paymentId,
   policyDescription,
   redirectUrl,
+  mode = 'started',
   onPaymentComplete,
   language,
   isAnswered,
@@ -244,6 +248,9 @@ export function PaymentCard({
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const c = COPY[language]
+  // D3.5 (M4/M6): the engine-determined session mode keys the card headline —
+  // the engine emits codes only; localization lives here.
+  const modeLabel = t(`payment_mode_${mode}`, language)
 
   const formattedAmount = amount.toLocaleString('ro-RO', {
     minimumFractionDigits: 0,
@@ -304,7 +311,7 @@ export function PaymentCard({
       </div>
       <div className="flex justify-between items-center">
         <span className="text-[14px]" style={{ color: '#8A8680' }}>
-          {c.premiumLabel}
+          {c.premiumLabel} · {modeLabel}
         </span>
         <span className="text-[20px] font-semibold" style={{ color: FOREST }}>
           {formattedAmount} {currency}

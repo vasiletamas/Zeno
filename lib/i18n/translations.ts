@@ -128,6 +128,9 @@ export const translations: Record<Language, TranslationTable> = {
     bd_result_answered: 'Raspuns inregistrat',
 
     // B2: Policy issued card
+    payment_mode_started: 'Plătește acum',
+    payment_mode_resumed: 'Continuă plata începută',
+    payment_mode_retried: 'Reîncearcă plata',
     policy_congratulations: 'Felicitari!',
     policy_activating: 'Polita ta se activeaza.',
     policy_total_coverage: 'Acoperire totala',
@@ -282,6 +285,9 @@ export const translations: Record<Language, TranslationTable> = {
     bd_result_answered: 'Answer recorded',
 
     // B2: Policy issued card
+    payment_mode_started: 'Pay now',
+    payment_mode_resumed: 'Resume your payment',
+    payment_mode_retried: 'Retry the payment',
     policy_congratulations: 'Congratulations!',
     policy_activating: 'Your policy is being activated.',
     policy_total_coverage: 'Total coverage',

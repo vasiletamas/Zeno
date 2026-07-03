@@ -99,6 +99,15 @@ export function adaptAction(action: UIAction): ToolCall | null {
         arguments: action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {},
       }
 
+    // ── Payment (D3.5, M4): the Pay button rides the SAME commit as the
+    // agent — mode (started|resumed|retried) is engine OUTPUT, never input ──
+    case 'pay_now':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'ensure_payment_session',
+        arguments: {},
+      }
+
     // ── Identity verification (B3.ADD-2) ──
     case 'otp_submit':
       return {
