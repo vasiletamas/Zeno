@@ -8,6 +8,8 @@ import { calculateQuote } from '@/lib/engines/quote-engine'
 import type { QuoteInput } from '@/lib/engines/quote-engine'
 import { decideQuoteIssue } from '@/lib/engines/quote-decision'
 import { canQuoteTransition, effectiveQuoteStatus, type QuoteStatusV3 } from '@/lib/engines/quote-lifecycle'
+import { disclosuresRequired, type DisclosureRef } from '@/lib/engines/disclosures'
+import { getProductDisclosureDocuments } from '@/lib/documents/registry'
 import { evaluateEligibility } from '@/lib/engines/eligibility'
 import { deriveSuitability } from '@/lib/engines/derive-and-expose'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
@@ -298,6 +300,15 @@ export const getQuoteInfo: ToolHandler = async (args, context) => {
     const coverages = quote.coverages as Record<string, unknown>
     const addonsSelected = quote.addonsSelected as Record<string, unknown> | null
 
+    // D2.3 (T7.D2): the disclosure gate — which current documents still lack
+    // an ack bound to their exact (kind, version, language) identity
+    const disclosureDocs = await getProductDisclosureDocuments(quote.productId, context.language ?? 'ro', context.db)
+    const ackRows = await context.db.disclosureAck.findMany({ where: { quoteId: quote.id } })
+    const disclosures_required = disclosuresRequired(
+      disclosureDocs.map((d) => ({ kind: d.kind as DisclosureRef['kind'], version: d.version, language: d.language })),
+      ackRows.map((a) => ({ kind: a.kind as DisclosureRef['kind'], version: a.version, language: a.language })),
+    )
+
     return {
       success: true,
       data: {
@@ -313,6 +324,8 @@ export const getQuoteInfo: ToolHandler = async (args, context) => {
         coverages,
         addonsSelected,
         payment_options,
+        disclosures_required,
+        documents: disclosureDocs.map((d) => ({ kind: d.kind, version: d.version, language: d.language, url: `/api/documents/${d.id}` })),
       },
       message: `Quote info: ${quote.premiumAnnual} RON/year. Status: ${status}.`,
     }
@@ -441,6 +454,59 @@ export const acceptQuote: ToolHandler = async (args, context) => {
           totalCoverage,
         } as unknown as Record<string, unknown>,
       },
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
+
+// ─────────────────────────────────────────────
+// acknowledge_disclosures (D2.3, T7.D2)
+// ─────────────────────────────────────────────
+
+export const acknowledgeDisclosures: ToolHandler = async (_args, context) => {
+  try {
+    const application = await loadActiveApplication(context)
+    if (!application) {
+      return { success: false, error: 'no_open_application: no application found.' }
+    }
+    const quote = await context.db.quote.findFirst({
+      where: { applicationId: application.id, status: 'ISSUED' },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!quote) {
+      return { success: false, error: 'no_issued_quote: there is no issued quote to acknowledge disclosures for.' }
+    }
+    const language = context.language ?? 'ro'
+    const docs = await getProductDisclosureDocuments(quote.productId, language, context.db)
+    const acks = await context.db.disclosureAck.findMany({ where: { quoteId: quote.id } })
+    // one row per still-missing document, inside the gateway tx; duplicates
+    // are answered by the ledger replay (identical args on the same quote)
+    // plus the @@unique([quoteId, kind, version, language]) belt
+    const missing = disclosuresRequired(
+      docs.map((d) => ({ kind: d.kind as DisclosureRef['kind'], version: d.version, language: d.language, documentId: d.id })),
+      acks.map((a) => ({ kind: a.kind as DisclosureRef['kind'], version: a.version, language: a.language })),
+    )
+    for (const doc of missing) {
+      await context.db.disclosureAck.create({
+        data: {
+          quoteId: quote.id,
+          customerId: quote.customerId,
+          documentId: doc.documentId,
+          kind: doc.kind,
+          version: doc.version,
+          language: doc.language,
+          actor: String(context.actor ?? 'agent'),
+          sourceCommitId: context.commitId ?? null,
+        },
+      })
+    }
+    return {
+      success: true,
+      data: { acknowledged: missing.map(({ kind, version, language: lang }) => ({ kind, version, language: lang })) },
+      message: missing.length > 0
+        ? `Disclosure documents acknowledged: ${missing.map((m) => `${m.kind} v${m.version}`).join(', ')}.`
+        : 'All disclosure documents were already acknowledged.',
     }
   } catch (error) {
     return { success: false, error: String(error) }

@@ -20,7 +20,7 @@ import { getDntState, getDntQuestions, getDntNextQuestion, openDntSession, write
 import { setApplication, getNextQuestionInfo, writeQuestionAnswer, modifyAnswer, resumeApplication, cancelApplication, getLastApplicationInfo } from './handlers/application-handlers'
 import { selectCoverage } from './handlers/select-coverage-handlers'
 import { acknowledgeSuitabilityWarning } from './handlers/suitability-handlers'
-import { generateQuote, getQuoteInfo, acceptQuote, cancelQuote } from './handlers/quote-handlers'
+import { generateQuote, getQuoteInfo, acceptQuote, cancelQuote, acknowledgeDisclosures } from './handlers/quote-handlers'
 import { compareProducts } from './handlers/product-handlers'
 import { previewProductRequirements } from './handlers/preview-handlers'
 import { getStateHandler } from './handlers/state-handlers'
@@ -885,6 +885,23 @@ registerTool('get_quote_info', {
   allowedRoles: ALL_ROLES,
   kind: 'read',
 }, getQuoteInfo)
+
+registerTool('acknowledge_disclosures', {
+  description:
+    'Record the customer\'s acknowledgement of the pre-contractual disclosure documents (IPID, terms & conditions) for the issued quote. ' +
+    'Use ONLY after presenting the documents (get_quote_info lists them with download links). Required before the quote can be accepted. Takes no arguments.',
+  parameters: {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: true,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+}, acknowledgeDisclosures)
 
 registerTool('cancel_quote', {
   description:

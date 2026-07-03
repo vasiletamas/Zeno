@@ -36,9 +36,9 @@ export async function createDocument(input: {
   })
 }
 
-export async function getProductDisclosureDocuments(productId: string, language: string) {
+export async function getProductDisclosureDocuments(productId: string, language: string, db: Db = prisma) {
   // latest version per kind for the product's static disclosure docs
-  const docs = await prisma.document.findMany({ where: { productId, language, kind: { in: ['IPID', 'TERMS'] } }, orderBy: { version: 'desc' } })
+  const docs = await db.document.findMany({ where: { productId, language, kind: { in: ['IPID', 'TERMS'] } }, orderBy: { version: 'desc' } })
   const latest = new Map<string, typeof docs[number]>()
   for (const d of docs) if (!latest.has(d.kind)) latest.set(d.kind, d)
   return [...latest.values()]
