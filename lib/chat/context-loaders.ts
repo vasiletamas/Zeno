@@ -356,6 +356,15 @@ export function flushCatalogOverviewCache(): void {
 }
 
 /**
+ * E1.3 (erratum 6): publish must invalidate ALL product-content caches —
+ * publishProductContent calls this so a compliance retraction never keeps
+ * serving retired claims from the prompt-side cache until TTL expiry.
+ */
+export function flushProductContextCache(): void {
+  productContextCache.clear()
+}
+
+/**
  * Load coaching briefing section from Product.defaultPlaybook (the
  * per-step playbook source died with the machine, A5.3).
  */
