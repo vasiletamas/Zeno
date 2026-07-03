@@ -126,7 +126,12 @@ Notes: `accept_quote` is the **identity hard gate** — it requires a **verified
 
 ---
 
-## @payment  (Stripe owns card entry; Zeno monitors and re-engages — never touches credentials)
+## @payment  (the payment PROVIDER owns card entry; Zeno monitors and re-engages — never touches credentials)
+
+<!-- F3 fold-back, critic note #10: "Stripe" below is shorthand for the
+     configured provider — the implementation ships three (mock, PayU,
+     Stripe) selected via PAYMENT_PROVIDER; the contract is provider-
+     agnostic: card entry is ALWAYS the provider UI's, never Zeno's. -->
 
 | Tool | Type | Inputs | Returns | Consequences | Exposed when |
 |---|---|---|---|---|---|
