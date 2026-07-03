@@ -6,6 +6,7 @@ import { loadDependencyGraph } from '@/lib/engines/dependency-graph-loader'
 import { getActiveAnswers } from '@/lib/engines/answer-store'
 import { parseEligibilityRuleSet, type EligibilityRuleSet } from '@/lib/engines/eligibility'
 import { parseSuitabilityRuleSet, type SuitabilityRuleSet } from '@/lib/engines/suitability'
+import { isExpired, type QuoteStatusV3 } from '@/lib/engines/quote-lifecycle'
 import { getOpenCircuitTools } from '@/lib/tools/circuit-state'
 import { deriveConsents, type ConsentEventLike } from '@/lib/customer/consent'
 import { getIdentityFacts, getAge } from '@/lib/customer/profile-service'
@@ -176,7 +177,8 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     },
     application: appState,
     resumableApplication: resumable ? { id: resumable.id, status: resumable.status as 'OPEN' | 'PAUSED' | 'REFERRED' } : null,
-    quote: issued ? { id: issued.id, status: issued.status, premiumAnnual: issued.premiumAnnual, validUntil: issued.validUntil.toISOString(), expired: issued.validUntil.getTime() <= Date.now() } : null,
+    // T7.D5: expiry via the ONE pure predicate — never an inline comparison
+    quote: issued ? { id: issued.id, status: issued.status, premiumAnnual: issued.premiumAnnual, validUntil: issued.validUntil.toISOString(), expired: isExpired({ status: issued.status as QuoteStatusV3, validUntil: issued.validUntil }, new Date()) } : null,
     acceptedQuote: accepted ? { id: accepted.id, acceptedAt: accepted.updatedAt.toISOString() } : null,
     schedule: { exists: false, settled: false, nextDueAt: null, lastPaymentStatus: null }, // Block D (PaymentSchedule) re-points
     policy: policy ? { id: policy.id, status: policy.status } : null,
