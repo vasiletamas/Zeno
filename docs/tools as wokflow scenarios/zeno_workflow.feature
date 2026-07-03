@@ -159,13 +159,13 @@ Feature: DNT - needs analysis, session, and consent gate
 
   # ---- state & resume -------------------------------------------------------
 
-  @id:dnt/valid-dnt-lets-questionnaire-begin @engine @backlog
+  @id:dnt/valid-dnt-lets-questionnaire-begin @engine
   Scenario: A valid DNT covering the product type lets the questionnaire begin
     Given get_dnt_state reports a valid DNT covering the application's product type (home, car, life-simple, or life-with-investment)
     Then sign_dnt and open_dnt_session are not offered
     And the underwriting questionnaire becomes available
 
-  @id:dnt/active-session-resumed-not-restarted @engine @backlog
+  @id:dnt/active-session-resumed-not-restarted @engine
   Scenario: An active DNT session is resumed, not restarted
     Given get_dnt_state reports session_active true with a session id
     Then Zeno continues that session via get_dnt_next_question
@@ -173,7 +173,7 @@ Feature: DNT - needs analysis, session, and consent gate
 
   # ---- starting a new DNT ---------------------------------------------------
 
-  @id:dnt/no-valid-dnt-starts-new-session @engine @backlog
+  @id:dnt/no-valid-dnt-starts-new-session @engine
   Scenario: No valid DNT and no active session starts a new DNT session
     Given get_dnt_state reports no valid DNT and no active session
     Then the underwriting questionnaire is blocked with reason "requires_consent"
@@ -181,7 +181,7 @@ Feature: DNT - needs analysis, session, and consent gate
     Then a new-type session is created, populated with the DNT questions
     And Zeno proceeds to answer them
 
-  @id:dnt/start-refuses-second-active-session @engine @backlog
+  @id:dnt/start-refuses-second-active-session @engine
   Scenario: open_dnt_session refuses to create a second active session
     Given an active DNT session already exists
     When open_dnt_session is called
@@ -198,13 +198,13 @@ Feature: DNT - needs analysis, session, and consent gate
     When the customer answers
     Then write_dnt_answer records it and returns the next question
 
-  @id:dnt/last-answer-returns-finish-signal @engine @backlog
+  @id:dnt/last-answer-returns-finish-signal @engine
   Scenario: The last DNT answer returns a finish signal
     Given the final DNT question is answered
     Then write_dnt_answer returns a finish signal
     And sign_dnt becomes available
 
-  @id:dnt/preview-form-without-session @engine @backlog
+  @id:dnt/preview-form-without-session @engine
   Scenario: Previewing the full DNT form without starting a session
     When the customer asks what the DNT will ask for
     Then Zeno uses get_dnt_questions to list the questions
@@ -255,14 +255,14 @@ Feature: DNT - needs analysis, session, and consent gate
     Then it returns an error
     And Zeno finishes or cancels the new session first
 
-  @id:dnt/dnt-not-covering-product-triggers-fresh-session @engine @backlog
+  @id:dnt/dnt-not-covering-product-triggers-fresh-session @engine
   Scenario: A DNT not covering the product type triggers a fresh session
     Given get_dnt_state reports a DNT that does not cover the application's product type
     Then open_dnt_session is offered for the current product type
 
   # ---- withdrawal -----------------------------------------------------------
 
-  @id:dnt/consent-withdrawn-halts-processing @engine @backlog
+  @id:dnt/consent-withdrawn-halts-processing @engine
   Scenario: Consent withdrawn mid-flow halts processing
     Given consent was previously given
     When the customer withdraws consent
@@ -302,7 +302,7 @@ Feature: Underwriting questionnaire
     And Zeno asks again rather than recording it
 
   # Extend this table as the consequence rules grow.
-  @id:questionnaire/modify-answer-consequence @engine @backlog
+  @id:questionnaire/modify-answer-consequence @engine
   Scenario Outline: Modifying an earlier answer carries its consequence
     Given the application is incomplete
     When the customer changes the answer to "<question>"
@@ -356,7 +356,7 @@ Feature: Quote generation (deterministic engine)
     And the phase advances to "quote"
 
   # Extend with each real rejection/refer reason.
-  @id:quote_generation/can-reject-or-refer-with-reason @engine @backlog
+  @id:quote_generation/can-reject-or-refer-with-reason @engine
   Scenario Outline: Generation can reject or refer with a reason
     When generate_quote runs
     Then it returns "<outcome>" with reason "<reason>"
@@ -384,7 +384,7 @@ Feature: Quote review and acceptance
     Given Zeno is in the "quote" phase with an issued quote
     And get_quote_info provides status, validity, premium, coverage and payment_options
 
-  @id:quote/disclosures-precede-acceptance @engine @backlog
+  @id:quote/disclosures-precede-acceptance @engine
   Scenario: Mandatory disclosures precede acceptance
     Given the IDD/IPID disclosures are not yet acknowledged
     Then accept_quote is blocked with reason "requires_disclosures"
@@ -398,7 +398,7 @@ Feature: Quote review and acceptance
     Then accept_quote is called with the chosen option
     And the engine returns "advance_phase" to "payment"
 
-  @id:quote/expired-quote-cannot-be-accepted @engine @backlog
+  @id:quote/expired-quote-cannot-be-accepted @engine
   Scenario: An expired quote cannot be accepted
     Given the quote validity has passed
     When the customer tries to accept
