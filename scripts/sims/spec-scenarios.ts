@@ -9,6 +9,9 @@ export interface SpecSimScenario {
   answerPolicy: 'valid' | 'refuse-consent' // pickAnswer strategy after convergence
   maxTurns: number
   asserts: string[]                        // names of assertion-fn checks run on the export
+  /** F5.5: run the world hooks (email click, GUI doc upload, provider
+   * settlement) between turns and the discovery->policy DB checks after. */
+  fullFunnel?: boolean
 }
 
 export const SPEC_SIM_SCENARIOS: SpecSimScenario[] = [
@@ -22,8 +25,9 @@ export const SPEC_SIM_SCENARIOS: SpecSimScenario[] = [
       'da, hai sa facem cererea',
     ],
     answerPolicy: 'valid',
-    maxTurns: 60,
+    maxTurns: 100,
     asserts: ['noNarrationViolations', 'noPhaseRegression', 'noPremiumBeforeQuote', 'dntOrder', 'noCardData'],
+    fullFunnel: true,
   },
   {
     key: 'dnt-refusal',

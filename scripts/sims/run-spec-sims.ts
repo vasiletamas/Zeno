@@ -74,6 +74,10 @@ function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy']): strin
   if (/ocupa|profesi|lucrezi/.test(m)) return 'sunt angajat cu carte de munca (employee)'
   if (/copii|dependen/.test(m)) return '0'
   if (/educa|studii/.test(m)) return 'studii universitare (university)'
+  if (/email/.test(m)) return 'ion.sim@example.com'
+  if (/\bcod\b|verificare|verificat/.test(m)) return 'am dat click pe linkul din email'
+  if (/document|buletin|carte de identitate/.test(m)) return 'am incarcat buletinul in aplicatie'
+  if (/frecven|plat[ăa] anual|trimestrial/.test(m)) return 'anual'
   return 'da'
 }
 
@@ -97,7 +101,9 @@ async function lastAssistant(conversationId: string): Promise<string> {
 /** Scenario-specific early-exit: the goal state has been reached. */
 async function goalReached(key: string, customerId: string, conversationId: string): Promise<boolean> {
   if (key === 'happy-path') {
-    return (await prisma.dnt.count({ where: { customerId } })) > 0
+    // F5.5: the full funnel — the trial ends when the first successful
+    // payment has issued the Policy (PENDING_SUBMISSION, contradiction #5)
+    return (await prisma.policy.count({ where: { customerId } })) > 0
   }
   if (key === 'dnt-refusal') {
     // any sign_dnt attempt has been ledgered (refused or otherwise)
@@ -107,6 +113,54 @@ async function goalReached(key: string, customerId: string, conversationId: stri
     return (await prisma.commitLedger.count({ where: { conversationId, tool: 'generate_quote', outcome: 'applied' } })) > 0
   }
   return false
+}
+
+/**
+ * F5.5 world hooks — everything around the chat the customer/world does
+ * outside Zeno's tools: the email client (clicking the B3 magic link = a
+ * consumed challenge, which IS channel verification per B3.4), the GUI
+ * document upload + operator validation, and the payment provider settling
+ * the session the agent opened. The CHAT side stays entirely agent-driven.
+ */
+async function worldHooks(customerId: string, conversationId: string): Promise<void> {
+  const challenge = await prisma.verificationChallenge.findFirst({
+    where: { customerId, consumedAt: null },
+  })
+  if (challenge) {
+    await prisma.verificationChallenge.update({ where: { id: challenge.id }, data: { consumedAt: new Date() } })
+  }
+  const accepted = await prisma.quote.count({
+    where: { status: 'ACCEPTED', application: { originConversationId: conversationId } },
+  })
+  if (accepted > 0) {
+    const doc = await prisma.customerDocument.findFirst({ where: { customerId, kind: 'id_card' } })
+    if (!doc) {
+      await prisma.customerDocument.create({
+        data: { customerId, kind: 'id_card', status: 'validated', encryptedData: Buffer.from('sim-upload'), dataIv: 'iv', dataTag: 'tag' },
+      })
+    }
+  }
+  const pending = await prisma.payment.findFirst({ where: { customerId, status: 'PENDING', providerPaymentId: { not: null } } })
+  if (pending?.providerPaymentId) {
+    const { settlePaymentEvent } = await import('@/lib/payments/settlement')
+    await settlePaymentEvent({ provider: 'MOCK', eventId: `sim_${pending.providerPaymentId}`, event: 'payment_succeeded', providerPaymentId: pending.providerPaymentId })
+  }
+}
+
+/** F5.5 step 1 DB checks — evidence, not narration. */
+async function fullFunnelDbChecks(customerId: string, conversationId: string): Promise<string[]> {
+  const failures: string[] = []
+  const app = await prisma.application.findFirst({ where: { originConversationId: conversationId } })
+  if (app?.status !== 'COMPLETED') failures.push(`application status ${app?.status ?? 'missing'} != COMPLETED`)
+  const quote = app ? await prisma.quote.findFirst({ where: { applicationId: app.id } }) : null
+  if (quote?.status !== 'ACCEPTED') failures.push(`quote status ${quote?.status ?? 'missing'} != ACCEPTED`)
+  const schedule = quote ? await prisma.paymentSchedule.findFirst({ where: { quoteId: quote.id }, include: { installments: { orderBy: { sequence: 'asc' } } } }) : null
+  if (schedule?.installments[0]?.status !== 'PAID') failures.push(`first installment ${schedule?.installments[0]?.status ?? 'missing'} != PAID`)
+  const policy = await prisma.policy.findFirst({ where: { customerId } })
+  if (policy?.status !== 'PENDING_SUBMISSION') failures.push(`policy ${policy?.status ?? 'missing'} != PENDING_SUBMISSION`)
+  const acceptRow = await prisma.commitLedger.findFirst({ where: { conversationId, tool: 'accept_quote', outcome: 'applied' } })
+  if (!acceptRow?.effects.includes('advance_phase')) failures.push('accept_quote ledger row missing advance_phase effect')
+  return failures
 }
 
 async function runTrial(sc: SpecSimScenario, trial: number): Promise<{ pass: boolean; export: ConversationExport | null; failures: string[] }> {
@@ -126,8 +180,10 @@ async function runTrial(sc: SpecSimScenario, trial: number): Promise<{ pass: boo
 
   for (const msg of sc.opening) await send(msg)
   while (turns < sc.maxTurns && !(await goalReached(sc.key, customer.id, conv.id))) {
+    if (sc.fullFunnel) await worldHooks(customer.id, conv.id)
     await send(pickAnswer(await lastAssistant(conv.id), sc.answerPolicy))
   }
+  if (sc.fullFunnel) await worldHooks(customer.id, conv.id)
   if (sc.key === 'quote-decline' && (await goalReached(sc.key, customer.id, conv.id))) {
     await send('nu, mulțumesc, nu vreau să accept oferta acum')
   }
@@ -142,6 +198,7 @@ async function runTrial(sc: SpecSimScenario, trial: number): Promise<{ pass: boo
   if (!bundle) return { pass: false, export: null, failures: ['export failed to load'] }
 
   const failures: string[] = []
+  if (sc.fullFunnel) failures.push(...await fullFunnelDbChecks(customer.id, conv.id))
   for (const name of sc.asserts) {
     const fn = ASSERTS[name]
     if (!fn) { failures.push(`unknown assert: ${name}`); continue }
