@@ -3,6 +3,8 @@ import {
   turnState,
   assertEveryCommitHasLedgerRow,
   assertNoBlockedActionExecuted,
+  toolCallsByTurn, assertToolCalled, assertToolNeverCalled, assertToolOrder,
+  phaseTimeline, assertNoPhaseRegression, assertNoNarrationViolations, assertNoPremiumBeforeQuote,
 } from '@/lib/testing/conversation-assertions'
 import type { ConversationExport, CommitLedgerExportRow } from '@/lib/debug/conversation-export'
 import type { DebugTurn } from '@/lib/debug/reducer'
@@ -100,6 +102,41 @@ describe('assertEveryCommitHasLedgerRow (F2.5, erratum 2 — join via commitLedg
       toolCalls: [{ round: 0, toolCallId: '0-0', name: 'sign_dnt', args: {}, partition: 'writing', result: { success: true, durationMs: 1, cached: false } }],
     })
     expect(() => assertEveryCommitHasLedgerRow(exp([t], [ledgerRow()]))).not.toThrow()
+  })
+})
+
+const call = (name: string) => ({ round: 0, toolCallId: name, name, args: {}, partition: 'writing' as const, result: { success: true, durationMs: 1, cached: false } })
+const gateTurn = (i: number, phase: string, quote: unknown = null) =>
+  turn(i, { gate: { skipped: false, durationMs: 0, derivedState: { phase, quote } as never } })
+
+describe('conversation assertions (F1.8 — agent-behavioral layer)', () => {
+  it('tool sequence asserts', () => {
+    const e = exp([turn(0, { toolCalls: [call('open_dnt_session')] }), turn(1, { toolCalls: [call('write_dnt_answer')] })])
+    expect(toolCallsByTurn(e)).toEqual([['open_dnt_session'], ['write_dnt_answer']])
+    expect(() => assertToolCalled(e, 'open_dnt_session')).not.toThrow()
+    expect(() => assertToolNeverCalled(e, 'sign_dnt')).not.toThrow()
+    expect(() => assertToolOrder(e, ['open_dnt_session', 'write_dnt_answer'])).not.toThrow()
+    expect(() => assertToolOrder(e, ['write_dnt_answer', 'open_dnt_session'])).toThrow(/order/)
+  })
+  it('phase timeline + regression', () => {
+    const e = exp([gateTurn(0, 'DISCOVERY'), gateTurn(1, 'APPLICATION')])
+    expect(phaseTimeline(e)).toEqual(['DISCOVERY', 'APPLICATION'])
+    expect(() => assertNoPhaseRegression(e)).not.toThrow()
+    const bad = exp([gateTurn(0, 'QUOTE'), gateTurn(1, 'DISCOVERY')])
+    expect(() => assertNoPhaseRegression(bad)).toThrow(/regression/)
+  })
+  it('narration-leak scan reads stored detector verdicts', () => {
+    const bad = exp([turn(0, { toolNarration: { violations: [{ category: 'unchecked', matchedPhrase: 'am salvat' }] } as never })])
+    expect(() => assertNoNarrationViolations(bad)).toThrow(/narration/)
+  })
+  it('premium-claim scan flags premium talk before any quote in state', () => {
+    const e = exp([gateTurn(0, 'DISCOVERY')])
+    e.messages = [{ id: 'm1', role: 'user', content: 'salut', toolCalls: null, toolResults: null, createdAt: 'x' },
+      { id: 'm2', role: 'assistant', content: 'Prima ta lunară este 84 lei.', toolCalls: null, toolResults: null, createdAt: 'x' }]
+    expect(() => assertNoPremiumBeforeQuote(e)).toThrow(/premium/)
+    const ok = exp([gateTurn(0, 'QUOTE', { id: 'q1' })])
+    ok.messages = e.messages
+    expect(() => assertNoPremiumBeforeQuote(ok)).not.toThrow()
   })
 })
 

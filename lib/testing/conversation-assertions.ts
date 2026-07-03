@@ -58,6 +58,59 @@ export function assertEveryCommitHasLedgerRow(e: ConversationExport): void {
   }
 }
 
+// ==============================================
+// AGENT-BEHAVIORAL ASSERTS (F1.8) — trace/transcript facts over the export
+// ==============================================
+
+const PHASE_ORDER = ['DISCOVERY', 'APPLICATION', 'QUOTE', 'PAYMENT', 'POLICY'] as const
+
+export function toolCallsByTurn(e: ConversationExport): string[][] {
+  return e.turns.map((t) => t.toolCalls.map((c) => c.name))
+}
+export function assertToolCalled(e: ConversationExport, tool: string): void {
+  if (!toolCallsByTurn(e).flat().includes(tool)) throw new Error(`expected tool ${tool} to be called`)
+}
+export function assertToolNeverCalled(e: ConversationExport, tool: string): void {
+  if (toolCallsByTurn(e).flat().includes(tool)) throw new Error(`tool ${tool} must never be called`)
+}
+export function assertToolOrder(e: ConversationExport, sequence: string[]): void {
+  const flat = toolCallsByTurn(e).flat()
+  let i = 0
+  for (const name of flat) if (name === sequence[i]) i++
+  if (i < sequence.length) throw new Error(`tool order violated: missing ${sequence[i]} (subsequence ${sequence.join(' -> ')})`)
+}
+export function phaseTimeline(e: ConversationExport): string[] {
+  return e.turns.map((t) => turnState(t)?.phase as string | undefined).filter((p): p is string => !!p)
+}
+export function assertNoPhaseRegression(e: ConversationExport, allow: string[] = []): void {
+  const tl = phaseTimeline(e)
+  for (let i = 1; i < tl.length; i++) {
+    if (PHASE_ORDER.indexOf(tl[i] as never) < PHASE_ORDER.indexOf(tl[i - 1] as never) && !allow.includes(tl[i])) {
+      throw new Error(`phase regression ${tl[i - 1]} -> ${tl[i]} at turn ${i}`)
+    }
+  }
+}
+export function assertNoNarrationViolations(e: ConversationExport): void {
+  for (const t of e.turns) {
+    const v = (t.toolNarration as { violations?: unknown[] } | undefined)?.violations ?? []
+    if (v.length > 0) throw new Error(`narration violations at messageIndex ${t.messageIndex}: ${JSON.stringify(v)}`)
+  }
+}
+const PREMIUM_RE = /\b(prim[aă]|premium|rat[aă] lunar[aă])\b[^.]{0,40}?\d/i
+export function assertNoPremiumBeforeQuote(e: ConversationExport): void {
+  const turnByIndex = new Map(e.turns.map((t) => [t.messageIndex, t]))
+  let quoteSeen = false
+  let turnIdx = -1
+  for (const m of e.messages) {
+    if (m.role === 'user') turnIdx++
+    const st = turnByIndex.get(turnIdx) ? turnState(turnByIndex.get(turnIdx)!) : null
+    if (st && (st as { quote?: unknown }).quote) quoteSeen = true
+    if (m.role === 'assistant' && !quoteSeen && PREMIUM_RE.test(m.content)) {
+      throw new Error(`premium claim before quote: "${m.content.slice(0, 80)}"`)
+    }
+  }
+}
+
 /**
  * No ledger row with outcome 'applied' may name a tool that was in that
  * turn's turn_start blocked list — the executor wall and the gateway must
