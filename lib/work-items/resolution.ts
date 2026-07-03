@@ -42,15 +42,27 @@ export async function resolveWorkItemDecision(input: {
 
     if (input.decision === 'approve') {
       const quote = await executeCommit({ tool: 'generate_quote', actor: 'system', conversationId, customerId, args: {}, toolContext: { ...toolContext, actor: 'system' } })
+      // E4.ADD-1: transactional notice on approve too — exempt from
+      // marketing consent; dedupeKey makes a replayed resolution send-once.
+      await sendCustomerNotification({
+        customerId, conversationId, kind: 'referral_approved',
+        dedupeKey: `referral_resolved:${input.workItemId}`,
+        subject: { ro: 'Cererea ta a fost aprobată', en: 'Your application was approved' },
+        html: {
+          ro: '<p>Vești bune — cererea ta a fost analizată și aprobată, iar oferta te așteaptă.</p><p><a href="{{magicLink}}">Revino în conversație</a> ca să o vezi.</p>',
+          en: '<p>Good news — your application was reviewed and approved, and your quote is ready.</p><p><a href="{{magicLink}}">Return to the conversation</a> to see it.</p>',
+        },
+      })
       return { outcome: 'applied', effects: ['re_rating' as CommitEffect], data: { workItemId: input.workItemId, quote: quote.data, quoteOutcome: quote.outcome } }
     }
 
     await sendCustomerNotification({
       customerId, conversationId, kind: 'referral_rejected',
+      dedupeKey: `referral_resolved:${input.workItemId}`,
       subject: { ro: 'Actualizare despre cererea ta', en: 'An update on your application' },
       html: {
-        ro: '<p>Cererea ta a fost analizată și nu poate continua. Te putem ajuta cu alternative în conversație.</p>',
-        en: '<p>Your application was reviewed and cannot proceed. We can help with alternatives in the conversation.</p>',
+        ro: '<p>Cererea ta a fost analizată și nu poate continua. Te putem ajuta cu alternative.</p><p><a href="{{magicLink}}">Revino în conversație</a> — îți explicăm opțiunile.</p>',
+        en: '<p>Your application was reviewed and cannot proceed. We can help with alternatives.</p><p><a href="{{magicLink}}">Return to the conversation</a> and we will walk through your options.</p>',
       },
     })
     return { outcome: 'applied', effects: ['terminal' as CommitEffect], data: { workItemId: input.workItemId } }
