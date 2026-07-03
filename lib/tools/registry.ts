@@ -33,6 +33,7 @@ import { escalateToHuman } from './handlers/utility-handlers'
 import { ensurePaymentSession, getPaymentStatus, changePaymentOption } from './handlers/payment-handlers'
 import { resolveReferral, resolveWorkItem } from './handlers/operator-handlers'
 import { markSubmitted, activatePolicy, cancelSubmission } from './handlers/policy-operator-handlers'
+import { getPolicyInfo } from './handlers/policy-handlers'
 import { startChannelVerification, confirmChannelVerification, requestDocumentUpload } from './handlers/identity-handlers'
 
 // ==============================================
@@ -1103,6 +1104,22 @@ registerTool('request_document_upload', {
 // --- Operator queue (E2.4) ---
 // Never agent-exposed: no ACTION_RULES entry; the gateway's OPERATOR_TOOLS
 // actor gate (operator|system only) replaces exposure-based legality.
+
+registerTool('get_policy_info', {
+  description:
+    'Get the customer\'s policy: engine-gated statusCode (paid_processing | submitted_to_insurer | policy_active | policy_cancelled | policy_lapsed | policy_expired — NEVER claim the policy is in force unless policy_active), ' +
+    'Allianz number, effective dates, free-look deadline, payment plan summary and documents. The single policy read.',
+  parameters: {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  kind: 'read',
+}, getPolicyInfo)
 
 registerTool('mark_submitted', {
   description: 'Operator: mark a paid policy as submitted to the insurer (PENDING_SUBMISSION → SUBMITTED).',

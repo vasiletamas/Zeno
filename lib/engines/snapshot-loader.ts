@@ -122,7 +122,13 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   // live (non-CANCELLED) application slice
   const issued = appState && application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'ISSUED' }, orderBy: { createdAt: 'desc' } }) : null
   const accepted = appState && application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'ACCEPTED' } }) : null
-  const policy = accepted ? await db.policy.findUnique({ where: { quoteId: accepted.id } }) : null
+  // D4.4 (T9.D6): the policy is CUSTOMER-scoped — it survives the sale
+  // conversation, so a returning customer's fresh conversation derives the
+  // POLICY phase and its post-sale surface.
+  const policy = await db.policy.findFirst({
+    where: { customerId: conversation.customerId, status: { in: ['PENDING_SUBMISSION', 'SUBMITTED', 'ACTIVE', 'LAPSED'] } },
+    orderBy: { createdAt: 'desc' },
+  })
   // D2.5 (T7.D2): which current disclosure docs still lack an exact-identity
   // ack — feeds the accept_quote legality predicate via the quote slice
   let quoteDisclosuresRequired: DisclosureRef[] = []

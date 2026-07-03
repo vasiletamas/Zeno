@@ -292,6 +292,7 @@ const toolSchemas: Record<string, ZodType> = {
 
   // Operator queue
   resolve_referral: resolveReferralSchema,
+  get_policy_info: z.object({}).strict(),
   mark_submitted: markSubmittedSchema,
   activate_policy: activatePolicySchema,
   cancel_submission: cancelSubmissionSchema,
