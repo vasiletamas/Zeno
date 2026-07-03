@@ -16,6 +16,7 @@ import { prisma } from '@/lib/db'
 import { calculateQuote } from '@/lib/engines/quote-engine'
 import { derivePricingExamples, type PricingExampleGrid } from '@/lib/engines/pricing-examples'
 import { getToolHandler } from '@/lib/tools/registry'
+import { seedProductContent } from '@/prisma/seeds/seed-product-content'
 import type { ToolContext } from '@/lib/tools/types'
 
 let failures = 0
@@ -29,6 +30,10 @@ function check(name: string, ok: boolean, detail?: unknown) {
 }
 
 async function main() {
+  // test runs truncate the dev-DB ProductContent table (resetDb owns it) —
+  // reseed idempotently, same precedent as seedDocuments in the D2 scripts
+  await seedProductContent(prisma as never)
+
   const product = await prisma.product.findUniqueOrThrow({
     where: { code: 'protect' },
     include: {

@@ -33,8 +33,8 @@ async function main() {
     check('live protect.eligibility parses under the typed schema', false, String(e))
     process.exit(1)
   }
-  check('derived bounds match the ratified business content (18..64)',
-    JSON.stringify(deriveEligibilityBounds(rules)) === JSON.stringify({ minAge: 18, maxAge: 64 }))
+  check('derived bounds match the ratified business content (18..64, residency listed)',
+    JSON.stringify(deriveEligibilityBounds(rules)) === JSON.stringify({ minAge: 18, maxAge: 64, otherRuleCodes: ['residency'] }))
 
   // leg 2: the verdict matrix
   const matrix: Array<{ age: number | undefined; product: string; addon: string }> = [
