@@ -84,11 +84,14 @@ export function adaptAction(action: UIAction): ToolCall | null {
         arguments: action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {},
       }
 
-    case 'modify_quote':
+    // D1.7 (erratum 3): the change button cancels the quote — post-quote
+    // mutation is engine-illegal; recovery is a NEW application (T13.D2).
+    // Tokenless first click → the gateway answers requires_confirmation.
+    case 'cancel_quote':
       return {
         id: `action_${Date.now()}`,
-        name: 'modify_quote',
-        arguments: {},
+        name: 'cancel_quote',
+        arguments: action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {},
       }
 
     // ── Identity verification (B3.ADD-2) ──

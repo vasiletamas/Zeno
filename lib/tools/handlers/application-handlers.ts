@@ -402,7 +402,7 @@ export const modifyAnswer: ToolHandler = async (args, context) => {
     const graph = await loadDependencyGraph(context.db, application.productId)
     const snapshot = await buildPlannerSnapshot(context.db, context.conversationId)
     if (application.status === 'COMPLETED' && snapshot.application.quoteIssued) {
-      return { success: false, error: 'quote_already_issued: modify the quote (modify_quote), not the sealed application.' }
+      return { success: false, error: 'application_frozen: the application sealed when its quote was issued — cancel the quote (cancel_quote) and open a new application to change anything.' }
     }
     if (!snapshot.questionCodes.includes(questionCode)) {
       return { success: false, error: `invalid_args: ${questionCode} is not part of this application's questionnaire.` }

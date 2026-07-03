@@ -1,7 +1,7 @@
 /**
  * Quote Handlers
  *
- * generate_quote, get_quote_info, accept_quote, cancel_quote, modify_quote
+ * generate_quote, get_quote_info, accept_quote, cancel_quote
  */
 
 import { calculateQuote } from '@/lib/engines/quote-engine'
@@ -500,44 +500,5 @@ export const cancelQuote: ToolHandler = async (_args, context) => {
   }
 }
 
-// ─────────────────────────────────────────────
-// modify_quote
-// ─────────────────────────────────────────────
-
-export const modifyQuote: ToolHandler = async (_args, context) => {
-  try {
-    // B4: selection lives on the Application (select_coverage is the sole
-    // writer) — modifying a quote just expires it; the customer re-selects
-    // with select_coverage and generates a fresh quote. No answers are
-    // touched and the application is not "reopened" (it stayed OPEN).
-    const application = await loadActiveApplication(context)
-    if (!application) {
-      return { success: false, error: 'No application found.' }
-    }
-
-    const quote = await context.db.quote.findUnique({
-      where: { applicationId: application.id },
-    })
-    if (!quote) {
-      return { success: false, error: 'No quote found to modify.' }
-    }
-
-    await context.db.quote.update({
-      where: { id: quote.id },
-      data: { status: 'EXPIRED' },
-    })
-
-    return {
-      success: true,
-      data: {
-        modificationStarted: true,
-        oldQuoteId: quote.id,
-        applicationId: application.id,
-      },
-      effects: ['re_rating'],
-      message: 'Quote expired. Change the coverage with select_coverage, then generate an updated quote.',
-    }
-  } catch (error) {
-    return { success: false, error: String(error) }
-  }
-}
+// modify_quote died at D1.7 (T13.D2): the quote is the immutable priced
+// artifact — the only change path is cancel_quote + a new application.

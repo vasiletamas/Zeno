@@ -199,7 +199,7 @@ export function RichContent({
             // gateway answer requires_confirmation → confirm_required card.
             onAction({ type: 'accept_quote', payload: {} })
           }
-          onModify={() => onAction({ type: 'modify_quote', payload: {} })}
+          onModify={() => onAction({ type: 'cancel_quote', payload: {} })}
           language={language}
           isAnswered={isAnswered}
           isLoading={isLoading}

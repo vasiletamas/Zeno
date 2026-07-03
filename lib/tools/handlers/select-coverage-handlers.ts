@@ -67,12 +67,10 @@ export const selectCoverage: ToolHandler = async (args, context) => {
       commitId: context.commitId ?? crypto.randomUUID(),
     }, plan)
 
-    // any real change under a live DRAFT quote expires it (re_rating is
-    // already in the plan's effects)
-    const draft = await context.db.quote.findFirst({ where: { applicationId: application.id, status: 'ISSUED' } })
-    if (draft) {
-      await context.db.quote.update({ where: { id: draft.id }, data: { status: 'EXPIRED' } })
-    }
+    // D1.7 (T7.D1): no quote-expiry branch — a Quote row in ANY state makes
+    // this commit engine-illegal (application_frozen) at legality, so the
+    // handler never runs post-quote; the change path is cancel_quote + a new
+    // application, never an in-place re-rate.
 
     const post = await context.db.application.findUniqueOrThrow({ where: { id: application.id } })
     // sequential: context.db is the gateway's single-connection tx client
@@ -93,8 +91,7 @@ export const selectCoverage: ToolHandler = async (args, context) => {
       },
       message:
         `Selection updated: ${tierRow?.code ?? '—'} / ${levelRow?.code ?? '—'} / addon ${post.includesAddon ? 'on' : 'off'}.` +
-        (plan.invalidations.some((i) => i.node === 'selection:level') ? ' The level was invalidated by the tier change — choose a level for the new tier.' : '') +
-        (draft ? ' The previous quote expired — generate a fresh one.' : ''),
+        (plan.invalidations.some((i) => i.node === 'selection:level') ? ' The level was invalidated by the tier change — choose a level for the new tier.' : ''),
     }
   } catch (error) {
     return { success: false, error: String(error) }

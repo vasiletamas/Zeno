@@ -28,17 +28,19 @@ it('writes Application columns only — no Answer rows (single writer, T5.D2); o
   expect(await prisma.answer.count({ where: { applicationId: app.id } })).toBe(0)
 })
 
-it('invalid level for tier → rejected(invalid_level_for_tier); re-invocation with a DRAFT quote → re_rating + quote expired', async () => {
+it('invalid level for tier → rejected(invalid_level_for_tier); re-invocation under a quote → application_frozen, quote untouched (D1.7)', async () => {
   const { c, conv } = await openApp()
   await executeCommit({ tool: 'select_coverage', args: { tier: 'standard' }, actor: 'agent', customerId: c.id, conversationId: conv.id, toolContext: ctx(c.id, conv.id) })
   const bad = await executeCommit({ tool: 'select_coverage', args: { level: 'no_such' }, actor: 'agent', customerId: c.id, conversationId: conv.id, toolContext: ctx(c.id, conv.id) })
   expect(bad).toMatchObject({ outcome: 'rejected', reason: 'invalid_level_for_tier' })
   await executeCommit({ tool: 'select_coverage', args: { level: 'level_1' }, actor: 'agent', customerId: c.id, conversationId: conv.id, toolContext: ctx(c.id, conv.id) })
   const app = await prisma.application.findFirstOrThrow({ where: { customerId: c.id } })
+  // T7.D1: a Quote row in ANY state freezes the application — re-selection is
+  // engine-illegal; the change path is cancel_quote + a new application.
   await prisma.quote.create({ data: { applicationId: app.id, productId: app.productId, customerId: c.id, premiumAnnual: 100, premiumMonthly: 9, coverages: {}, status: 'ISSUED', validUntil: new Date(Date.now() + 86400e3) } })
   const r2 = await executeCommit({ tool: 'select_coverage', args: { level: 'level_2' }, actor: 'agent', customerId: c.id, conversationId: conv.id, toolContext: ctx(c.id, conv.id) })
-  expect(r2.effects).toContain('re_rating')
-  expect((await prisma.quote.findFirstOrThrow({ where: { applicationId: app.id } })).status).toBe('EXPIRED')
+  expect(r2).toMatchObject({ outcome: 'rejected', reason: 'application_frozen' })
+  expect((await prisma.quote.findFirstOrThrow({ where: { applicationId: app.id } })).status).toBe('ISSUED')
 })
 
 it('addon toggle carries cascade_expand / questions_removed (#4); legacy mutators are gone', async () => {

@@ -146,8 +146,6 @@ const cancelQuoteSchema = z.object({
   confirmToken: z.string().optional(),
 }).strict()
 
-const modifyQuoteSchema = z.object({}).strict()
-
 // ==============================================
 // DATA COLLECTION
 // ==============================================
@@ -252,7 +250,6 @@ const toolSchemas: Record<string, ZodType> = {
   accept_quote: acceptQuoteSchema,
   get_quote_info: getQuoteInfoSchema,
   cancel_quote: cancelQuoteSchema,
-  modify_quote: modifyQuoteSchema,
 
   // BD Eligibility
 

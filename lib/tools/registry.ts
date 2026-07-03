@@ -20,7 +20,7 @@ import { getDntState, getDntQuestions, getDntNextQuestion, openDntSession, write
 import { setApplication, getNextQuestionInfo, writeQuestionAnswer, modifyAnswer, resumeApplication, cancelApplication, getLastApplicationInfo } from './handlers/application-handlers'
 import { selectCoverage } from './handlers/select-coverage-handlers'
 import { acknowledgeSuitabilityWarning } from './handlers/suitability-handlers'
-import { generateQuote, getQuoteInfo, acceptQuote, cancelQuote, modifyQuote } from './handlers/quote-handlers'
+import { generateQuote, getQuoteInfo, acceptQuote, cancelQuote } from './handlers/quote-handlers'
 import { compareProducts } from './handlers/product-handlers'
 import { previewProductRequirements } from './handlers/preview-handlers'
 import { getStateHandler } from './handlers/state-handlers'
@@ -739,7 +739,7 @@ registerTool('select_coverage', {
     'Choose or change the coverage: pricing tier (e.g. "standard", "optim"), premium level (e.g. "level_1") or the add-on. ' +
     'THE only way to set them — they are not questionnaire questions. ONE facet per call (tier, then level, then addon): ' +
     'each change carries its own consequences (a tier change invalidates the level; the addon toggle adds/removes the medical questionnaire). ' +
-    'Re-selecting under an existing quote expires it (a fresh quote is needed).',
+    'Once a quote exists the selection is frozen — cancel the quote and open a new application to change it.',
   parameters: {
     type: 'object',
     properties: {
@@ -904,19 +904,8 @@ registerTool('cancel_quote', {
   requiresConfirmation: true,
 }, cancelQuote)
 
-registerTool('modify_quote', {
-  description: 'Expire the current quote and reopen the application for package re-selection.',
-  parameters: {
-    type: 'object',
-    properties: {},
-    additionalProperties: false,
-  },
-  executionMode: 'blocking',
-  customerVisible: false,
-  statusMessage: null,
-  allowedRoles: ALL_ROLES,
-  kind: 'commit',
-}, modifyQuote)
+// modify_quote retired at D1.7 (T13.D2): the quote is immutable once issued —
+// cancel_quote + a new application is the only change path.
 
 // check_bd_eligibility was retired in C1.ADD-2 (T13.D7): the bd rule lives
 // as ELIGIBILITY edges in the dependency graph — answering a BD question

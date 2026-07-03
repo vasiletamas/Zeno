@@ -4,6 +4,7 @@ import { checkIdentityRequirement, IDENTITY_REQUIREMENTS, type IdentityRequireme
 import { consentBlocksCommit } from './consent-rules'
 import { dntExposure, type DntFact, type ProductTypeStr } from './dnt-rules'
 import { applicationExposure, canTransition, type AppStatus } from './application-rules'
+import { mutationBlockedReason } from './frozen-application'
 import { evaluateEligibility } from './eligibility'
 import { evaluateSuitability, type SuitabilityResult } from './suitability'
 
@@ -51,11 +52,22 @@ function appExposureFromSnapshot(s: DomainSnapshot): ReturnType<typeof applicati
   })
 }
 
+/**
+ * D1.7: the snapshot's merged frozen fact (frozenAt set OR a Quote row in
+ * ANY state) feeds the pure predicate's quoteExists slot — one OR either way.
+ */
+const freezeFacts = (s: DomainSnapshot) => ({ frozenAt: null, quoteExists: s.application?.frozen ?? false })
+
 const appRule = (action: string): ActionRule => ({
   action,
   kind: 'commit',
-  exposedWhen: (s) => appExposureFromSnapshot(s).available.includes(action),
+  exposedWhen: (s) => appExposureFromSnapshot(s).available.includes(action) && mutationBlockedReason(freezeFacts(s), action) === null,
   blockedReason: (s) => {
+    // D1.7 (T7.D1): the freeze outranks lifecycle reasons — the precise
+    // recovery answer for a mutating action is application_frozen
+    // (cancel_quote + a new application), never a generic status block.
+    const frozen = s.application !== null ? mutationBlockedReason(freezeFacts(s), action) : null
+    if (frozen) return { reason: frozen }
     const b = appExposureFromSnapshot(s).blocked.find((x) => x.action === action)
     if (b) return { reason: b.reason as ReasonCode, params: b.params }
     // precise terminal answers the lifecycle rules stay silent about
@@ -73,7 +85,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.21.0' // 1.18.0: suitability documented-warning flow (C3.4) — acknowledge_suitability_warning exposed while a warn_and_allow mismatch awaits ack, generate_quote blocked suitability_warning_unacknowledged (warn) or the mismatch's own reason (hard_block); 1.19.0: freeze-at-issue (D1) — a Quote row in ANY state blocks generate_quote with application_frozen; 1.20.0: cancel_quote exposure (D1.5) — live ISSUED quote only, quote_expired/quote_already_accepted precise blocks; accept_quote answers time-expiry with quote_expired (lazy-expiry trigger); 1.21.0: get_quote_details renamed get_quote_info (D1.6)
+export const engineVersion = '1.22.0' // 1.19.0: freeze-at-issue (D1) — a Quote row in ANY state blocks generate_quote with application_frozen; 1.20.0: cancel_quote exposure (D1.5) — live ISSUED quote only, quote_expired/quote_already_accepted precise blocks; accept_quote answers time-expiry with quote_expired (lazy-expiry trigger); 1.21.0: get_quote_details renamed get_quote_info (D1.6); 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -229,7 +241,8 @@ export const ACTION_RULES: ActionRule[] = [
       s.quote !== null && s.quote.expired ? { reason: 'quote_expired', params: { quoteId: s.quote.id } }
       : s.acceptedQuote !== null ? { reason: 'quote_already_accepted' }
       : null) },
-  { action: 'modify_quote', kind: 'commit', exposedWhen: (_s, d) => d.phase === 'QUOTE' },
+  // modify_quote died at D1.7 (T13.D2): post-quote mutation is engine-illegal
+  // (application_frozen) — cancel_quote + a new application is the change path.
   { action: 'initiate_payment', kind: 'commit', exposedWhen: (s) => s.policy !== null && s.policy.status === 'PENDING_SUBMISSION' },
 ]
 
