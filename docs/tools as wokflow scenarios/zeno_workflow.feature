@@ -61,13 +61,13 @@ Feature: The agent is a client of the domain (no privileged access)
     When no committing action has returned "advance_phase"
     Then the agent does not tell the customer the phase has moved on
 
-  @id:contract/idempotent-on-double-submit @engine @backlog
+  @id:contract/idempotent-on-double-submit @engine
   Scenario: A committing action is idempotent on double-submit
     When the same commit is submitted twice for the same target
     Then the engine applies it once
     And no duplicate effect (e.g. double charge) occurs
 
-  @id:contract/concurrent-gui-and-agent-consistent @engine @backlog
+  @id:contract/concurrent-gui-and-agent-consistent @engine
   Scenario: Concurrent GUI and agent actions stay consistent
     Given a GUI button and the agent act in the same session
     When both submit operations
@@ -500,7 +500,7 @@ Feature: Regression guards derived from the failed replay
     Then Zeno advances by calling that tool
     And never loops by inventing questions to fill a missing action
 
-  @id:lifecycle/one-application-one-quote @engine @backlog
+  @id:lifecycle/one-application-one-quote @engine
   Scenario: One application yields one quote
     Given a quote has been issued for an application
     Then that application accepts no further answers or quotes
