@@ -113,9 +113,9 @@ async function main() {
   check('application terminal: CANCELLED with underwriter reason (T5.D6, erratum 2)',
     appAfter.status === 'CANCELLED' && (appAfter.flagsForReview as { underwriterReason?: string } | null)?.underwriterReason === 'sum at risk exceeded',
     JSON.stringify({ status: appAfter.status, flags: appAfter.flagsForReview }))
-  check('customer notified: notification_sent system ledger event recorded',
-    notification !== null && notification.targetRef === 'referral_rejected',
-    JSON.stringify({ found: notification !== null }))
+  check('customer notified: notification_sent system ledger event recorded (send-once dedupe key)',
+    notification !== null && notification.targetRef === `referral_resolved:${referralItem.id}`,
+    JSON.stringify({ found: notification !== null, targetRef: notification?.targetRef }))
 
   console.log(failures === 0 ? '\n==== work-items: all invariants PASS ====' : `\n==== work-items: ${failures} FAIL ====`)
   await prisma.$disconnect()
