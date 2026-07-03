@@ -39,9 +39,14 @@ describe('basic diagnostic checks', () => {
     const e = makeExport({ turns: [turn(0), turn(0)] as never })
     expect(runDiagnostics(e).some((x) => x.checkId === 'duplicate_turn_debug')).toBe(true)
   })
-  it('anomalies_reported relays persisted turn anomalies', () => {
-    const e = makeExport({ turns: [turn(0, { totals: { phases: {}, totalInputTokens: 0, totalOutputTokens: 0, cost: 0, latencyMs: 1, anomalies: [{ type: 'behavioral', severity: 'critical', message: 'briefing_action_not_exposed', metadata: {} }] } })] as never })
-    expect(runDiagnostics(e).find((x) => x.checkId === 'anomalies_reported')?.severity).toBe('error')
+  it('anomalies_reported relays persisted turn anomalies with a 1:1 severity map', () => {
+    const e = makeExport({ turns: [turn(0, { totals: { phases: {}, totalInputTokens: 0, totalOutputTokens: 0, cost: 0, latencyMs: 1, anomalies: [
+      { type: 'behavioral', severity: 'critical', message: 'briefing_action_not_exposed', metadata: {} },
+      { type: 'error_pattern', severity: 'warning', message: '3 tool failures in this turn', metadata: {} },
+      { type: 'error_pattern', severity: 'info', message: 'LLM retry detected for agent "main-chat"', metadata: {} },
+    ] } })] as never })
+    const f = runDiagnostics(e).filter((x) => x.checkId === 'anomalies_reported')
+    expect(f.map((x) => x.severity)).toEqual(['error', 'warn', 'info'])
   })
   it('a clean conversation yields zero findings and the catalog is closed over unique ids', () => {
     expect(runDiagnostics(makeExport({ turns: [turn(0)] as never }))).toEqual([])

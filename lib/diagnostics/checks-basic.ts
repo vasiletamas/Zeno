@@ -66,7 +66,15 @@ export const duplicateTurnDebug: DiagnosticCheck = {
 }
 
 export const anomaliesReported: DiagnosticCheck = {
+  // 1:1 severity map (walkthrough finding): info anomalies (e.g. the
+  // multi-round "LLM retry detected" heuristic, idempotent_replay) must not
+  // inflate into warns — the anomaly's own severity IS the verdict.
   id: 'anomalies_reported', description: 'Runtime invariant monitors fired during the turn',
   run: (e) => e.turns.flatMap((t) => ((t.totals?.anomalies ?? []) as { severity: string; message: string }[])
-    .map((a): Finding => ({ checkId: 'anomalies_reported', severity: a.severity === 'critical' ? 'error' : 'warn', turn: t.messageIndex, evidence: { anomaly: a.message } }))),
+    .map((a): Finding => ({
+      checkId: 'anomalies_reported',
+      severity: a.severity === 'critical' ? 'error' : a.severity === 'warning' ? 'warn' : 'info',
+      turn: t.messageIndex,
+      evidence: { anomaly: a.message },
+    }))),
 }
