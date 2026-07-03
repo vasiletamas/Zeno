@@ -849,14 +849,15 @@ registerTool('generate_quote', {
 }, generateQuote)
 
 registerTool('accept_quote', {
-  description: 'Accept the quote and proceed to policy issuance.',
+  description:
+    'Accept the issued quote with the customer\'s ELECTED payment frequency (two-step: the gateway returns a confirmation request first; re-call with the token and the SAME paymentOption). ' +
+    'Acceptance freezes the price into a payment schedule — the policy is issued at the first successful payment, not here. Requires acknowledged disclosures and a verified channel.',
   parameters: {
     type: 'object',
     properties: {
-      quoteId: { type: 'string', description: 'Quote ID to accept.' },
-      confirmAcceptance: { type: 'boolean', description: 'Customer confirms acceptance.' },
+      paymentOption: { type: 'string', enum: ['annual', 'semi_annual', 'quarterly'], description: 'The payment frequency the customer chose (get_quote_info lists options with amounts).' },
     },
-    required: ['confirmAcceptance'],
+    required: ['paymentOption'],
     additionalProperties: false,
   },
   executionMode: 'blocking',

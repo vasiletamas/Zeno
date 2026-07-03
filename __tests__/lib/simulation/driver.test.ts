@@ -146,7 +146,7 @@ describe('driveConversation', () => {
     mockSend.mockResolvedValueOnce({
       content: 'Polita emisa!',
       toolsCalled: [],
-      uiActions: [{ type: 'show_policy_issued', payload: {} }],
+      uiActions: [{ type: 'show_payment_success', payload: {} }],
       errors: [], done: { messageId: 'm1' }, rawEvents: [],
     })
 

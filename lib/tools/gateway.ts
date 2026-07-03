@@ -90,7 +90,10 @@ export function resolveTargetRef(tool: string, args: Record<string, unknown>, st
   if (OPERATOR_TOOLS.has(tool)) return `work_item:${String(args.workItemId ?? 'unknown')}`
   // one-shot / entity-scoped commits — stable natural key
   if (tool === 'sign_dnt') return `dnt_session:${state.dnt.activeSessionId ?? 'none'}` // B2.6: customer-scoped renewals may recur per conversation
-  if (tool === 'accept_quote' || tool === 'cancel_quote' || tool === 'acknowledge_disclosures') return `quote:${state.quote?.id ?? 'none'}`
+  // D2.5: the ref must survive the ISSUED→ACCEPTED transition — an accepted
+  // quote leaves state.quote (issued-only slice), so a same-args resubmit
+  // would otherwise hash against quote:none and miss its own replay row.
+  if (tool === 'accept_quote' || tool === 'cancel_quote' || tool === 'acknowledge_disclosures') return `quote:${state.quote?.id ?? state.acceptedQuote?.id ?? 'none'}`
   if (tool === 'generate_quote' || tool === 'set_application') return `application:${state.application?.id ?? 'none'}`
   if (tool === 'initiate_payment') return `policy:${state.policy?.id ?? 'none'}`
   return `conversation:${conversationId}`
@@ -105,7 +108,8 @@ export function resolveTargetRef(tool: string, args: Record<string, unknown>, st
  */
 const CONFIRM_ARG_INJECTION: Record<string, Record<string, unknown>> = {
   sign_dnt: { confirmSignature: true },
-  accept_quote: { confirmAcceptance: true },
+  // accept_quote left at D2.5: the narrow handler takes paymentOption as its
+  // material arg — no legacy literal-true flag remains to inject.
 }
 
 /**

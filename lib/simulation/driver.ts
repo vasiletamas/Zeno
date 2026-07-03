@@ -18,7 +18,9 @@ import type { Persona, ScriptedScenario, ScenarioStep, ConversationResult, Parse
 // CONSTANTS
 // ==============================================
 
-const TERMINAL_UI_ACTIONS = new Set(['show_payment_success', 'show_policy_issued'])
+// D2.5 (M9): show_policy_issued died at accept — the policy is issued at
+// first successful payment, so payment success IS the terminal surface.
+const TERMINAL_UI_ACTIONS = new Set(['show_payment_success'])
 const MAX_CONSECUTIVE_ERRORS = 3
 const OPENING_MESSAGE = 'Buna ziua, sunt interesat de o asigurare de viata.'
 

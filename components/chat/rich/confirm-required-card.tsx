@@ -21,22 +21,25 @@ const COPY: Record<(typeof CONFIRMABLE_TOOLS)[number], { title: { ro: string; en
   },
   accept_quote: {
     title: { ro: 'Confirmă acceptarea ofertei', en: 'Confirm quote acceptance' },
-    body: { ro: 'Accepți această ofertă? După acceptare trecem la emiterea poliței.', en: 'Accept this quote? After acceptance we proceed to policy issuance.' },
+    body: { ro: 'Accepți această ofertă? După acceptare urmează plata primei rate — polița se emite la prima plată reușită.', en: 'Accept this quote? The first installment payment follows — the policy is issued at the first successful payment.' },
     cta: { ro: 'Accept oferta', en: 'Accept quote' },
   },
 }
 
-export function buildConfirmAction(tool: string, confirmToken: string): UIAction | null {
+export function buildConfirmAction(tool: string, confirmToken: string, args: Record<string, unknown> = {}): UIAction | null {
   if (!(CONFIRMABLE_TOOLS as readonly string[]).includes(tool)) return null
   // sign_dnt: clicking the consent-labelled CTA IS the explicit grant (B1.5) —
   // the consent object is material, so it must match the original call's args.
-  if (tool === 'sign_dnt') return { type: tool, payload: { confirmToken, consent: { gdpr: true, aiDisclosure: true } } }
-  return { type: tool, payload: { confirmToken } }
+  if (tool === 'sign_dnt') return { type: tool, payload: { ...args, confirmToken, consent: { gdpr: true, aiDisclosure: true } } }
+  // D2.5: the token is bound to the material args hash — the original args
+  // (e.g. accept_quote's paymentOption) must ride the confirm round-trip.
+  return { type: tool, payload: { ...args, confirmToken } }
 }
 
 interface ConfirmRequiredCardProps {
   tool: string
   confirmToken: string
+  args?: Record<string, unknown>
   onConfirm: (action: UIAction) => void
   language: Language
   isAnswered?: boolean
@@ -46,6 +49,7 @@ interface ConfirmRequiredCardProps {
 export function ConfirmRequiredCard({
   tool,
   confirmToken,
+  args = {},
   onConfirm,
   language,
   isAnswered = false,
@@ -53,7 +57,7 @@ export function ConfirmRequiredCard({
 }: ConfirmRequiredCardProps) {
   const copy = COPY[tool as (typeof CONFIRMABLE_TOOLS)[number]]
   if (!copy) return null
-  const action = buildConfirmAction(tool, confirmToken)
+  const action = buildConfirmAction(tool, confirmToken, args)
 
   return (
     <div className="bg-linen border border-warm-border rounded-xl p-5 animate-[message-appear_300ms_ease-out]">

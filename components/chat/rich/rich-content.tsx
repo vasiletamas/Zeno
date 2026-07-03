@@ -6,7 +6,7 @@ import { QuoteCard } from './quote-card'
 import { QuestionCard } from './question-card'
 import { BdResultCard } from './bd-result-card'
 import { ConfirmRequiredCard } from './confirm-required-card'
-import { PolicyIssuedCard } from './policy-issued-card'
+import { QuoteAcceptedCard } from './quote-accepted-card'
 import { InlineDataForm } from './inline-data-form'
 import { PaymentCard } from './payment-card'
 
@@ -173,6 +173,7 @@ export function RichContent({
         <ConfirmRequiredCard
           tool={p.tool as string}
           confirmToken={p.confirmToken as string}
+          args={(p.args ?? {}) as Record<string, unknown>}
           onConfirm={(confirmAction) => onAction(confirmAction)}
           language={language}
           isAnswered={isAnswered}
@@ -197,7 +198,10 @@ export function RichContent({
           onAccept={() =>
             // No self-confirm (M4/A3.5): the tokenless first click makes the
             // gateway answer requires_confirmation → confirm_required card.
-            onAction({ type: 'accept_quote', payload: {} })
+            // D2.5: the GUI button elects the ANNUAL frequency shown on the
+            // card (paymentOption is material); other frequencies are elected
+            // through the agent, changeable via change_payment_option (D3).
+            onAction({ type: 'accept_quote', payload: { paymentOption: 'annual' } })
           }
           onModify={() => onAction({ type: 'cancel_quote', payload: {} })}
           language={language}
@@ -239,15 +243,14 @@ export function RichContent({
       )
     }
 
-    /* ── Policy issued ────────────────────────────── */
-    case 'show_policy_issued': {
+    /* ── Quote accepted (D2.5 — replaces show_policy_issued at accept:
+          the policy is issued at first successful payment, M9) ──────── */
+    case 'show_quote_accepted': {
       return (
-        <PolicyIssuedCard
-          tierName={p.tierName as LocalizedString}
-          levelName={p.levelName as LocalizedString}
-          includesAddon={p.includesAddon as boolean}
-          premiumMonthly={p.premiumMonthly as number}
-          totalCoverage={p.totalCoverage as string}
+        <QuoteAcceptedCard
+          quoteId={p.quoteId as string}
+          paymentOption={p.paymentOption as string}
+          firstInstallment={p.firstInstallment as { amountMinor: number; dueAt: string }}
           language={language}
         />
       )

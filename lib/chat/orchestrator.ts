@@ -804,6 +804,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     // confirm_required ui_action carrying the token, so the GUI renders the
     // confirm dialog that round-trips the SAME commit + token the agent would.
     if (pipelineResult.toolResult.envelope?.outcome === 'requires_confirmation') {
+      // D2.5: the confirm token is bound to the MATERIAL args hash, so the
+      // original args (minus any stale token) ride the card and return with
+      // the confirm click — e.g. accept_quote's paymentOption.
+      const { confirmToken: _staleToken, ...materialArgs } = (tc.arguments ?? {}) as Record<string, unknown>
       yield {
         event: 'ui_action',
         data: {
@@ -811,6 +815,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           payload: {
             tool: tc.name,
             confirmToken: pipelineResult.toolResult.envelope.confirmToken,
+            args: materialArgs,
             preview: pipelineResult.toolResult.envelope.data,
           },
         },

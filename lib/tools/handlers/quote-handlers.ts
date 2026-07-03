@@ -9,6 +9,7 @@ import type { QuoteInput } from '@/lib/engines/quote-engine'
 import { decideQuoteIssue } from '@/lib/engines/quote-decision'
 import { canQuoteTransition, effectiveQuoteStatus, type QuoteStatusV3 } from '@/lib/engines/quote-lifecycle'
 import { disclosuresRequired, type DisclosureRef } from '@/lib/engines/disclosures'
+import { buildSchedule, type PaymentFrequency } from '@/lib/engines/payment-schedule'
 import { getProductDisclosureDocuments } from '@/lib/documents/registry'
 import { evaluateEligibility } from '@/lib/engines/eligibility'
 import { deriveSuitability } from '@/lib/engines/derive-and-expose'
@@ -338,120 +339,79 @@ export const getQuoteInfo: ToolHandler = async (args, context) => {
 // accept_quote
 // ─────────────────────────────────────────────
 
+/**
+ * D2.5 (T7.D6): NARROW accept — CAS ISSUED→ACCEPTED with the immutable
+ * acceptance evidence (paymentFrequency + acceptedAt, written HERE and never
+ * again) and the transactional schedule (contradiction #3: integer minor
+ * units, the live money truth from this moment). NO Policy (it is created
+ * at first successful settlement — contradiction #5) and NO conversation
+ * close (contradiction #11). Legality (expiry/transition/identity/
+ * disclosures) lives in the pure acceptQuoteLegality consumed by
+ * deriveAndExpose — never re-decided here (erratum 1).
+ */
 export const acceptQuote: ToolHandler = async (args, context) => {
-  const confirmAcceptance = args.confirmAcceptance as boolean
-
   try {
-    if (!confirmAcceptance) {
-      return { success: false, error: 'Confirmation is required to accept the quote.' }
-    }
-
-    // Find quote via the conversation's active application (B4)
+    const paymentOption = args.paymentOption as PaymentFrequency
     const application = await loadActiveApplication(context)
     if (!application) {
-      return { success: false, error: 'No application found.' }
+      return { success: false, error: 'no_open_application: no application found.' }
     }
-
-    const quote = await context.db.quote.findUnique({
-      where: { applicationId: application.id },
+    const quote = await context.db.quote.findFirst({
+      where: { applicationId: application.id, status: 'ISSUED' },
+      orderBy: { createdAt: 'desc' },
     })
     if (!quote) {
-      return { success: false, error: 'No quote found.' }
+      return { success: false, error: 'no_issued_quote: there is no issued quote to accept.' }
+    }
+    // the elected frequency must be one the PRODUCT offers (T7.D3)
+    const product = await context.db.product.findUnique({ where: { id: quote.productId }, select: { paymentFrequencyOptions: true } })
+    const offered = Object.keys((product?.paymentFrequencyOptions as Record<string, unknown> | null) ?? {})
+    if (!offered.includes(paymentOption)) {
+      return { success: false, error: `invalid_args: payment option "${paymentOption}" is not offered for this product (${offered.join(', ')}).` }
     }
 
-    if (quote.status !== 'ISSUED') {
-      return { success: false, error: `Quote is not in DRAFT status (current: ${quote.status}).` }
-    }
-
-    // Check expiry
-    if (new Date() > quote.validUntil) {
-      await context.db.quote.update({
-        where: { id: quote.id },
-        data: { status: 'EXPIRED' },
-      })
-      return { success: false, error: 'Quote has expired. Please generate a new quote.' }
-    }
-
-    // Update Quote status -> ACCEPTED
-    await context.db.quote.update({
-      where: { id: quote.id },
-      data: { status: 'ACCEPTED' },
+    const now = new Date()
+    const cas = await context.db.quote.updateMany({
+      where: { id: quote.id, status: 'ISSUED' },
+      data: { status: 'ACCEPTED', paymentFrequency: paymentOption, acceptedAt: now },
     })
-
-    // Create Policy (PENDING_SUBMISSION)
-    const policy = await context.db.policy.create({
+    if (cas.count === 0) {
+      return { success: false, error: 'illegal_status_transition: the quote left ISSUED between legality and apply.' }
+    }
+    const rows = buildSchedule({ premiumAnnual: quote.premiumAnnual, frequency: paymentOption, startAt: now })
+    const schedule = await context.db.paymentSchedule.create({
       data: {
         quoteId: quote.id,
         customerId: quote.customerId,
-        productId: quote.productId,
-        status: 'PENDING_SUBMISSION',
-        premiumAnnual: quote.premiumAnnual,
-        premiumMonthly: quote.premiumMonthly,
+        frequency: paymentOption,
+        totalInstallments: rows.length,
         currency: quote.currency,
-        coverageSummary: JSON.parse(JSON.stringify(quote.coverages)),
-        issuedAt: new Date(),
+        installments: { create: rows },
       },
+      include: { installments: { orderBy: { sequence: 'asc' } } },
     })
 
     trackQuoteAccepted(quote.customerId, quote.premiumAnnual)
 
-    // D2.1 (contradiction #11): acceptance no longer closes the conversation
-    // — a conversation is a channel, ACTIVE until the inactivity sweep
-    // archives it. (D2.5 rewrites this handler narrow.)
-
-    // Load tier/level names for uiAction payload
-    const appWithPricing = await context.db.application.findUnique({
-      where: { id: application.id },
-      include: {
-        tier: { select: { name: true } },
-        level: { select: { name: true } },
-      },
-    })
-
-    const tierName = (appWithPricing?.tier?.name ?? { en: 'Standard', ro: 'Standard' }) as { en: string; ro: string }
-    const levelName = (appWithPricing?.level?.name ?? { en: 'Level', ro: 'Nivel' }) as { en: string; ro: string }
-    const includesAddon = appWithPricing?.includesAddon ?? false
-
-    // Calculate total coverage from coverages data
-    const coveragesData = quote.coverages as Record<string, unknown>
-    const baseCovs = (coveragesData?.baseCoverages ?? []) as Array<{ amount: number; currency: string }>
-    const addonCovs = (coveragesData?.addonCoverages ?? []) as Array<{ amount: number; currency: string }>
-    const allCovs = [...baseCovs, ...addonCovs]
-
-    // Group by currency and sum
-    const totals = new Map<string, number>()
-    for (const c of allCovs) {
-      totals.set(c.currency, (totals.get(c.currency) ?? 0) + c.amount)
-    }
-    const totalParts = Array.from(totals.entries()).map(([cur, amt]) => {
-      const formatted = amt >= 1_000_000
-        ? `${(amt / 1_000_000).toLocaleString('ro-RO')} M ${cur}`
-        : `${amt.toLocaleString('ro-RO')} ${cur}`
-      return formatted
-    })
-    const totalCoverage = totalParts.join(' + ') || `${quote.premiumAnnual} RON`
-
+    const first = schedule.installments[0]
     return {
       success: true,
       data: {
-        policyCreated: true,
-        policyId: policy.id,
-        policyStatus: 'PENDING_SUBMISSION',
         quoteId: quote.id,
-        premiumAnnual: quote.premiumAnnual,
-        premiumMonthly: quote.premiumMonthly,
+        paymentOption,
+        acceptedAt: now.toISOString(),
+        scheduleId: schedule.id,
+        totalInstallments: schedule.totalInstallments,
+        firstInstallment: { amountMinor: first.amountMinor, dueAt: first.dueAt.toISOString() },
       },
       message:
-        'Quote accepted! Your policy has been created and is pending submission to Allianz. An operator will process it shortly.',
+        `Quote accepted with ${paymentOption} payment: ${schedule.totalInstallments} installment(s), first ${(first.amountMinor / 100).toFixed(2)} RON due now. Payment follows — the policy is issued at the first successful payment.`,
       uiAction: {
-        type: 'show_policy_issued',
+        type: 'show_quote_accepted',
         payload: {
-          policyId: policy.id,
-          tierName,
-          levelName,
-          includesAddon,
-          premiumMonthly: quote.premiumMonthly,
-          totalCoverage,
+          quoteId: quote.id,
+          paymentOption,
+          firstInstallment: { amountMinor: first.amountMinor, dueAt: first.dueAt.toISOString() },
         } as unknown as Record<string, unknown>,
       },
     }

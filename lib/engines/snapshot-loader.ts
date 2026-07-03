@@ -7,6 +7,8 @@ import { getActiveAnswers } from '@/lib/engines/answer-store'
 import { parseEligibilityRuleSet, type EligibilityRuleSet } from '@/lib/engines/eligibility'
 import { parseSuitabilityRuleSet, type SuitabilityRuleSet } from '@/lib/engines/suitability'
 import { isExpired, type QuoteStatusV3 } from '@/lib/engines/quote-lifecycle'
+import { disclosuresRequired, type DisclosureRef } from '@/lib/engines/disclosures'
+import { getProductDisclosureDocuments } from '@/lib/documents/registry'
 import { getOpenCircuitTools } from '@/lib/tools/circuit-state'
 import { deriveConsents, type ConsentEventLike } from '@/lib/customer/consent'
 import { getIdentityFacts, getAge } from '@/lib/customer/profile-service'
@@ -121,6 +123,33 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   const issued = appState && application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'ISSUED' }, orderBy: { createdAt: 'desc' } }) : null
   const accepted = appState && application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'ACCEPTED' } }) : null
   const policy = accepted ? await db.policy.findUnique({ where: { quoteId: accepted.id } }) : null
+  // D2.5 (T7.D2): which current disclosure docs still lack an exact-identity
+  // ack — feeds the accept_quote legality predicate via the quote slice
+  let quoteDisclosuresRequired: DisclosureRef[] = []
+  if (issued && prod) {
+    const disclosureDocs = await getProductDisclosureDocuments(prod.id, conversation.language ?? 'ro', db)
+    const ackRows = await db.disclosureAck.findMany({ where: { quoteId: issued.id }, select: { kind: true, version: true, language: true } })
+    quoteDisclosuresRequired = disclosuresRequired(
+      disclosureDocs.map((d) => ({ kind: d.kind as DisclosureRef['kind'], version: d.version, language: d.language })),
+      ackRows.map((a) => ({ kind: a.kind as DisclosureRef['kind'], version: a.version, language: a.language })),
+    )
+  }
+  // D2.5 (contradiction #3): the schedule slice goes live — existence flips
+  // the phase to PAYMENT, settled/nextDueAt feed D2.6/D3
+  const scheduleRow = accepted
+    ? await db.paymentSchedule.findFirst({
+        where: { quoteId: accepted.id, status: { in: ['PENDING_FIRST_CAPTURE', 'ACTIVE', 'COMPLETED'] } },
+        include: { installments: { orderBy: { sequence: 'asc' } } },
+        orderBy: { createdAt: 'desc' },
+      })
+    : null
+  const nextPending = scheduleRow?.installments.find((i) => i.status === 'PENDING') ?? null
+  const scheduleSlice = {
+    exists: scheduleRow !== null,
+    settled: scheduleRow !== null && scheduleRow.installments.every((i) => i.status === 'PAID' || i.status === 'WAIVED'),
+    nextDueAt: nextPending?.dueAt.toISOString() ?? null,
+    lastPaymentStatus: null as string | null, // D2.6 settlement wires this
+  }
   // C2.6: identity-class eligibility facts — age via the B0 derivation
   // (DOB or declaredAge, NEVER a 30-fallback), residency from a
   // declared/verified CNP (a Romanian personal code implies RO residence).
@@ -178,9 +207,9 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     application: appState,
     resumableApplication: resumable ? { id: resumable.id, status: resumable.status as 'OPEN' | 'PAUSED' | 'REFERRED' } : null,
     // T7.D5: expiry via the ONE pure predicate — never an inline comparison
-    quote: issued ? { id: issued.id, status: issued.status, premiumAnnual: issued.premiumAnnual, validUntil: issued.validUntil.toISOString(), expired: isExpired({ status: issued.status as QuoteStatusV3, validUntil: issued.validUntil }, new Date()) } : null,
+    quote: issued ? { id: issued.id, status: issued.status, premiumAnnual: issued.premiumAnnual, validUntil: issued.validUntil.toISOString(), expired: isExpired({ status: issued.status as QuoteStatusV3, validUntil: issued.validUntil }, new Date()), disclosuresRequired: quoteDisclosuresRequired } : null,
     acceptedQuote: accepted ? { id: accepted.id, acceptedAt: accepted.updatedAt.toISOString() } : null,
-    schedule: { exists: false, settled: false, nextDueAt: null, lastPaymentStatus: null }, // Block D (PaymentSchedule) re-points
+    schedule: scheduleSlice,
     policy: policy ? { id: policy.id, status: policy.status } : null,
     eligibilityFacts, suitabilityAcks,
     documents: {

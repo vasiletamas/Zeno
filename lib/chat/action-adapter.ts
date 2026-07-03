@@ -78,10 +78,15 @@ export function adaptAction(action: UIAction): ToolCall | null {
     // flag — the gateway answers requires_confirmation with a token, the GUI
     // confirm dialog round-trips it.
     case 'accept_quote':
+      // D2.5: paymentOption is MATERIAL — it must ride both the first click
+      // and the confirm round-trip (the token is bound to its args hash).
       return {
         id: `action_${Date.now()}`,
         name: 'accept_quote',
-        arguments: action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {},
+        arguments: {
+          ...(action.payload.paymentOption ? { paymentOption: String(action.payload.paymentOption) } : {}),
+          ...(action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {}),
+        },
       }
 
     // D1.7 (erratum 3): the change button cancels the quote — post-quote

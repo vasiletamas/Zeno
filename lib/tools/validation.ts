@@ -130,9 +130,11 @@ const generateQuoteSchema = z.object({
   applicationId: z.string().optional(),
 }).strict()
 
+// D2.5 (T7.D6/T7.D3): the elected contract frequency is THE material arg —
+// no legacy confirmAcceptance flag (the gateway owns the two-step), no
+// monthly (not sellable, D2 erratum 2).
 const acceptQuoteSchema = z.object({
-  quoteId: z.string().optional(),
-  confirmAcceptance: z.boolean().optional(),
+  paymentOption: z.enum(['annual', 'semi_annual', 'quarterly']),
   confirmToken: z.string().optional(),
 }).strict()
 

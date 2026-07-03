@@ -43,7 +43,7 @@ export interface DomainSnapshot {
    * so resume_application can be exposed in a fresh conversation.
    */
   resumableApplication: { id: string; status: 'OPEN' | 'PAUSED' | 'REFERRED' } | null
-  quote: { id: string; status: string; premiumAnnual: number; validUntil: string; expired: boolean } | null // issued, unaccepted
+  quote: { id: string; status: string; premiumAnnual: number; validUntil: string; expired: boolean; disclosuresRequired?: { kind: string; version: number; language: string }[] } | null // issued, unaccepted; disclosuresRequired (D2.5, T7.D2) = current disclosure docs lacking an exact-identity ack — the loader always sets it; undefined ≡ [] keeps pre-D2 test literals compiling
   acceptedQuote: { id: string; acceptedAt: string | null } | null
   schedule: { exists: boolean; settled: boolean; nextDueAt: string | null; lastPaymentStatus: string | null } // Block D re-points; loader stubs exists:false
   policy: { id: string; status: string } | null
@@ -83,6 +83,7 @@ export interface DerivedStateV3 {
   dnt: DomainSnapshot['dnt']
   application: DomainSnapshot['application']
   quote: DomainSnapshot['quote']
+  acceptedQuote: DomainSnapshot['acceptedQuote'] // D2.5: stable quote ref across ISSUED→ACCEPTED (gateway targetRef + phase)
   schedule: DomainSnapshot['schedule']
   policy: DomainSnapshot['policy']
   /** C2.6: the discovery verdict — DERIVED per turn from the product rules (subject 'product'), never stored. */

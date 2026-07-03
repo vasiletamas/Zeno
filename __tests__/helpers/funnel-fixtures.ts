@@ -9,6 +9,7 @@ import { setDeclaredField } from '@/lib/customer/profile-service'
 import { writeRevision } from '@/lib/engines/answer-store'
 import { resolveGroupCodes } from '@/lib/engines/question-groups'
 import { executeCommit } from '@/lib/tools/gateway'
+import { seedDocuments } from '@/prisma/seeds/seed-documents'
 import { seedMinimalProtectFixture, signDntWithFacts } from './test-db'
 import type { ToolContext } from '@/lib/tools/types'
 
@@ -23,7 +24,9 @@ export async function buildReadyApplication(options: { escalationFlag?: string; 
   })
   if (!options.withoutDob) {
     await setDeclaredField(fx.customerId, 'dateOfBirth', '1990-01-01', 'fixture')
-    await setDeclaredField(fx.customerId, 'cnp', '1980418089861', 'fixture') // checksum-valid; residency fact
+    // checksum-valid AND consistent with the declared DOB (identity tier
+    // derivation cross-checks cnpMatchesDob — D2.5); carries the residency fact
+    await setDeclaredField(fx.customerId, 'cnp', '1900101080012', 'fixture')
   }
   // complete the application questionnaire directly (the commit under test
   // is generate_quote, not the answer path)
@@ -47,6 +50,35 @@ export async function buildReadyApplication(options: { escalationFlag?: string; 
 
 export const fixtureCtx = (customerId: string, conversationId: string) =>
   ({ customerId, conversationId, language: 'ro', db: prisma } as unknown as ToolContext)
+
+/**
+ * buildIssuedQuote + everything accept_quote's legality demands (D2.5,
+ * erratum-8 fixture spec): protect disclosure docs seeded and ACKED through
+ * the real acknowledge_disclosures commit, full KYC declared (name/email/
+ * phone on top of buildReadyApplication's dob+cnp) and a CONSUMED email
+ * VerificationChallenge so the derived tier is verified_channel. Options
+ * peel one gate off at a time for the blocked-path tests. Returns
+ * { customerId, conversationId, applicationId, quoteId }.
+ */
+export async function buildAcceptReadyQuote(options: { withoutDisclosureAck?: boolean; withoutVerifiedChannel?: boolean } = {}) {
+  const fx = await buildIssuedQuote()
+  await seedDocuments(prisma) // idempotent — IPID/TERMS v1 ro+en
+  await setDeclaredField(fx.customerId, 'name', 'Ion Fixture', 'fixture')
+  const email = `fx-${fx.customerId}@example.com`
+  await setDeclaredField(fx.customerId, 'email', email, 'fixture')
+  await setDeclaredField(fx.customerId, 'phone', '+40712345678', 'fixture')
+  if (!options.withoutVerifiedChannel) {
+    // a CONSUMED challenge is what makes a channel verified (B3.4)
+    await prisma.verificationChallenge.create({
+      data: { customerId: fx.customerId, channel: 'email', target: email, codeHash: 'fixture', expiresAt: new Date(Date.now() + 600_000), consumedAt: new Date() },
+    })
+  }
+  if (!options.withoutDisclosureAck) {
+    const ack = await executeCommit({ tool: 'acknowledge_disclosures', args: {}, actor: 'agent', customerId: fx.customerId, conversationId: fx.conversationId, toolContext: fixtureCtx(fx.customerId, fx.conversationId) })
+    if (ack.outcome !== 'applied') throw new Error(`buildAcceptReadyQuote: acknowledge_disclosures ${ack.outcome} (${ack.reason})`)
+  }
+  return fx
+}
 
 /** buildReadyApplication + a real gateway generate_quote → ISSUED quote. */
 export async function buildIssuedQuote(options: { validUntil?: Date } = {}) {

@@ -7,7 +7,9 @@ const ctx = { customerId: 'c1', conversationId: 'cv1', language: 'ro', exposedTo
 
 describe('executor defense-in-depth', () => {
   it('hard-rejects a registered but non-exposed tool with a not_exposed envelope', async () => {
-    const r = await executeTool('accept_quote', {}, ctx, 'CUSTOMER')
+    // D2.5: paymentOption is schema-required — args must be VALID so the
+    // probe reaches the exposure wall (validation runs first by design)
+    const r = await executeTool('accept_quote', { paymentOption: 'annual' }, ctx, 'CUSTOMER')
     expect(r.success).toBe(false)
     expect(r.envelope?.outcome).toBe('rejected')
     expect(r.envelope?.reason).toBe('not_exposed')

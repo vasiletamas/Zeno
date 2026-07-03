@@ -4,6 +4,7 @@ import { checkIdentityRequirement, IDENTITY_REQUIREMENTS, type IdentityRequireme
 import { consentBlocksCommit } from './consent-rules'
 import { dntExposure, type DntFact, type ProductTypeStr } from './dnt-rules'
 import { applicationExposure, canTransition, type AppStatus } from './application-rules'
+import { acceptQuoteLegality } from './accept-quote-legality'
 import { mutationBlockedReason } from './frozen-application'
 import { evaluateEligibility } from './eligibility'
 import { evaluateSuitability, type SuitabilityResult } from './suitability'
@@ -85,7 +86,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.23.0' // 1.20.0: cancel_quote exposure (D1.5) — live ISSUED quote only, quote_expired/quote_already_accepted precise blocks; accept_quote answers time-expiry with quote_expired (lazy-expiry trigger); 1.21.0: get_quote_details renamed get_quote_info (D1.6); 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application; 1.23.0: acknowledge_disclosures exposed on the live issued quote (D2.3, T7.D2)
+export const engineVersion = '1.24.0' // 1.21.0: get_quote_details renamed get_quote_info (D1.6); 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application; 1.23.0: acknowledge_disclosures exposed on the live issued quote (D2.3, T7.D2); 1.24.0: accept_quote legality through the pure acceptQuoteLegality predicate (D2.5, T7.D6) — expiry → transition → verified_channel identity → disclosure acks
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -225,13 +226,23 @@ export const ACTION_RULES: ActionRule[] = [
       if (appExposureFromSnapshot(s).available.includes('generate_quote') && !s.consents.gdprProcessing) return { reason: 'requires_consent', params: { kind: 'gdpr_processing' } }
       return null
     } },
-  { action: 'accept_quote', kind: 'commit', exposedWhen: (_s, d) => d.phase === 'QUOTE',
-    blockedReason: (s, d) => (d.phase === 'PAYMENT' || d.phase === 'POLICY' ? { reason: 'quote_already_accepted' }
-      // D1.5 (erratum 1): time-expiry answers with quote_expired — the gateway
-      // persists EXPIRED opportunistically off this reason (lazy expiry is a
-      // gateway concern shared by cancel_quote and accept_quote, T7.D5).
-      : s.quote !== null && s.quote.expired ? { reason: 'quote_expired', params: { quoteId: s.quote.id } }
-      : s.application !== null && d.phase !== 'QUOTE' ? { reason: 'no_issued_quote' } : null) },
+  // D2.5 (T7.D6): accept legality speaks through the ONE pure predicate —
+  // expiry (shared isExpired) → transition → verified_channel identity
+  // (T4-R6) → disclosure acks (T7.D2). Never re-decided in the handler
+  // (erratum 1 / contradiction #6).
+  { action: 'accept_quote', kind: 'commit',
+    exposedWhen: (s, d) => d.phase === 'QUOTE' && s.quote !== null
+      && acceptQuoteLegality({ quote: { status: s.quote.status, validUntil: new Date(s.quote.validUntil), disclosuresRequired: s.quote.disclosuresRequired ?? [] }, identity: { tier: s.identity.tier } }, new Date()).ok,
+    blockedReason: (s, d) => {
+      if (d.phase === 'PAYMENT' || d.phase === 'POLICY') return { reason: 'quote_already_accepted' }
+      if (s.quote === null) return s.application !== null ? { reason: 'no_issued_quote' } : null
+      const legality = acceptQuoteLegality({ quote: { status: s.quote.status, validUntil: new Date(s.quote.validUntil), disclosuresRequired: s.quote.disclosuresRequired ?? [] }, identity: { tier: s.identity.tier } }, new Date())
+      if (legality.ok) return null
+      if (legality.outcome === 'rejected') return { reason: legality.reason, params: { quoteId: s.quote.id } }
+      // requires_identity / requires_disclosures — the reason IS the outcome
+      // class (outcomeForBlocked); needs ride params for the envelope
+      return { reason: legality.outcome, params: { needs: legality.needs } }
+    } },
   // D2.3 (T7.D2): disclosure acknowledgement rides the live issued quote —
   // the accept_quote requires_disclosures gate consumes the same predicate
   // over the ack rows (D2.5).
@@ -295,7 +306,7 @@ export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequiremen
     phase: d.phase, subphase: d.subphase, product: s.product,
     selection: { tier: s.application?.tier ?? null, level: s.application?.level ?? null, addon: s.application?.addon ?? null },
     identity: s.identity, consents: s.consents, dnt: s.dnt, application: s.application,
-    quote: s.quote, schedule: s.schedule, policy: s.policy,
+    quote: s.quote, acceptedQuote: s.acceptedQuote, schedule: s.schedule, policy: s.policy,
     eligibility: d.eligibility, suitability: d.suitability, openItems: s.openItems,
     flagsForReview,
     nextBestAction: next ? `call ${next}` : 'continue the conversation (no funnel commit is currently available)',
