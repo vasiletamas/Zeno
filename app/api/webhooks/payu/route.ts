@@ -10,9 +10,10 @@
  * so PayU retries (T8.D3 — never silently drop a money event).
  */
 
+import crypto from 'crypto'
 import { NextResponse } from 'next/server'
 import { getPaymentProvider } from '@/lib/payments'
-import { settlePaymentEvent } from '@/lib/payments/settlement'
+import { settlePaymentEvent, recordPaymentAnomaly } from '@/lib/payments/settlement'
 
 export async function POST(request: Request) {
   try {
@@ -38,6 +39,13 @@ export async function POST(request: Request) {
         '[PayUWebhook] Webhook validation failed:',
         error instanceof Error ? error.message : error,
       )
+      // D2.ADD-1: a bad/missing signature never reaches the inbox — flag it
+      // (once per payload) so an operator sees possible forgery attempts.
+      await recordPaymentAnomaly({
+        anomaly: 'bad_signature',
+        ref: `PAYU:${crypto.createHash('sha256').update(rawBody).digest('hex').slice(0, 16)}`,
+        reason: `bad_signature: PayU webhook rejected — ${error instanceof Error ? error.message : 'validation failed'}`,
+      }).catch(() => {})
       return NextResponse.json(
         { error: 'Webhook validation failed' },
         { status: 400 },

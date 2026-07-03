@@ -12,9 +12,10 @@
  * (T8.D3 — the old 200-swallow silently dropped money events).
  */
 
+import crypto from 'crypto'
 import { NextResponse } from 'next/server'
 import { getPaymentProvider } from '@/lib/payments'
-import { settlePaymentEvent } from '@/lib/payments/settlement'
+import { settlePaymentEvent, recordPaymentAnomaly } from '@/lib/payments/settlement'
 
 export async function POST(request: Request) {
   let webhookEvent
@@ -46,6 +47,13 @@ export async function POST(request: Request) {
         '[StripeWebhook] Signature validation failed:',
         error instanceof Error ? error.message : error,
       )
+      // D2.ADD-1: signature failures never reach the inbox — flag once per
+      // payload so an operator sees possible forgery attempts.
+      await recordPaymentAnomaly({
+        anomaly: 'bad_signature',
+        ref: `STRIPE:${crypto.createHash('sha256').update(rawBody).digest('hex').slice(0, 16)}`,
+        reason: `bad_signature: Stripe webhook rejected — ${error instanceof Error ? error.message : 'validation failed'}`,
+      }).catch(() => {})
       return NextResponse.json(
         { error: 'Webhook signature verification failed' },
         { status: 400 },

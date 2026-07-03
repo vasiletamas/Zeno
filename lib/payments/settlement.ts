@@ -16,6 +16,7 @@
  */
 import { prisma } from '@/lib/db'
 import type { Prisma } from '@/lib/generated/prisma/client'
+import { createWorkItem } from '@/lib/work-items/service'
 import { getEmailProvider } from '@/lib/email'
 import { issueChallenge } from '@/lib/customer/verification-service'
 import { purchaseConfirmationEmail } from '@/lib/email/templates/purchase-confirmation'
@@ -34,6 +35,35 @@ export interface SettlementResult {
   disposition: 'applied' | 'replay' | 'unmatched'
   firstCapture?: boolean
   paymentId?: string
+}
+
+type Db = typeof prisma | Prisma.TransactionClient
+
+/**
+ * D2.ADD-1 (G11a): payment-pipeline anomalies become ALERT_FLAG WorkItems —
+ * exactly once per anomaly identity (an OPEN alert with the same anomalyKey
+ * absorbs redeliveries, even under fresh provider event ids). Wired into
+ * the inbox transaction for amount-mismatch and unmatched events; webhook
+ * routes call it on signature failures (which never reach the inbox).
+ */
+export async function recordPaymentAnomaly(
+  input: { anomaly: 'bad_signature' | 'amount_mismatch' | 'unmatched_payment'; ref: string; reason: string; refs?: Record<string, string> },
+  db: Db = prisma,
+): Promise<void> {
+  const anomalyKey = `${input.anomaly}:${input.ref}`
+  const existing = await db.workItem.findFirst({
+    where: { kind: 'ALERT_FLAG', status: 'OPEN', payload: { path: ['anomalyKey'], equals: anomalyKey } },
+    select: { id: true },
+  })
+  if (existing) return
+  await createWorkItem({
+    kind: 'ALERT_FLAG',
+    reason: input.reason,
+    refs: (input.refs ?? {}) as never,
+    createdBy: 'payment-inbox',
+    priority: 'HIGH',
+    payload: { anomalyKey, anomaly: input.anomaly },
+  }, db)
 }
 
 export async function settlePaymentEvent(e: SettlementEvent): Promise<SettlementResult> {
@@ -56,7 +86,29 @@ export async function settlePaymentEvent(e: SettlementEvent): Promise<Settlement
       where: { providerPaymentId: e.providerPaymentId },
       include: { installment: { include: { schedule: { include: { installments: true, quote: true } } } } },
     })
-    if (!payment) return { disposition: 'unmatched' as const }
+    if (!payment) {
+      // D2.ADD-1: a verified event naming a payment we do not know is an
+      // anomaly worth an operator's eyes — once per provider payment id.
+      await recordPaymentAnomaly({
+        anomaly: 'unmatched_payment',
+        ref: `${e.provider}:${e.providerPaymentId}`,
+        reason: `unmatched_payment: verified ${e.provider} event ${e.eventId} names unknown providerPaymentId ${e.providerPaymentId}`,
+        refs: { eventId: e.eventId },
+      }, tx)
+      return { disposition: 'unmatched' as const }
+    }
+
+    // D2.ADD-1: the captured amount must match the installment it settles —
+    // drift is flagged (exactly once) but the settlement itself proceeds:
+    // the money moved; the operator reconciles.
+    if (payment.amountMinor !== payment.installment.amountMinor) {
+      await recordPaymentAnomaly({
+        anomaly: 'amount_mismatch',
+        ref: payment.id,
+        reason: `amount_mismatch: payment ${payment.id} captured ${payment.amountMinor} against installment ${payment.installment.id} of ${payment.installment.amountMinor}`,
+        refs: { paymentId: payment.id, customerId: payment.customerId },
+      }, tx)
+    }
 
     if (e.event === 'payment_failed') {
       await tx.payment.updateMany({ where: { id: payment.id, status: 'PENDING' }, data: { status: 'FAILED', failureReason: e.failureReason ?? 'provider_failed' } })
@@ -150,7 +202,13 @@ async function runFirstCaptureSideEffects(paymentId: string): Promise<void> {
   const tierNameJson = quote.application?.tier?.name as Record<string, string> | null
   const levelNameJson = quote.application?.level?.name as Record<string, string> | null
   const currency = policy?.currency ?? quote.currency
-  const coverageSummary = (policy?.coverageSummary ?? null) as Array<{ name: string | Record<string, string>; amount: number; currency: string }> | null
+  // coverageSummary carries the quote's coverages OBJECT
+  // ({ baseCoverages, addonCoverages, ... }) — flatten for the email
+  const summary = (policy?.coverageSummary ?? quote.coverages ?? {}) as {
+    baseCoverages?: Array<{ name: string | Record<string, string>; amount: number; currency: string }>
+    addonCoverages?: Array<{ name: string | Record<string, string>; amount: number; currency: string }>
+  }
+  const allCoverages = [...(summary.baseCoverages ?? []), ...(summary.addonCoverages ?? [])]
   const { subject, html } = purchaseConfirmationEmail({
     customerName: customer.name ?? 'Client',
     tierName: tierNameJson?.[customerLanguage] ?? tierNameJson?.ro ?? 'Standard',
@@ -158,8 +216,8 @@ async function runFirstCaptureSideEffects(paymentId: string): Promise<void> {
     includesAddon: quote.application?.includesAddon ?? false,
     premiumMonthly: policy?.premiumMonthly ?? quote.premiumMonthly,
     currency,
-    coverages: (coverageSummary ?? []).map((cov) => ({
-      name: typeof cov.name === 'string' ? cov.name : (cov.name[customerLanguage] ?? cov.name.ro ?? ''),
+    coverages: allCoverages.map((cov) => ({
+      name: typeof cov.name === 'string' ? cov.name : (cov.name?.[customerLanguage] ?? cov.name?.ro ?? ''),
       amount: cov.amount,
       currency: cov.currency ?? currency,
     })),
