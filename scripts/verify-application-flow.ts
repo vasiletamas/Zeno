@@ -67,9 +67,9 @@ async function main() {
 
   // leg 2: questionnaire is DNT-gated in exposure
   const exposed = deriveAndExpose(await loadDomainSnapshot(conv.id))
-  const saveBlock = exposed.actions.blocked.find((b) => b.action === 'save_application_answer')
-  check('save_application_answer blocked requires_consent(valid_dnt) pre-DNT',
-    !exposed.actions.available.includes('save_application_answer') && saveBlock?.reason === 'requires_consent',
+  const saveBlock = exposed.actions.blocked.find((b) => b.action === 'write_question_answer')
+  check('write_question_answer blocked requires_consent(valid_dnt) pre-DNT',
+    !exposed.actions.available.includes('write_question_answer') && saveBlock?.reason === 'requires_consent',
     JSON.stringify(saveBlock))
 
   // leg 3: DNT via the B2 surface, then the questionnaire opens
@@ -83,7 +83,7 @@ async function main() {
     : sign1
   const afterDnt = deriveAndExpose(await loadDomainSnapshot(conv.id))
   check('after DNT sign the questionnaire is writable',
-    sign2.outcome === 'applied' && afterDnt.actions.available.includes('save_application_answer'),
+    sign2.outcome === 'applied' && afterDnt.actions.available.includes('write_question_answer'),
     JSON.stringify({ sign: sign2.outcome }))
 
   // leg 4: answer the questionnaire through the gateway, driven by the
@@ -96,7 +96,7 @@ async function main() {
     const q = next.question
     const first = Array.isArray(q.options) ? (q.options[0] as { value?: string } | undefined) : undefined
     const value = first?.value ?? 'true'
-    const r = await commit('save_application_answer', { answer: value }, customer.id, conv.id)
+    const r = await commit('write_question_answer', { answer: value }, customer.id, conv.id)
     if (r.outcome !== 'applied') throw new Error(`save(${q.code}): ${JSON.stringify(r)}`)
     answered++
   }

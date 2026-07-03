@@ -71,7 +71,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.15.0' // 1.13.0: B4 lifecycle — set_application (no DNT pre-gate, T5.D1) + select_coverage via the pure application rules; legacy mutators retired; selection_incomplete is a generate_quote blocked-reason (#10); 1.14.0: resume_application exposed cross-conversation via the customer-scoped resumable fact, REFERRED answers with_underwriter (B4.6); 1.15.0: modify_answer exposed on OPEN/PAUSED apps with answers behind the DNT gate (C1.5, erratum 10)
+export const engineVersion = '1.16.0' // 1.14.0: resume_application exposed cross-conversation via the customer-scoped resumable fact, REFERRED answers with_underwriter (B4.6); 1.15.0: modify_answer exposed on OPEN/PAUSED apps with answers behind the DNT gate (C1.5, erratum 10); 1.16.0: pinned questionnaire surface (C1.ADD-1/2) — write_question_answer renames the save commit, get_next_question read with branching provenance, check_bd_eligibility retired (bd rule = ELIGIBILITY edges)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -109,6 +109,9 @@ export const ACTION_RULES: ActionRule[] = [
   dntRule('write_dnt_answer', 'commit'),
   { action: 'get_quote_details', kind: 'read', exposedWhen: (s) => s.quote !== null || s.acceptedQuote !== null },
   { action: 'get_last_application_info', kind: 'read', exposedWhen: always }, // B4.6 prefill-as-proposals read
+  // C1.ADD-1: the pinned questionnaire read — next question + progress +
+  // structured branching provenance (T13.D1)
+  { action: 'get_next_question', kind: 'read', exposedWhen: (s) => s.application !== null },
   { action: 'escalate_to_human', kind: 'commit', exposedWhen: always },
   { action: 'set_candidate_product', kind: 'commit', exposedWhen: always },
   { action: 'collect_customer_field', kind: 'commit', exposedWhen: always },
@@ -125,7 +128,7 @@ export const ACTION_RULES: ActionRule[] = [
   { action: 'set_application', kind: 'commit', exposedWhen: (s) => (s.product !== null || s.candidateProductId !== null) && s.application === null,
     blockedReason: (s) => (s.application !== null ? { reason: 'application_already_open', params: { applicationId: s.application.id } } : { reason: 'no_candidate_product' }) },
   // B4.2: lifecycle exposure comes from the pure application rules
-  appRule('save_application_answer'),
+  appRule('write_question_answer'),
   appRule('modify_answer'),
   appRule('select_coverage'),
   // resume works CROSS-conversation (T5.D4): a fresh conversation carries no
@@ -134,7 +137,6 @@ export const ACTION_RULES: ActionRule[] = [
     exposedWhen: (s) => appExposureFromSnapshot(s).available.includes('resume_application') || (s.resumableApplication !== null && s.resumableApplication.status !== 'REFERRED'),
     blockedReason: (s) => ((s.application?.status ?? s.resumableApplication?.status) === 'REFERRED' ? { reason: 'with_underwriter' } : null) },
   appRule('cancel_application'),
-  { action: 'check_bd_eligibility', kind: 'commit', exposedWhen: (s) => s.application !== null && s.application.addon === true },
   { action: 'generate_quote', kind: 'commit',
     exposedWhen: (s, d) => d.phase === 'APPLICATION' && appExposureFromSnapshot(s).available.includes('generate_quote') && s.consents.gdprProcessing,
     blockedReason: (s, d) => {
@@ -150,7 +152,7 @@ export const ACTION_RULES: ActionRule[] = [
   { action: 'initiate_payment', kind: 'commit', exposedWhen: (s) => s.policy !== null && s.policy.status === 'PENDING_SUBMISSION' },
 ]
 
-const NEXT_BEST_PRIORITY = ['initiate_payment', 'accept_quote', 'generate_quote', 'select_coverage', 'save_application_answer', 'sign_dnt', 'write_dnt_answer', 'open_dnt_session', 'set_application', 'set_candidate_product', 'list_products']
+const NEXT_BEST_PRIORITY = ['initiate_payment', 'accept_quote', 'generate_quote', 'select_coverage', 'write_question_answer', 'sign_dnt', 'write_dnt_answer', 'open_dnt_session', 'set_application', 'set_candidate_product', 'list_products']
 
 export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequirements?: IdentityRequirementsTable }): DeriveAndExposeResult {
   const d = derivePhase(s)

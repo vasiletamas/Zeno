@@ -25,10 +25,10 @@ describe('orchestrator-side-effect-validation (subsystem C anomaly path)', () =>
     expect(validation.valid).toBe(true)
   })
 
-  it('passes through when assistant writes "am notat" alongside a successful save_application_answer', () => {
+  it('passes through when assistant writes "am notat" alongside a successful write_question_answer', () => {
     const validation = validateSideEffectClaims(
       'Am notat: 80 mp.',
-      [{ id: 't1', name: 'save_application_answer', arguments: {} } as any],
+      [{ id: 't1', name: 'write_question_answer', arguments: {} } as any],
       [{ success: true }] as any,
       'ro',
     )

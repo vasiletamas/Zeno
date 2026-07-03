@@ -31,7 +31,7 @@ describe('validateSideEffectClaims', () => {
   it('allows "am notat" when a save-category tool was called and succeeded', () => {
     const result = validateSideEffectClaims(
       'Am notat răspunsul tău.',
-      [{ id: 't1', name: 'save_application_answer', arguments: {} } as any],
+      [{ id: 't1', name: 'write_question_answer', arguments: {} } as any],
       [{ success: true }] as any,
       'ro',
     )
@@ -41,7 +41,7 @@ describe('validateSideEffectClaims', () => {
   it('flags "am notat" when a save tool was called but failed', () => {
     const result = validateSideEffectClaims(
       'Am notat răspunsul tău.',
-      [{ id: 't1', name: 'save_application_answer', arguments: {} } as any],
+      [{ id: 't1', name: 'write_question_answer', arguments: {} } as any],
       [{ success: false, error: 'db down' }] as any,
       'ro',
     )

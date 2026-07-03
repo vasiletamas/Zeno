@@ -17,7 +17,7 @@ import { calculateAge } from '@/lib/chat/age'
 
 // --- Handler imports ---
 import { getDntState, getDntQuestions, getDntNextQuestion, openDntSession, writeDntAnswer, signDnt } from './handlers/dnt-handlers'
-import { setApplication, saveApplicationAnswer, modifyAnswer, resumeApplication, cancelApplication, getLastApplicationInfo } from './handlers/application-handlers'
+import { setApplication, getNextQuestionInfo, writeQuestionAnswer, modifyAnswer, resumeApplication, cancelApplication, getLastApplicationInfo } from './handlers/application-handlers'
 import { selectCoverage } from './handlers/select-coverage-handlers'
 import { generateQuote, getQuoteDetails, acceptQuote, modifyQuote } from './handlers/quote-handlers'
 import { compareProducts } from './handlers/product-handlers'
@@ -27,7 +27,6 @@ import { setCandidateProduct } from './handlers/candidate-handlers'
 import { getCustomerProfile } from './handlers/profile-handlers'
 import { withdrawConsent } from './handlers/consent-handlers'
 import { getObjectionStrategy } from './handlers/objection-handlers'
-import { checkBdEligibility } from './handlers/bd-handlers'
 import { collectCustomerField } from './handlers/data-handlers'
 import { escalateToHuman } from './handlers/utility-handlers'
 import { initiatePayment } from './handlers/payment-handlers'
@@ -154,17 +153,6 @@ const STATUS_ACCEPT_QUOTE = {
     'Connecting everything to Allianz. One more second.',
     'Preparing your policy. Worth celebrating.',
     'Final steps... your family will be protected',
-  ],
-}
-
-const STATUS_CHECK_BD_ELIGIBILITY = {
-  ro: [
-    'Analizez r\u0103spunsurile tale',
-    'Verific eligibilitatea...',
-  ],
-  en: [
-    'Analyzing your answers',
-    'Checking eligibility...',
   ],
 }
 
@@ -685,7 +673,23 @@ registerTool('set_application', {
   kind: 'commit',
 }, setApplication)
 
-registerTool('save_application_answer', {
+registerTool('get_next_question', {
+  description:
+    'The next unanswered application question with progress and branching_metadata — the structured provenance of WHY the ' +
+    'question appears (which dependency edge fired on which answer/selection). Use the metadata to explain new questions; never paraphrase gates from memory.',
+  parameters: {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  kind: 'read',
+}, getNextQuestionInfo)
+
+registerTool('write_question_answer', {
   description: 'Save the customer\'s answer to the current application question.',
   parameters: {
     type: 'object',
@@ -701,7 +705,7 @@ registerTool('save_application_answer', {
   allowedRoles: ALL_ROLES,
   sideEffect: 'save',
   kind: 'commit',
-}, saveApplicationAnswer)
+}, writeQuestionAnswer)
 
 registerTool('modify_answer', {
   description:
@@ -872,23 +876,9 @@ registerTool('modify_quote', {
   kind: 'commit',
 }, modifyQuote)
 
-// --- BD Eligibility ---
-
-registerTool('check_bd_eligibility', {
-  description: 'Check medical questionnaire eligibility for BD (Boli Diverse) products.',
-  parameters: {
-    type: 'object',
-    properties: {
-      applicationId: { type: 'string', description: 'Application ID to check eligibility for.' },
-    },
-    additionalProperties: false,
-  },
-  executionMode: 'blocking',
-  customerVisible: true,
-  statusMessage: STATUS_CHECK_BD_ELIGIBILITY,
-  allowedRoles: ALL_ROLES,
-  kind: 'commit',
-}, checkBdEligibility)
+// check_bd_eligibility was retired in C1.ADD-2 (T13.D7): the bd rule lives
+// as ELIGIBILITY edges in the dependency graph — answering a BD question
+// re-evaluates eligibility inside the consequence plan, no separate tool.
 
 // --- Payment ---
 

@@ -63,9 +63,9 @@ export function applicationExposure(i: AppExposureInput): { available: string[];
   if (i.application.status === 'OPEN') {
     available.push('select_coverage', 'cancel_application')
     if (i.dntValidForProduct) {
-      available.push('save_application_answer')
+      available.push('write_question_answer')
     } else {
-      blocked.push({ action: 'save_application_answer', reason: 'requires_consent', params: { needs: ['valid_dnt'] } })
+      blocked.push({ action: 'write_question_answer', reason: 'requires_consent', params: { needs: ['valid_dnt'] } })
     }
     const missing = [!i.application.tier && 'tier', !i.application.level && 'level'].filter(Boolean) as string[]
     if (i.application.answersComplete && missing.length === 0) {

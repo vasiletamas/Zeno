@@ -65,7 +65,7 @@ export function adaptAction(action: UIAction): ToolCall | null {
       }
       return {
         id: `action_${Date.now()}`,
-        name: 'save_application_answer',
+        name: 'write_question_answer',
         arguments: { answer: String(action.payload.answer) },
       }
     }

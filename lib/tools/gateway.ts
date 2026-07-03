@@ -72,7 +72,7 @@ export function resolveTargetRef(tool: string, args: Record<string, unknown>, st
   // repeatable commits — addressed entity from ARGS (erratum 4)
   if (tool === 'collect_customer_field') return `field:${String(args.field ?? 'unknown')}`
   if (tool === 'write_dnt_answer') return `dnt_answer:${String(args.questionCode ?? 'unknown')}`
-  if (tool === 'save_application_answer') return `app_answer:${String(args.field ?? 'auto')}`
+  if (tool === 'write_question_answer') return `app_answer:${String(args.field ?? 'auto')}`
   if (tool === 'withdraw_consent') return `consent:${String(args.kind ?? 'unknown')}`
   if (OPERATOR_TOOLS.has(tool)) return `work_item:${String(args.workItemId ?? 'unknown')}`
   // one-shot / entity-scoped commits — stable natural key

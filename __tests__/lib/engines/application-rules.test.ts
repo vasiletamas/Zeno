@@ -12,8 +12,8 @@ it('status machine: COMPLETED and CANCELLED are terminal; cancel ≠ complete', 
 it('questionnaire is exposed only under a valid covering DNT (T5.D1 ordering flip, engine-enforced)', () => {
   const base = { application: { exists: true, status: 'OPEN' as const, tier: null, level: null, addon: null, answersComplete: false, hasAnswers: false }, dntValidForProduct: false }
   const noDnt = applicationExposure(base)
-  expect(noDnt.blocked.find(b => b.action === 'save_application_answer')).toMatchObject({ reason: 'requires_consent' })
-  expect(applicationExposure({ ...base, dntValidForProduct: true }).available).toContain('save_application_answer')
+  expect(noDnt.blocked.find(b => b.action === 'write_question_answer')).toMatchObject({ reason: 'requires_consent' })
+  expect(applicationExposure({ ...base, dntValidForProduct: true }).available).toContain('write_question_answer')
 })
 
 it('selection incompleteness is a generate_quote blocked-reason, NOT a subphase (#10)', () => {

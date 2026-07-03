@@ -57,6 +57,7 @@ const setCandidateProductSchema = z.object({
 // ==============================================
 
 const getDntStateSchema = z.object({}).strict()
+const getNextQuestionSchema = z.object({}).strict()
 const getDntQuestionsSchema = z.object({}).strict()
 const getDntNextQuestionSchema = z.object({}).strict()
 
@@ -90,7 +91,7 @@ const setApplicationSchema = z.object({
   productId: z.string().optional(),
 }).strict()
 
-const saveApplicationAnswerSchema = z.object({
+const writeQuestionAnswerSchema = z.object({
   answer: z.string().min(1, 'Answer is required'),
 }).strict()
 
@@ -134,14 +135,6 @@ const getQuoteDetailsSchema = z.object({
 }).strict()
 
 const modifyQuoteSchema = z.object({}).strict()
-
-// ==============================================
-// BD ELIGIBILITY
-// ==============================================
-
-const checkBdEligibilitySchema = z.object({
-  applicationId: z.string().optional(),
-}).strict()
 
 // ==============================================
 // DATA COLLECTION
@@ -233,7 +226,8 @@ const toolSchemas: Record<string, ZodType> = {
 
   // Application (B4 lifecycle)
   set_application: setApplicationSchema,
-  save_application_answer: saveApplicationAnswerSchema,
+  get_next_question: getNextQuestionSchema,
+  write_question_answer: writeQuestionAnswerSchema,
   modify_answer: modifyAnswerSchema,
   select_coverage: selectCoverageSchema,
   resume_application: resumeApplicationSchema,
@@ -247,7 +241,6 @@ const toolSchemas: Record<string, ZodType> = {
   modify_quote: modifyQuoteSchema,
 
   // BD Eligibility
-  check_bd_eligibility: checkBdEligibilitySchema,
 
   // Payment
   initiate_payment: z.object({}).strict(),

@@ -7,10 +7,10 @@ describe('per-round exposure refresh', () => {
     expect(shouldRefreshExposure([{ outcome: 'rejected', effects: [] }, { outcome: 'requires_confirmation', effects: [] }])).toBe(false)
   })
   it('renders a compact actions message (phase + available + blocked, no full state dump)', () => {
-    const msg = formatRoundRefreshMessage({ phase: 'APPLICATION', subphase: 'QUESTIONNAIRE' } as never, { available: ['save_application_answer', 'escalate_to_human'], blocked: [{ action: 'generate_quote', reason: 'questionnaire_incomplete' }] })
+    const msg = formatRoundRefreshMessage({ phase: 'APPLICATION', subphase: 'QUESTIONNAIRE' } as never, { available: ['write_question_answer', 'escalate_to_human'], blocked: [{ action: 'generate_quote', reason: 'questionnaire_incomplete' }] })
     expect(msg).toContain('[State update]')
     expect(msg).toContain('APPLICATION/QUESTIONNAIRE')
-    expect(msg).toContain('save_application_answer')
+    expect(msg).toContain('write_question_answer')
     expect(msg).toContain('generate_quote (questionnaire_incomplete)')
   })
 })

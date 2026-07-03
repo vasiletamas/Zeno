@@ -108,10 +108,76 @@ export const setApplication: ToolHandler = async (args, context) => {
 }
 
 // ─────────────────────────────────────────────
-// save_application_answer (B4.1 re-key)
+// get_next_question (C1.ADD-1) — the pinned questionnaire READ (T13.D1):
+// next question + progress + structured branching provenance
 // ─────────────────────────────────────────────
 
-export const saveApplicationAnswer: ToolHandler = async (args, context) => {
+export const getNextQuestionInfo: ToolHandler = async (_args, context) => {
+  try {
+    const application = await loadActiveApplication(context)
+    if (!application || application.status === 'CANCELLED') {
+      return { success: false, error: 'no_open_application: set an application first.' }
+    }
+    const activeGroupCodes = await appGroupCodesFor(context, application.includesAddon)
+    const scope = { kind: 'application' as const, applicationId: application.id }
+    const nextResult = await getNextQuestion(activeGroupCodes, scope)
+    if (!nextResult) {
+      return {
+        success: true,
+        data: { isComplete: true, applicationId: application.id, readyForQuote: true },
+        message: 'All application questions are answered.',
+      }
+    }
+    const nq = nextResult.question
+    const lang = context.language ?? 'ro'
+    // provenance facts: active answers + current selection; "added by the
+    // last commit" comes from the latest applied envelope's questionsAdded
+    // (the C1.5 ledger persistence — reads have no in-hand plan).
+    const graph = await loadDependencyGraph(context.db, application.productId)
+    const activeAnswers = await getActiveAnswers(context.db, application.id)
+    const tierRow = application.tierId ? await context.db.pricingTier.findUnique({ where: { id: application.tierId } }) : null
+    const levelRow = application.levelId ? await context.db.pricingLevel.findUnique({ where: { id: application.levelId } }) : null
+    const lastApplied = await context.db.commitLedger.findFirst({
+      where: { conversationId: context.conversationId, outcome: 'applied' },
+      orderBy: { createdAt: 'desc' },
+    })
+    const lastAdded = ((lastApplied?.envelope as { data?: { questionsAdded?: string[] } } | null)?.data?.questionsAdded) ?? []
+    const branchingMetadata = nq.code
+      ? await buildQuestionProvenance(
+          context,
+          graph,
+          { answers: activeAnswers, selection: { tier: tierRow?.code ?? null, level: levelRow?.code ?? null, addon: application.includesAddon } },
+          { id: nq.id, code: nq.code },
+          lastAdded,
+        )
+      : null
+    return {
+      success: true,
+      data: {
+        question: {
+          id: nq.id,
+          code: nq.code,
+          text: (nq.text as { en: string; ro: string })[lang],
+          helpText: nq.helpText ? (nq.helpText as { en: string; ro: string })[lang] : null,
+          type: nq.type,
+          options: nq.options,
+          branching_metadata: branchingMetadata,
+        },
+        progress: nextResult.progress,
+        ...(nextResult.suggestedAnswer !== undefined ? { suggestedAnswer: nextResult.suggestedAnswer } : {}),
+      },
+      message: `Next question: ${nq.code ?? nq.id} (${nextResult.progress.answered}/${nextResult.progress.total} answered).`,
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
+
+// ─────────────────────────────────────────────
+// write_question_answer (B4.1 re-key; C1.ADD-1 pinned name)
+// ─────────────────────────────────────────────
+
+export const writeQuestionAnswer: ToolHandler = async (args, context) => {
   const answer = args.answer as string
 
   try {
@@ -519,7 +585,7 @@ export const getLastApplicationInfo: ToolHandler = async (_args, context) => {
       orderBy: { answeredAt: 'asc' },
     })
     // PROPOSALS, not answers (T5.D5): each needs the customer's per-question
-    // confirmation via a real save_application_answer commit stamped now.
+    // confirmation via a real write_question_answer commit stamped now.
     const proposals = answers
       .filter((a) => a.question.code)
       .map((a) => ({ questionCode: a.question.code as string, suggestedAnswer: a.value, answeredAt: a.answeredAt.toISOString() }))
