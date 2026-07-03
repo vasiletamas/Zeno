@@ -68,6 +68,11 @@ const REPLAY_EXEMPT = new Set([
   // envelope after cancel/expiry would lie about a dead quote, so duplicates
   // are answered by legality, never by the ledger.
   'generate_quote',
+  // D3.3 (erratum 1): the apply IS the idempotency mechanism — it returns
+  // the canonical open session (resumed) or supersedes a stale one; a
+  // replayed 'started' envelope would hand back a dead clientSecret and
+  // break retry-after-failure.
+  'ensure_payment_session',
 ])
 
 /**
@@ -95,7 +100,6 @@ export function resolveTargetRef(tool: string, args: Record<string, unknown>, st
   // would otherwise hash against quote:none and miss its own replay row.
   if (tool === 'accept_quote' || tool === 'cancel_quote' || tool === 'acknowledge_disclosures') return `quote:${state.quote?.id ?? state.acceptedQuote?.id ?? 'none'}`
   if (tool === 'generate_quote' || tool === 'set_application') return `application:${state.application?.id ?? 'none'}`
-  if (tool === 'initiate_payment') return `policy:${state.policy?.id ?? 'none'}`
   return `conversation:${conversationId}`
 }
 

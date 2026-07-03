@@ -143,7 +143,8 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
         orderBy: { createdAt: 'desc' },
       })
     : null
-  const nextPending = scheduleRow?.installments.find((i) => i.status === 'PENDING') ?? null
+  // PENDING or FAILED — a failed installment is still DUE (retry, D3.1)
+  const nextPending = scheduleRow?.installments.find((i) => i.status === 'PENDING' || i.status === 'FAILED') ?? null
   const scheduleSlice = {
     exists: scheduleRow !== null,
     settled: scheduleRow !== null && scheduleRow.installments.every((i) => i.status === 'PAID' || i.status === 'WAIVED'),

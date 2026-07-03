@@ -68,7 +68,7 @@ export class StripePaymentProvider implements PaymentProvider {
     amount: number
     currency: string
     customerId: string
-    policyId: string
+    referenceId: string
     description: string
   }): Promise<PaymentIntent> {
     const paymentIntent = await this.stripe.paymentIntents.create({
@@ -77,7 +77,7 @@ export class StripePaymentProvider implements PaymentProvider {
       description: input.description,
       metadata: {
         customerId: input.customerId,
-        policyId: input.policyId,
+        referenceId: input.referenceId,
       },
     })
 
@@ -113,6 +113,10 @@ export class StripePaymentProvider implements PaymentProvider {
         // processing, requires_confirmation, requires_action, etc.
         return { status: 'pending' }
     }
+  }
+
+  async cancelPaymentIntent(providerPaymentId: string): Promise<void> {
+    await this.stripe.paymentIntents.cancel(providerPaymentId)
   }
 
   async handleWebhook(

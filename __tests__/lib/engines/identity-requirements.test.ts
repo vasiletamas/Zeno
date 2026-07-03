@@ -7,14 +7,14 @@ import { makeSnapshot } from './snapshot-fixtures'
 describe('identity-requirements mechanism (contradiction #1)', () => {
   it('the B3.2 rows are landed — one row per ratified commit gate', () => {
     expect(Object.keys(IDENTITY_REQUIREMENTS).sort()).toEqual(
-      ['accept_quote', 'generate_quote', 'initiate_payment', 'set_application', 'sign_dnt'],
+      ['accept_quote', 'ensure_payment_session', 'generate_quote', 'set_application', 'sign_dnt'],
     )
   })
   it('pins the ratified rows (ADD-1, erratum-4a encoding)', () => {
     expect(IDENTITY_REQUIREMENTS.generate_quote).toEqual({ minTier: 'anonymous', anyDeclaredOf: ['cnp', 'dateOfBirth'] })
     expect(IDENTITY_REQUIREMENTS.accept_quote).toEqual({ minTier: 'verified_channel' })
-    // documents ride initiate_payment until D3 lands ensure_payment_session
-    expect(IDENTITY_REQUIREMENTS.initiate_payment).toEqual({ minTier: 'verified_channel', productDocuments: true })
+    // D3.3: the document requirement rides ensure_payment_session
+    expect(IDENTITY_REQUIREMENTS.ensure_payment_session).toEqual({ minTier: 'verified_channel', productDocuments: true })
   })
   it('every key is a registered commit tool (ADD-1)', () => {
     const commits = new Set(listCommitTools())

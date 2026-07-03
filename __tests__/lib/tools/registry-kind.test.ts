@@ -14,7 +14,7 @@ import { getRegisteredToolNames, getToolDefinition } from '@/lib/tools/registry'
 // (ADD-1); check_bd_eligibility retired (ADD-2 — bd rule = ELIGIBILITY edges);
 // C3: acknowledge_suitability_warning added (C3.4);
 // D1: cancel_quote added, modify_quote retired (D1.5/D1.7 — T13.D2)
-const COMMITS = ['set_candidate_product', 'open_dnt_session', 'write_dnt_answer', 'sign_dnt', 'set_application', 'write_question_answer', 'modify_answer', 'select_coverage', 'resume_application', 'cancel_application', 'acknowledge_suitability_warning', 'generate_quote', 'accept_quote', 'cancel_quote', 'initiate_payment', 'collect_customer_field', 'escalate_to_human', 'withdraw_consent', 'resolve_referral', 'resolve_work_item', 'start_channel_verification', 'confirm_channel_verification', 'request_document_upload']
+const COMMITS = ['set_candidate_product', 'open_dnt_session', 'write_dnt_answer', 'sign_dnt', 'set_application', 'write_question_answer', 'modify_answer', 'select_coverage', 'resume_application', 'cancel_application', 'acknowledge_suitability_warning', 'generate_quote', 'accept_quote', 'cancel_quote', 'ensure_payment_session', 'collect_customer_field', 'escalate_to_human', 'withdraw_consent', 'resolve_referral', 'resolve_work_item', 'start_channel_verification', 'confirm_channel_verification', 'request_document_upload']
 
 describe('tool kind classification', () => {
   it('every registered tool carries a kind', () => {

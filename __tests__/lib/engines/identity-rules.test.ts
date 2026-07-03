@@ -23,14 +23,14 @@ it('invalid CNP checksum blocks the declared tier', () => {
   expect(deriveIdentityTier(f({ cnp: { value: '1980418089862', provenance: 'declared' } }))).toBe('anonymous')
 })
 
-it('#1 rows: generate_quote needs declared cnp-or-dob; accept_quote needs verified_channel; initiate_payment adds product docs', () => {
+it('#1 rows: generate_quote needs declared cnp-or-dob; accept_quote needs verified_channel; ensure_payment_session adds product docs (D3.3)', () => {
   // no hard identity gate pre-needs-analysis (#1)
   expect(IDENTITY_REQUIREMENTS.set_application).toEqual({ minTier: 'anonymous' })
   const anon = { fields: {}, verifiedChannels: [] as ('email' | 'sms')[] }
   expect(evaluateIdentityRequirement('generate_quote', anon, [])).toEqual({ ok: false, needs: ['declared:cnp_or_dateOfBirth'] })
   expect(evaluateIdentityRequirement('generate_quote', { fields: { dateOfBirth: { value: '1998-04-18', provenance: 'declared' } }, verifiedChannels: [] }, [])).toEqual({ ok: true })
   expect(evaluateIdentityRequirement('accept_quote', f(), [])).toEqual({ ok: false, needs: ['verified_channel'] })
-  expect(evaluateIdentityRequirement('initiate_payment', { ...f(), verifiedChannels: ['email'] }, ['id_card'])).toEqual({ ok: false, needs: ['document:id_card'] })
+  expect(evaluateIdentityRequirement('ensure_payment_session', { ...f(), verifiedChannels: ['email'] }, ['id_card'])).toEqual({ ok: false, needs: ['document:id_card'] })
   // erratum 1: validated docs satisfy the product-document requirement
-  expect(evaluateIdentityRequirement('initiate_payment', { ...f(), verifiedChannels: ['email'] }, ['id_card'], ['id_card'])).toEqual({ ok: true })
+  expect(evaluateIdentityRequirement('ensure_payment_session', { ...f(), verifiedChannels: ['email'] }, ['id_card'], ['id_card'])).toEqual({ ok: true })
 })

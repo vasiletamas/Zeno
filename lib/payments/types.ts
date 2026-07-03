@@ -35,11 +35,15 @@ export interface PaymentProvider {
     amount: number // in smallest currency unit (RON bani = amount * 100)
     currency: string // 'RON'
     customerId: string
-    policyId: string
+    referenceId: string // D3.3: the schedule id (was policyId — no policy exists pre-capture)
     description: string
   }): Promise<PaymentIntent>
 
   getPaymentStatus(providerPaymentId: string): Promise<PaymentStatus>
+
+  /** D3.3 (T8.D4): cancel an open intent so superseding never stacks
+   *  capturable sessions — the single-open-attempt invariant. */
+  cancelPaymentIntent(providerPaymentId: string): Promise<void>
 
   handleWebhook(payload: unknown, signature: string): Promise<WebhookEvent>
 }

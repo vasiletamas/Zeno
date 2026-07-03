@@ -30,7 +30,7 @@ import { withdrawConsent } from './handlers/consent-handlers'
 import { getObjectionStrategy } from './handlers/objection-handlers'
 import { collectCustomerField } from './handlers/data-handlers'
 import { escalateToHuman } from './handlers/utility-handlers'
-import { initiatePayment } from './handlers/payment-handlers'
+import { ensurePaymentSession, getPaymentStatus } from './handlers/payment-handlers'
 import { resolveReferral, resolveWorkItem } from './handlers/operator-handlers'
 import { startChannelVerification, confirmChannelVerification, requestDocumentUpload } from './handlers/identity-handlers'
 
@@ -931,8 +931,26 @@ registerTool('cancel_quote', {
 
 // --- Payment ---
 
-registerTool('initiate_payment', {
-  description: 'Initiate a payment for the current policy. Creates a payment intent and shows the inline payment UI.',
+registerTool('get_payment_status', {
+  description:
+    'Get the payment plan state: installments with amounts and statuses, next due amount, captures so far, last failure. ' +
+    'The ONLY payment read — answers from the schedule, the live money truth from acceptance onward.',
+  parameters: {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  kind: 'read',
+}, getPaymentStatus)
+
+registerTool('ensure_payment_session', {
+  description:
+    'Start, resume or retry the payment for the next due installment — ONE tool for all three; the mode is decided by the engine and returned, never passed in. ' +
+    'Guarantees a single open payment attempt (a stale one is superseded, never stacked). Shows the inline payment UI.',
   parameters: {
     type: 'object',
     properties: {},
@@ -942,8 +960,9 @@ registerTool('initiate_payment', {
   customerVisible: true,
   statusMessage: STATUS_INITIATE_PAYMENT,
   allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
   kind: 'commit',
-}, initiatePayment)
+}, ensurePaymentSession)
 
 // --- Data Collection ---
 

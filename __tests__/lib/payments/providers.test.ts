@@ -49,7 +49,7 @@ describe('Stripe event mapping (D2.7)', () => {
 describe('Mock provider ids (D2.7, erratum 9)', () => {
   it('two intents in the same millisecond do not collide under the @unique constraint', async () => {
     const mock = new MockPaymentProvider()
-    const input = { amount: 100, currency: 'RON', customerId: 'c', policyId: 'p', description: 'd' }
+    const input = { amount: 100, currency: 'RON', customerId: 'c', referenceId: 's', description: 'd' }
     const [a, b] = await Promise.all([mock.createPaymentIntent(input), mock.createPaymentIntent(input)])
     expect(a.providerPaymentId).not.toBe(b.providerPaymentId)
   })

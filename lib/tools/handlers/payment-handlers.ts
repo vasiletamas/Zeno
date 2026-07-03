@@ -1,131 +1,185 @@
 /**
- * Payment Tool Handlers (D2.8 — schedule-anchored, interim until D3)
+ * Payment Tool Handlers (D3 — the schedule substrate is the only money truth)
  *
- * initiate_payment reads the SCHEDULE, never a Policy: the policy does not
- * exist until the first successful settlement (contradiction #5). The
- * amount is the due installment's integer minor units — the annual-vs-
- * monthly branch and the premiumMonthly fallback died with the re-anchor
- * (contradiction #3: the schedule is the live money truth).
+ * get_payment_status: the ONLY payment read (contradiction #3).
+ * ensure_payment_session: ONE commit replacing initiate/resume/retry
+ * (T8.D4) — engine-determined mode, single open attempt structurally.
+ * change_payment_option: pre-capture re-rating by superseding the schedule,
+ * never mutating the accepted Quote (T8.D5).
+ * No Quote money field is ever read here; no Policy prerequisite exists
+ * (the policy is born at first capture — contradiction #5).
  */
 
 import { getPaymentProvider } from '@/lib/payments'
+import { deriveSchedulePosition } from '@/lib/engines/payment-position'
 import type { ToolHandler, ToolResult } from '@/lib/tools/types'
+import type { ToolContext } from '@/lib/tools/types'
 import { logError } from '@/lib/errors/logger'
 
-export const initiatePayment: ToolHandler = async (
+/**
+ * The customer's LIVE (non-superseded) schedule with installments and
+ * attempts — conversation→application→quote chain first, customer-scoped
+ * fallback for returning users (D3.2).
+ */
+async function loadLiveSchedule(context: ToolContext) {
+  const conversation = await context.db.conversation.findUnique({
+    where: { id: context.conversationId },
+    select: { activeApplicationId: true },
+  })
+  const quote = conversation?.activeApplicationId
+    ? await context.db.quote.findFirst({
+        where: { applicationId: conversation.activeApplicationId, status: 'ACCEPTED' },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
+      })
+    : null
+  return context.db.paymentSchedule.findFirst({
+    where: {
+      status: { in: ['PENDING_FIRST_CAPTURE', 'ACTIVE', 'COMPLETED'] },
+      ...(quote ? { quoteId: quote.id } : { customerId: context.customerId }),
+    },
+    include: { installments: { orderBy: { sequence: 'asc' }, include: { payments: { orderBy: { createdAt: 'desc' } } } } },
+    orderBy: { createdAt: 'desc' },
+  })
+}
+
+// ─────────────────────────────────────────────
+// get_payment_status (D3.2) — the ONLY payment read; answers exclusively
+// from PaymentSchedule/Installment/Payment state (contradiction #3 — no
+// Quote money field is ever read, only the relation key).
+// ─────────────────────────────────────────────
+
+export const getPaymentStatus: ToolHandler = async (_args, context) => {
+  try {
+    const schedule = await loadLiveSchedule(context)
+    if (!schedule) {
+      return { success: false, error: 'payment_not_pending: no payment schedule exists — payment starts at quote acceptance.' }
+    }
+    const payments = schedule.installments.flatMap((i) => i.payments)
+    const pos = deriveSchedulePosition({
+      installments: schedule.installments,
+      payments,
+      now: new Date(),
+    })
+    const lastFailure = payments.filter((p) => p.status === 'FAILED').sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null
+    return {
+      success: true,
+      data: {
+        frequency: schedule.frequency,
+        status: schedule.status,
+        currency: schedule.currency,
+        installments: schedule.installments.map((i) => ({ sequence: i.sequence, dueAt: i.dueAt.toISOString(), amountMinor: i.amountMinor, status: i.status })),
+        nextDue: pos.nextDue ? { sequence: pos.nextDue.sequence, amountMinor: pos.nextDue.amountMinor, dueAt: pos.nextDue.dueAt.toISOString() } : null,
+        capturedCount: pos.capturedCount,
+        settled: pos.settled,
+        recoveryMode: pos.recoveryMode,
+        openAttemptStale: pos.openAttemptStale,
+        lastFailureReason: lastFailure?.failureReason ?? null,
+      },
+      message: pos.settled
+        ? `Payment plan settled: ${pos.capturedCount}/${schedule.totalInstallments} installments paid.`
+        : `Payment plan ${schedule.frequency}: ${pos.capturedCount}/${schedule.totalInstallments} paid, next due ${(pos.nextDue!.amountMinor / 100).toFixed(2)} ${schedule.currency}.`,
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
+
+/**
+ * ensure_payment_session (D3.3, T8.D4) — ONE commit replaces the
+ * initiate/resume/retry trio. The mode (started|resumed|retried) is ENGINE
+ * OUTPUT from deriveSchedulePosition, never input. Single-open-attempt is
+ * structural: a fresh non-stale open intent is RESUMED (the canonical
+ * session), a stale one is provider-cancelled and marked SUPERSEDED before a
+ * fresh intent is created — capturable sessions never stack (the live
+ * double-charge surface is closed). REPLAY_EXEMPT in the gateway (D3
+ * erratum 1): the apply IS the idempotency mechanism.
+ */
+export const ensurePaymentSession: ToolHandler = async (
   _args,
   context,
 ): Promise<ToolResult> => {
   try {
-    // ─── Resolve conversation → application → accepted quote ───
-    const conversation = await context.db.conversation.findUnique({
-      where: { id: context.conversationId },
-      select: { activeApplicationId: true },
-    })
-    const application = conversation?.activeApplicationId
-      ? await context.db.application.findUnique({
-          where: { id: conversation.activeApplicationId },
-          include: { tier: true, level: true },
-        })
-      : null
-    if (!application) {
-      return { success: false, error: 'payment_not_pending: no application found — accept a quote first.' }
+    const schedule = await loadLiveSchedule(context)
+    if (!schedule || schedule.status === 'COMPLETED') {
+      return { success: false, error: schedule ? 'no_due_installment: the payment plan is fully settled.' : 'payment_not_pending: no payment schedule exists — accept a quote first.' }
     }
-    const quote = await context.db.quote.findFirst({
-      where: { applicationId: application.id, status: 'ACCEPTED' },
-      orderBy: { createdAt: 'desc' },
-    })
-    if (!quote) {
-      return { success: false, error: 'payment_not_pending: no accepted quote — payment starts at acceptance.' }
-    }
-
-    // ─── The live schedule and its first due installment ───────
-    const schedule = await context.db.paymentSchedule.findFirst({
-      where: { quoteId: quote.id, status: { in: ['PENDING_FIRST_CAPTURE', 'ACTIVE'] } },
-      include: { installments: { where: { status: 'PENDING' }, orderBy: { sequence: 'asc' }, take: 1 } },
-      orderBy: { createdAt: 'desc' },
-    })
-    const installment = schedule?.installments[0]
-    if (!schedule || !installment) {
+    const payments = schedule.installments.flatMap((i) => i.payments)
+    const pos = deriveSchedulePosition({ installments: schedule.installments, payments, now: new Date() })
+    if (!pos.nextDue) {
       return { success: false, error: 'no_due_installment: the schedule has no pending installment to pay.' }
     }
-
-    const amountMinor = installment.amountMinor
-    const currency = schedule.currency
-
-    // ─── Create PaymentIntent via the provider ──────────────────
     const provider = getPaymentProvider()
-    const paymentIntent = await provider.createPaymentIntent({
-      amount: amountMinor,
-      currency,
-      customerId: context.customerId,
-      policyId: schedule.quoteId, // provider input field name stays until D3's interface pass
-      description: `Installment ${installment.sequence}/${schedule.totalInstallments}`,
-    })
 
-    const providerEnum = provider.name.toUpperCase() as 'STRIPE' | 'PAYU' | 'MOCK'
-    const payment = await context.db.payment.create({
-      data: {
-        installmentId: installment.id,
-        customerId: context.customerId,
-        amountMinor,
-        currency,
-        provider: providerEnum,
-        providerPaymentId: paymentIntent.providerPaymentId,
-        status: 'PENDING',
-      },
-    })
-
-    // ─── Description for the payment card ──────────────────────
-    const tierName = application.tier?.name as Record<string, string> | null
-    const levelName = application.level?.name as Record<string, string> | null
-    const lang = context.language
-    const policyDescription = [
-      tierName?.[lang] ?? tierName?.ro ?? '',
-      levelName?.[lang] ?? levelName?.ro ?? '',
-      application.includesAddon ? '+ BD' : '',
-    ]
-      .filter(Boolean)
-      .join(' ')
-
-    const displayAmount = amountMinor / 100
-
-    return {
-      success: true,
-      data: {
-        paymentId: payment.id,
-        amount: displayAmount,
-        currency,
-        installmentSequence: installment.sequence,
-        totalInstallments: schedule.totalInstallments,
-        providerName: provider.name,
-      },
-      message: `Payment initiated for installment ${installment.sequence}/${schedule.totalInstallments} (${displayAmount.toFixed(2)} ${currency}).`,
-      uiAction: {
-        type: 'show_payment',
-        payload: {
-          clientSecret: paymentIntent.clientSecret,
-          amount: displayAmount,
-          currency,
-          providerName: provider.name,
-          paymentId: payment.id,
-          policyDescription,
-          redirectUrl: paymentIntent.redirectUrl ?? null,
+    if (pos.openAttempt && !pos.openAttemptStale) {
+      // the canonical open session — resumed, no new capturable intent
+      return {
+        success: true,
+        data: { mode: 'resumed', paymentId: pos.openAttempt.id, amountMinor: pos.nextDue.amountMinor, installmentSequence: pos.nextDue.sequence, totalInstallments: schedule.totalInstallments },
+        message: `Resuming the open payment session for installment ${pos.nextDue.sequence}/${schedule.totalInstallments}.`,
+        uiAction: {
+          type: 'show_payment',
+          payload: { clientSecret: null, redirectUrl: null, amount: pos.nextDue.amountMinor / 100, currency: schedule.currency, providerName: provider.name, paymentId: pos.openAttempt.id, mode: 'resumed' },
         },
-      },
+      }
+    }
+
+    if (pos.openAttempt && pos.openAttempt.providerPaymentId) {
+      // stale: supersede — cancel at the provider, mark SUPERSEDED
+      await provider.cancelPaymentIntent(pos.openAttempt.providerPaymentId)
+      await context.db.payment.updateMany({
+        where: { providerPaymentId: pos.openAttempt.providerPaymentId, status: 'PENDING' },
+        data: { status: 'SUPERSEDED' },
+      })
+    }
+
+    // the intent is created before the gateway transaction commits — a
+    // failure after this point cancels it so no orphan capturable session
+    // survives a rollback
+    const intent = await provider.createPaymentIntent({
+      amount: pos.nextDue.amountMinor,
+      currency: schedule.currency,
+      customerId: context.customerId,
+      referenceId: schedule.id,
+      description: `Installment ${pos.nextDue.sequence}/${schedule.totalInstallments}`,
+    })
+    try {
+      const payment = await context.db.payment.create({
+        data: {
+          installmentId: pos.nextDue.id,
+          customerId: context.customerId,
+          amountMinor: pos.nextDue.amountMinor,
+          currency: schedule.currency,
+          provider: provider.name.toUpperCase() as 'STRIPE' | 'PAYU' | 'MOCK',
+          providerPaymentId: intent.providerPaymentId,
+          status: 'PENDING',
+        },
+      })
+      const mode = pos.recoveryMode === 'resumed' ? 'started' : pos.recoveryMode
+      return {
+        success: true,
+        data: { mode, paymentId: payment.id, amountMinor: payment.amountMinor, installmentSequence: pos.nextDue.sequence, totalInstallments: schedule.totalInstallments },
+        message: `Payment session ${mode} for installment ${pos.nextDue.sequence}/${schedule.totalInstallments} (${(payment.amountMinor / 100).toFixed(2)} ${schedule.currency}).`,
+        uiAction: {
+          type: 'show_payment',
+          payload: { clientSecret: intent.clientSecret, redirectUrl: intent.redirectUrl ?? null, amount: payment.amountMinor / 100, currency: schedule.currency, providerName: provider.name, paymentId: payment.id, mode },
+        },
+      }
+    } catch (dbError) {
+      // DB write failed inside the gateway tx — cancel the just-created
+      // intent so the rollback leaves no capturable orphan at the provider
+      await provider.cancelPaymentIntent(intent.providerPaymentId).catch(() => {})
+      throw dbError
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     logError({
       layer: 'tool',
-      category: 'initiate_payment',
-      message: `Payment initiation failed: ${message}`,
+      category: 'ensure_payment_session',
+      message: `ensure_payment_session failed: ${message}`,
       context: { conversationId: context.conversationId, customerId: context.customerId },
       error,
     })
-    return {
-      success: false,
-      error: `Failed to initiate payment: ${message}`,
-    }
+    return { success: false, error: `Failed to ensure payment session: ${message}` }
   }
 }

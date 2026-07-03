@@ -86,7 +86,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.25.0' // 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application; 1.23.0: acknowledge_disclosures exposed on the live issued quote (D2.3, T7.D2); 1.24.0: accept_quote legality through the pure acceptQuoteLegality predicate (D2.5, T7.D6) — expiry → transition → verified_channel identity → disclosure acks; 1.25.0: initiate_payment rides the schedule (D2.8) — due PENDING installment exposes, settled answers no_due_installment, no Policy prerequisite
+export const engineVersion = '1.27.0' // 1.27.0: ensure_payment_session replaces the legacy initiate tool (D3.3, T8.D4); 1.26.0: get_payment_status read exposed on schedule existence (D3.2); 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application; 1.23.0: acknowledge_disclosures exposed on the live issued quote (D2.3, T7.D2); 1.24.0: accept_quote legality through the pure acceptQuoteLegality predicate (D2.5, T7.D6) — expiry → transition → verified_channel identity → disclosure acks; 1.25.0: the payment commit rides the schedule (D2.8) — due PENDING installment exposes, settled answers no_due_installment, no Policy prerequisite
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -261,15 +261,17 @@ export const ACTION_RULES: ActionRule[] = [
       : null) },
   // modify_quote died at D1.7 (T13.D2): post-quote mutation is engine-illegal
   // (application_frozen) — cancel_quote + a new application is the change path.
-  // D2.8 (contradiction #3/#5): payment rides the SCHEDULE — a due PENDING
-  // installment exposes it; a settled schedule answers precisely; no Policy
-  // prerequisite (the policy does not exist until first capture).
-  { action: 'initiate_payment', kind: 'commit',
+  // D3.2: the ONLY payment read — exposed once a schedule exists
+  { action: 'get_payment_status', kind: 'read', exposedWhen: (s) => s.schedule.exists },
+  // D3.3 (T8.D4): ensure_payment_session replaces the initiate/resume/retry
+  // trio — exposed while a due PENDING installment exists; a settled
+  // schedule answers precisely; no Policy prerequisite (contradiction #5).
+  { action: 'ensure_payment_session', kind: 'commit',
     exposedWhen: (s) => s.schedule.exists && !s.schedule.settled && s.schedule.nextDueAt !== null,
     blockedReason: (s) => (s.schedule.exists && (s.schedule.settled || s.schedule.nextDueAt === null) ? { reason: 'no_due_installment' } : null) },
 ]
 
-const NEXT_BEST_PRIORITY = ['initiate_payment', 'accept_quote', 'generate_quote', 'select_coverage', 'write_question_answer', 'sign_dnt', 'write_dnt_answer', 'open_dnt_session', 'set_application', 'set_candidate_product', 'list_products']
+const NEXT_BEST_PRIORITY = ['ensure_payment_session', 'accept_quote', 'generate_quote', 'select_coverage', 'write_question_answer', 'sign_dnt', 'write_dnt_answer', 'open_dnt_session', 'set_application', 'set_candidate_product', 'list_products']
 
 export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequirements?: IdentityRequirementsTable }): DeriveAndExposeResult {
   const d: Derived = { ...derivePhase(s), eligibility: deriveEligibility(s), suitability: deriveSuitability(s) }

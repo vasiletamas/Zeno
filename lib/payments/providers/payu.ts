@@ -59,7 +59,7 @@ export class PayUPaymentProvider implements PaymentProvider {
     amount: number
     currency: string
     customerId: string
-    policyId: string
+    referenceId: string
     description: string
   }): Promise<PaymentIntent> {
     const { merchantId, secretKey } = getPayUConfig()
@@ -72,7 +72,7 @@ export class PayUPaymentProvider implements PaymentProvider {
       description: input.description,
       currencyCode: input.currency,
       totalAmount: String(input.amount), // PayU expects string amount in smallest unit
-      extOrderId: `${input.policyId}_${Date.now()}`,
+      extOrderId: `${input.referenceId}_${Date.now()}`,
       continueUrl: `${appUrl}/api/payments/confirm?provider=payu`,
       notifyUrl: `${appUrl}/api/webhooks/payu`,
       products: [
@@ -168,6 +168,18 @@ export class PayUPaymentProvider implements PaymentProvider {
         }
       default:
         return { status: 'pending' }
+    }
+  }
+
+  async cancelPaymentIntent(providerPaymentId: string): Promise<void> {
+    const { merchantId, secretKey } = getPayUConfig()
+    const accessToken = await getAccessToken(merchantId, secretKey)
+    const response = await fetch(`${PAYU_API_BASE}/api/v2_1/orders/${providerPaymentId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    if (!response.ok) {
+      throw new Error(`PayU order cancel failed: ${response.status} ${response.statusText}`)
     }
   }
 

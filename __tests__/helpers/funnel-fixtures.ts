@@ -125,6 +125,10 @@ export async function buildAcceptedQuoteWithSchedule(options: { frequency: 'annu
   if (ask.outcome !== 'requires_confirmation') throw new Error(`buildAcceptedQuoteWithSchedule: accept ask ${ask.outcome} (${ask.reason})`)
   const res = await accept({ paymentOption: options.frequency, confirmToken: ask.confirmToken })
   if (res.outcome !== 'applied') throw new Error(`buildAcceptedQuoteWithSchedule: accept ${res.outcome} (${res.reason})`)
+  // ensure_payment_session's #1 row demands a VALIDATED id_card (B3/D3.3)
+  await prisma.customerDocument.create({
+    data: { customerId: fx.customerId, kind: 'id_card', status: 'validated', encryptedData: Buffer.from('fixture'), dataIv: 'iv', dataTag: 'tag' },
+  })
   const schedule = await prisma.paymentSchedule.findFirstOrThrow({ where: { quoteId: fx.quoteId }, include: { installments: { orderBy: { sequence: 'asc' } } } })
   if (options.settle) {
     await prisma.installment.updateMany({ where: { scheduleId: schedule.id }, data: { status: 'PAID', paidAt: new Date() } })

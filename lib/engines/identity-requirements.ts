@@ -10,10 +10,10 @@
  * — the full declared tier already implies both fields, which would make
  * the ratified 'CNP-or-DOB' clause vacuous; this encoding keeps it
  * meaningful (either field alone unlocks quoting). (b) T4-R6's document
- * default is resolved to before-initiate_payment; flip by seeding
+ * default is resolved to before-payment-session; flip by seeding
  * accept_quote's verificationRequirements if compliance wants accept-time.
  * Rows are keyed by REGISTERED commit tools; the payment-documents row
- * rides initiate_payment until D3 lands ensure_payment_session.
+ * rides ensure_payment_session (D3.3 renamed the legacy initiate tool).
  */
 
 import type { IdentityTier, DomainSnapshot } from './domain-types'
@@ -30,7 +30,7 @@ export const IDENTITY_REQUIREMENTS: IdentityRequirementsTable = {
   sign_dnt: { minTier: 'anonymous' },
   generate_quote: { minTier: 'anonymous', anyDeclaredOf: ['cnp', 'dateOfBirth'] },
   accept_quote: { minTier: 'verified_channel' },
-  initiate_payment: { minTier: 'verified_channel', productDocuments: true },
+  ensure_payment_session: { minTier: 'verified_channel', productDocuments: true },
 }
 
 const TIER_ORDER: Record<IdentityTier, number> = { anonymous: 0, declared: 1, verified_channel: 2 }

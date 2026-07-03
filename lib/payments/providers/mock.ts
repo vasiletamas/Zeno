@@ -20,7 +20,7 @@ export class MockPaymentProvider implements PaymentProvider {
     amount: number
     currency: string
     customerId: string
-    policyId: string
+    referenceId: string
     description: string
   }): Promise<PaymentIntent> {
     // D2.7 (erratum 9): Payment.providerPaymentId is @unique — Date.now()
@@ -44,6 +44,10 @@ export class MockPaymentProvider implements PaymentProvider {
       status: 'completed',
       paidAt: new Date(),
     }
+  }
+
+  async cancelPaymentIntent(_providerPaymentId: string): Promise<void> {
+    // mock intents hold no provider state — cancellation is a no-op
   }
 
   async handleWebhook(

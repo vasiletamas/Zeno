@@ -184,9 +184,9 @@ export async function seedProduct(prisma: PrismaClient) {
       ],
       eligibility: PROTECT_ELIGIBILITY,
       suitabilityRules: PROTECT_SUITABILITY,
-      // B3.7 (#1 productDocuments): R6 resolved to before-initiate_payment;
+      // B3.7 (#1 productDocuments): R6 resolved to before-payment-session;
       // flip by seeding accept_quote: ['id_card'] if compliance wants accept-time.
-      verificationRequirements: { accept_quote: [], initiate_payment: ['id_card'] },
+      verificationRequirements: { accept_quote: [], ensure_payment_session: ['id_card'] },
       features: [
         'Two packages: Standard and Optim',
         'Three premium levels per package (I, II, III)',
@@ -514,9 +514,9 @@ PRIORITATE LA CONTRADICȚII
       ],
       eligibility: PROTECT_ELIGIBILITY,
       suitabilityRules: PROTECT_SUITABILITY,
-      // B3.7 (#1 productDocuments): R6 resolved to before-initiate_payment;
+      // B3.7 (#1 productDocuments): R6 resolved to before-payment-session;
       // flip by seeding accept_quote: ['id_card'] if compliance wants accept-time.
-      verificationRequirements: { accept_quote: [], initiate_payment: ['id_card'] },
+      verificationRequirements: { accept_quote: [], ensure_payment_session: ['id_card'] },
       features: [
         'Two packages: Standard and Optim',
         'Three premium levels per package (I, II, III)',

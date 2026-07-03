@@ -74,6 +74,7 @@ enum PaymentStatus {
   COMPLETED
   FAILED
   REFUNDED
+  SUPERSEDED
 }
 
 enum PaymentProvider {
