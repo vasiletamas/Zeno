@@ -185,3 +185,18 @@ export async function loadTurnContext(
     recentMessages,
   }
 }
+
+/**
+ * D2.9 (contradiction #11): a conversation is a CHANNEL — ACTIVE or
+ * ARCHIVED (inactivity sweep), never a funnel stage. A turn on an archived
+ * conversation REACTIVATES it (the old terminal guard threw). This is the
+ * ONLY status-writing call site in lib/; the sweep script is the other, in
+ * scripts/.
+ */
+export async function reactivateIfArchived(conversationId: string): Promise<boolean> {
+  const res = await prisma.conversation.updateMany({
+    where: { id: conversationId, status: 'ARCHIVED' },
+    data: { status: 'ACTIVE', archivedAt: null },
+  })
+  return res.count > 0
+}

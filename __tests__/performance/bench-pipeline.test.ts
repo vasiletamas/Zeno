@@ -124,6 +124,8 @@ vi.mock('@/lib/db', () => {
         findUnique: conversationFindUnique,
         findUniqueOrThrow: conversationFindUniqueOrThrow,
         update: conversationUpdate,
+        // D2.9: reactivate-on-turn probes ARCHIVED status at the pipeline top
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       message: {
         create: messageCreate,

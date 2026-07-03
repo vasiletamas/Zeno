@@ -33,7 +33,7 @@ import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
 import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, loadDntContext, loadPaymentContext, loadPolicyContext, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
 import { buildTurnTools, DEGRADED_FLOOR } from './turn-tools'
 import { shouldRefreshExposure, formatRoundRefreshMessage } from './round-refresh'
-import { loadTurnContext, type TurnContext } from './turn-context'
+import { loadTurnContext, reactivateIfArchived, type TurnContext } from './turn-context'
 import { inferCandidate, hasAnyCategoryKeyword } from './candidate-inference'
 import { resolveAgent } from './agent-resolver'
 import { executeComplianceCheck, COMPLIANCE_RELEVANT_BY_PHASE, type ComplianceCheckResult } from './compliance-checker'
@@ -337,8 +337,9 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     preloadedInsights = undefined
   }
 
-  // D2 (contradiction #11): no terminal-conversation guard — a conversation
-  // is a channel; turns REACTIVATE archived ones (D2.9 wires the flip).
+  // D2.9 (contradiction #11): no terminal-conversation guard — a
+  // conversation is a channel; a turn on an ARCHIVED one reactivates it.
+  await reactivateIfArchived(state.conversationId)
 
   // Guard: must have content
   if (!input.message && !input.syntheticToolCall) {
