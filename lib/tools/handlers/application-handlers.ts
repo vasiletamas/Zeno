@@ -14,12 +14,13 @@
 import {
   getNextQuestion,
   validateAnswer,
-  checkForFlags,
   calculateProgress,
 } from '@/lib/engines/questionnaire-engine'
 import { resolveGroupCodes, resolveActiveProductId } from '@/lib/engines/question-groups'
 import { canTransition, type AppStatus } from '@/lib/engines/application-rules'
-import { writeRevision } from '@/lib/engines/answer-store'
+import { computeConsequences, type ConsequencePlan } from '@/lib/engines/consequence-planner'
+import { computeVisibleSet } from '@/lib/engines/dependency-graph'
+import { applyConsequencePlan, buildPlannerSnapshot, loadDependencyGraph } from '@/lib/engines/consequence-applier'
 import { getIdentityFacts } from '@/lib/customer/profile-service'
 import { deriveIdentityTier } from '@/lib/engines/identity-rules'
 import type { ToolHandler, ToolContext } from '@/lib/tools/types'
@@ -149,42 +150,23 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
       return { success: false, error: validation.error ?? 'Invalid answer.' }
     }
 
-    const flagResult = checkForFlags(currentQuestion.validationRules, validation.normalizedValue)
-
-    const saveAnswer = () =>
-      writeRevision(context.db, {
-        applicationId: application.id,
-        questionId: currentQuestion.id,
-        value: validation.normalizedValue,
-        source: 'USER_ANSWER',
-      })
-
-    // escalate-class flag: save, pause, surface
-    if (flagResult.flagged && flagResult.action === 'escalate') {
-      await saveAnswer()
-      const existingFlags = (application.flagsForReview as unknown as Array<Record<string, unknown>>) ?? []
-      const newFlag = { questionCode: currentQuestion.code, answer: validation.normalizedValue, reason: flagResult.reason, action: flagResult.action }
-      await context.db.application.update({
-        where: { id: application.id },
-        data: { status: 'PAUSED', flagsForReview: JSON.parse(JSON.stringify([...existingFlags, newFlag])) },
-      })
-      return {
-        success: true,
-        data: { answerSaved: true, escalated: true, reason: flagResult.reason, applicationId: application.id },
-        message: `Application paused for review. ${flagResult.reason ?? 'This answer requires human review.'}`,
-      }
+    if (!currentQuestion.code) {
+      return { success: false, error: 'invalid_args: the current question has no code — cannot plan consequences.' }
     }
 
-    if (flagResult.flagged && flagResult.action === 'flag') {
-      const existingFlags = (application.flagsForReview as unknown as Array<Record<string, unknown>>) ?? []
-      const newFlag = { questionCode: currentQuestion.code, answer: validation.normalizedValue, reason: flagResult.reason, action: 'flag' }
-      await context.db.application.update({
-        where: { id: application.id },
-        data: { flagsForReview: JSON.parse(JSON.stringify([...existingFlags, newFlag])) },
-      })
+    // C1.5: ONE planner path — sensitivity confirmation, cascades,
+    // eligibility, derived flags/status all come from the plan.
+    const graph = await loadDependencyGraph(context.db, application.productId)
+    const snapshot = await buildPlannerSnapshot(context.db, context.conversationId)
+    const plan = computeConsequences(graph, snapshot, { node: `answer:${currentQuestion.code}`, newValue: validation.normalizedValue })
+    if (plan.requiresConfirmation && !context.confirmed) {
+      return { success: false, requiresConfirmation: { preview: planPreview(plan) } }
     }
-
-    await saveAnswer()
+    await applyConsequencePlan(context.db, {
+      conversationId: context.conversationId,
+      applicationId: application.id,
+      commitId: context.commitId ?? crypto.randomUUID(),
+    }, plan)
     await context.db.application.update({
       where: { id: application.id },
       data: { currentQuestionIndex: application.currentQuestionIndex + 1 },
@@ -201,13 +183,31 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
       })
     }
 
-    const nextResult = await getNextQuestion(activeGroupCodes, scope)
+    // derived flag escalation (erratum 10): the applier recomputed
+    // flags/status from active revisions — surface a pause when it happened.
+    const postApp = await context.db.application.findUniqueOrThrow({ where: { id: application.id } })
+    if (postApp.status === 'PAUSED') {
+      const escalated = (postApp.flagsForReview as unknown as Array<{ questionCode?: string; reason?: string; action?: string }> ?? [])
+        .find((f) => f.action === 'escalate')
+      return {
+        success: true,
+        effects: plan.effects,
+        data: { answerSaved: true, escalated: true, reason: escalated?.reason ?? null, applicationId: application.id, ...planData(plan) },
+        message: `Application paused for review. ${escalated?.reason ?? 'This answer requires human review.'}`,
+      }
+    }
+
+    // the plan may have toggled the addon (eligibility) — recompute the
+    // active group codes so the next question follows the new branch.
+    const postGroupCodes = await appGroupCodesFor(context, postApp.includesAddon)
+    const nextResult = await getNextQuestion(postGroupCodes, scope)
     if (!nextResult) {
       // Completeness is DERIVED (missingCodes = []) — the status machine
       // stays OPEN; generate_quote exposure turns on from the derived state.
       return {
         success: true,
-        data: { answerSaved: true, isComplete: true, applicationId: application.id, readyForQuote: true },
+        effects: plan.effects,
+        data: { answerSaved: true, isComplete: true, applicationId: application.id, readyForQuote: true, ...planData(plan) },
         message: 'Application questionnaire complete. Choose coverage with select_coverage if not chosen, then generate the quote.',
       }
     }
@@ -217,6 +217,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
     const nqText = nq.text as { en: string; ro: string }
     return {
       success: true,
+      effects: plan.effects,
       data: {
         answerSaved: true,
         isComplete: false,
@@ -229,6 +230,7 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
           options: nq.options,
         },
         progress: nextResult.progress,
+        ...planData(plan),
       },
       message: `Answer saved. ${nextResult.progress.total - nextResult.progress.answered} questions remaining.`,
       uiAction: {
@@ -239,6 +241,93 @@ export const saveApplicationAnswer: ToolHandler = async (args, context) => {
           groupType: 'application',
         } as unknown as Record<string, unknown>,
       },
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
+
+/** The planner outputs every answer-commit envelope carries (erratum 8). */
+function planData(plan: ConsequencePlan): Record<string, unknown> {
+  return {
+    questionsAdded: plan.questionsAdded,
+    questionsRemoved: plan.questionsRemoved,
+    invalidations: plan.invalidations,
+    eligibilityOutcomes: plan.eligibilityOutcomes,
+  }
+}
+
+/** The requires_confirmation preview IS the plan (T6.D6). */
+function planPreview(plan: ConsequencePlan): Record<string, unknown> {
+  return { ...planData(plan), mutation: plan.mutation, selectionPatch: plan.selectionPatch, statusTransition: plan.statusTransition, effects: plan.effects }
+}
+
+// ─────────────────────────────────────────────
+// modify_answer (C1.5) — planner-driven correction, no status-guard bypass
+// ─────────────────────────────────────────────
+
+export const modifyAnswer: ToolHandler = async (args, context) => {
+  const questionCode = args.questionCode as string
+  const newValue = args.newValue as string
+  try {
+    const application = await loadActiveApplication(context)
+    if (!application) {
+      return { success: false, error: 'no_open_application: no active application in this conversation.' }
+    }
+    if (application.status === 'REFERRED') {
+      return { success: false, error: 'with_underwriter: the application is under review — answers cannot change until the underwriter answers.' }
+    }
+    if (application.status === 'CANCELLED') {
+      return { success: false, error: 'illegal_status_transition: a CANCELLED application cannot be modified.' }
+    }
+
+    const graph = await loadDependencyGraph(context.db, application.productId)
+    const snapshot = await buildPlannerSnapshot(context.db, context.conversationId)
+    if (application.status === 'COMPLETED' && snapshot.application.quoteIssued) {
+      return { success: false, error: 'quote_already_issued: modify the quote (modify_quote), not the sealed application.' }
+    }
+    if (!snapshot.questionCodes.includes(questionCode)) {
+      return { success: false, error: `invalid_args: ${questionCode} is not part of this application's questionnaire.` }
+    }
+    const visible = computeVisibleSet(graph, snapshot.questionCodes, { answers: snapshot.answers.active, selection: snapshot.selection })
+    if (!visible.has(questionCode)) {
+      return { success: false, error: `removed_by_branch: ${questionCode} is not part of the current branch (check the coverage selection).` }
+    }
+
+    const question = await context.db.question.findFirstOrThrow({ where: { code: questionCode } })
+    const validation = validateAnswer(
+      { type: question.type, options: question.options, validationRules: question.validationRules },
+      newValue,
+    )
+    if (!validation.valid) {
+      return { success: false, error: validation.error ?? 'Invalid answer.' }
+    }
+
+    const plan = computeConsequences(graph, snapshot, { node: `answer:${questionCode}`, newValue: validation.normalizedValue })
+    if (plan.requiresConfirmation && !context.confirmed) {
+      return { success: false, requiresConfirmation: { preview: planPreview(plan) } }
+    }
+    await applyConsequencePlan(context.db, {
+      conversationId: context.conversationId,
+      applicationId: application.id,
+      commitId: context.commitId ?? crypto.randomUUID(),
+    }, plan)
+
+    const postApp = await context.db.application.findUniqueOrThrow({ where: { id: application.id } })
+    return {
+      success: true,
+      effects: plan.effects,
+      data: {
+        answerModified: true,
+        questionCode,
+        value: validation.normalizedValue,
+        applicationId: application.id,
+        applicationStatus: postApp.status,
+        ...planData(plan),
+      },
+      message: plan.invalidations.length > 0
+        ? `Answer updated. ${plan.invalidations.length} dependent item(s) were invalidated — review them with the customer.`
+        : 'Answer updated.',
     }
   } catch (error) {
     return { success: false, error: String(error) }

@@ -17,7 +17,7 @@ import { calculateAge } from '@/lib/chat/age'
 
 // --- Handler imports ---
 import { getDntState, getDntQuestions, getDntNextQuestion, openDntSession, writeDntAnswer, signDnt } from './handlers/dnt-handlers'
-import { setApplication, saveApplicationAnswer, resumeApplication, cancelApplication, getLastApplicationInfo } from './handlers/application-handlers'
+import { setApplication, saveApplicationAnswer, modifyAnswer, resumeApplication, cancelApplication, getLastApplicationInfo } from './handlers/application-handlers'
 import { selectCoverage } from './handlers/select-coverage-handlers'
 import { generateQuote, getQuoteDetails, acceptQuote, modifyQuote } from './handlers/quote-handlers'
 import { compareProducts } from './handlers/product-handlers'
@@ -702,6 +702,28 @@ registerTool('save_application_answer', {
   sideEffect: 'save',
   kind: 'commit',
 }, saveApplicationAnswer)
+
+registerTool('modify_answer', {
+  description:
+    'Correct a previously answered application question by its code. The consequence planner computes the full cascade ' +
+    '(invalidated dependents, added/removed questions, eligibility, status) — sensitive answers require the customer\'s explicit confirmation (resend with confirmToken).',
+  parameters: {
+    type: 'object',
+    properties: {
+      questionCode: { type: 'string', description: 'The code of the question to modify (e.g. HEALTH_DECLARATION_CONFIRM).' },
+      newValue: { type: 'string', description: 'The corrected answer.' },
+      confirmToken: { type: 'string', description: 'Confirmation token from a prior requires_confirmation envelope.' },
+    },
+    required: ['questionCode', 'newValue'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'save',
+  kind: 'commit',
+}, modifyAnswer)
 
 registerTool('select_coverage', {
   description:

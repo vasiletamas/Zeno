@@ -52,6 +52,13 @@ export const translations: Record<Language, TranslationTable> = {
       work_item_not_open: 'Sarcina de lucru a fost deja rezolvată sau închisă.',
       permission_denied: 'Nu ai permisiunea pentru această acțiune.',
       not_exposed: 'Această acțiune nu este disponibilă în acest moment.',
+      validity_dependency_changed: 'O alegere anterioară s-a schimbat, așa că acest răspuns trebuie reconfirmat.',
+      removed_by_branch: 'Această întrebare nu mai face parte din traseul actual al cererii.',
+      addon_ineligible_medical_history: 'Istoricul medical declarat nu permite adăugarea opțiunii de tratament în străinătate.',
+      ineligible_age_minimum: 'Produsul este disponibil de la vârsta de 18 ani.',
+      ineligible_age_maximum: 'Produsul este disponibil până la vârsta de 64 de ani.',
+      ineligible_residency: 'Produsul este disponibil doar pentru rezidenții din România.',
+      addon_age_band_unavailable: 'Opțiunea de tratament în străinătate nu este disponibilă pentru această vârstă.',
     },
     // Hero section
     hero_headline: 'Dacă mâine primești un diagnostic grav, ai fi pregătit?',
@@ -187,6 +194,13 @@ export const translations: Record<Language, TranslationTable> = {
       work_item_not_open: 'The work item has already been resolved or closed.',
       permission_denied: 'You do not have permission for this action.',
       not_exposed: 'This action is not available right now.',
+      validity_dependency_changed: 'An earlier choice changed, so this answer needs to be confirmed again.',
+      removed_by_branch: 'This question is no longer part of the current application path.',
+      addon_ineligible_medical_history: 'The declared medical history does not allow adding the treatment-abroad option.',
+      ineligible_age_minimum: 'The product is available from age 18.',
+      ineligible_age_maximum: 'The product is available up to age 64.',
+      ineligible_residency: 'The product is only available to residents of Romania.',
+      addon_age_band_unavailable: 'The treatment-abroad option is not available for this age.',
     },
     // Hero section
     hero_headline:

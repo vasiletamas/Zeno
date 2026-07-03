@@ -100,6 +100,15 @@ export interface ToolResult {
     provenance?: string
     timestamp: string
   }
+  /**
+   * Handler-driven CONDITIONAL confirmation (C1.5, T6.D3/T6.D6): returned
+   * when the consequence plan demands confirmation and the request carried
+   * no verified token (context.confirmed false). The gateway turns this
+   * into a requires_confirmation envelope with a minted confirmToken; the
+   * preview (the plan) is what the customer is asked to approve. A handler
+   * returning this MUST NOT have written anything yet.
+   */
+  requiresConfirmation?: { preview: Record<string, unknown> }
 }
 
 export interface ToolContext {
@@ -124,6 +133,20 @@ export interface ToolContext {
    * The orchestrator refreshes this after every applied commit round.
    */
   exposedTools?: string[]
+  /**
+   * C1.5 conditional confirmation: true when the request carried a
+   * confirmToken the gateway verified against the current state
+   * fingerprint. Handlers whose consequence plan demands confirmation
+   * proceed only when this is set; otherwise they return
+   * ToolResult.requiresConfirmation.
+   */
+  confirmed?: boolean
+  /**
+   * C1.5: the gateway-minted commit id — the CommitLedger row of this apply
+   * is created with this id, so answer revisions written through the
+   * consequence applier carry a real ledger reference in Answer.commitId.
+   */
+  commitId?: string
   product?: {
     id: string
     code: string

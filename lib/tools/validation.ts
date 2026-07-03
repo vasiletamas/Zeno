@@ -94,6 +94,12 @@ const saveApplicationAnswerSchema = z.object({
   answer: z.string().min(1, 'Answer is required'),
 }).strict()
 
+const modifyAnswerSchema = z.object({
+  questionCode: z.string().min(1, 'Question code is required'),
+  newValue: z.string().min(1, 'New value is required'),
+  confirmToken: z.string().optional(),
+}).strict()
+
 const selectCoverageSchema = z.object({
   tier: z.string().optional(),
   level: z.string().optional(),
@@ -228,6 +234,7 @@ const toolSchemas: Record<string, ZodType> = {
   // Application (B4 lifecycle)
   set_application: setApplicationSchema,
   save_application_answer: saveApplicationAnswerSchema,
+  modify_answer: modifyAnswerSchema,
   select_coverage: selectCoverageSchema,
   resume_application: resumeApplicationSchema,
   cancel_application: cancelApplicationSchema,

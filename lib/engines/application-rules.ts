@@ -33,6 +33,8 @@ export interface AppExposureInput {
     level: string | null
     addon: boolean | null
     answersComplete: boolean
+    /** C1.5: at least one ACTIVE answer revision — something to modify. */
+    hasAnswers: boolean
   }
   dntValidForProduct: boolean
 }
@@ -48,6 +50,16 @@ export function applicationExposure(i: AppExposureInput): { available: string[];
   const blocked: AppBlocked[] = []
   if (!i.application.exists) return { available, blocked }
   if (i.application.status === 'OPEN' || i.application.status === 'PAUSED') available.push('resume_application')
+  // C1.5: corrections flow through the consequence planner — exposed on OPEN
+  // and PAUSED (the erratum-10 unpause path: fixing the escalated answer is
+  // exactly what un-pauses), still behind the T5.D1 DNT gate.
+  if ((i.application.status === 'OPEN' || i.application.status === 'PAUSED') && i.application.hasAnswers) {
+    if (i.dntValidForProduct) {
+      available.push('modify_answer')
+    } else {
+      blocked.push({ action: 'modify_answer', reason: 'requires_consent', params: { needs: ['valid_dnt'] } })
+    }
+  }
   if (i.application.status === 'OPEN') {
     available.push('select_coverage', 'cancel_application')
     if (i.dntValidForProduct) {

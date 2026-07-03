@@ -290,6 +290,35 @@ export function checkForFlags(
   return { flagged: false, action: null, reason: null }
 }
 
+export interface DerivedFlag {
+  questionCode: string
+  answer: string
+  reason: string | null
+  action: 'flag' | 'escalate' | 'reject'
+}
+
+/**
+ * Flags DERIVED from active answer revisions (C1.5, erratum 10 / T6.D2):
+ * pure recomputation over the active view, so a corrected answer can never
+ * leave a zombie flag behind. The consequence applier persists the result
+ * (plus PAUSED/OPEN status recompute) inside the commit transaction.
+ */
+export function deriveFlags(
+  activeAnswers: Record<string, string>,
+  questionRules: { code: string; validationRules: unknown }[],
+): DerivedFlag[] {
+  const flags: DerivedFlag[] = []
+  for (const q of questionRules) {
+    const value = activeAnswers[q.code]
+    if (value === undefined) continue
+    const result = checkForFlags(q.validationRules, value)
+    if (result.flagged && result.action) {
+      flags.push({ questionCode: q.code, answer: value, reason: result.reason, action: result.action })
+    }
+  }
+  return flags
+}
+
 // ==========================================
 // HELPERS (PRIVATE)
 // ==========================================

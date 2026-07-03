@@ -127,9 +127,10 @@ async function findFreshApplied(db: Db, conversationId: string, tool: string, ke
   })
 }
 
-async function writeLedger(db: Db, req: CommitRequest, targetRef: string, argsHash: string, envelope: CommitResult, phaseFrom: string, phaseTo: string): Promise<void> {
+async function writeLedger(db: Db, req: CommitRequest, targetRef: string, argsHash: string, envelope: CommitResult, phaseFrom: string, phaseTo: string, id?: string): Promise<void> {
   await db.commitLedger.create({
     data: {
+      ...(id ? { id } : {}),
       conversationId: req.conversationId, customerId: req.customerId, actor: req.actor, tool: req.tool,
       targetRef, argsHash, outcome: envelope.outcome, effects: envelope.effects,
       reasonCode: envelope.reason ?? null, phaseFrom, phaseTo,
@@ -197,9 +198,14 @@ export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
   // fingerprint, never a hard reject. Issuance is a ledgered attempt
   // (erratum 6). The token may arrive as a dedicated field or inside args.
   const confirmToken = req.confirmToken ?? (typeof req.args.confirmToken === 'string' ? req.args.confirmToken : undefined)
+  const fp = stateFingerprint(pre.state)
+  // C1.5 conditional confirmation: any present token is verified into a
+  // `confirmed` context flag, so handlers whose consequence PLAN demands
+  // confirmation (sensitivity, T6.D3) can honor the two-step without the
+  // static def.requiresConfirmation gate.
+  const confirmed = !!confirmToken && verifyConfirmToken(confirmSecret(), confirmToken, req.conversationId, req.tool, argsHash, fp)
   if (def.requiresConfirmation) {
-    const fp = stateFingerprint(pre.state)
-    if (!confirmToken || !verifyConfirmToken(confirmSecret(), confirmToken, req.conversationId, req.tool, argsHash, fp)) {
+    if (!confirmed) {
       const envelope: CommitResult = {
         outcome: 'requires_confirmation',
         reason: 'requires_confirmation',
@@ -219,14 +225,14 @@ export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
   // (6+7) transactional apply under the per-conversation advisory lock,
   // ledger row in the same transaction, post-derive delta = advance_phase.
   try {
-    return await runApplyTransaction(req, def.requiresConfirmation === true, targetRef, argsHash, validation.data ?? {})
+    return await runApplyTransaction(req, def.requiresConfirmation === true, targetRef, argsHash, validation.data ?? {}, confirmed)
   } catch (err) {
     if (err instanceof TimeoutError || err instanceof CircuitOpenError) return toUnavailable(err)
     throw err
   }
 }
 
-async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boolean, targetRef: string, argsHash: string, validatedArgs: Record<string, unknown>): Promise<CommitResult> {
+async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boolean, targetRef: string, argsHash: string, validatedArgs: Record<string, unknown>, confirmed: boolean): Promise<CommitResult> {
   const handler = getToolHandler(req.tool)!
   return prisma.$transaction(async (tx) => {
     // ::text cast because pg_advisory_xact_lock returns void, which the
@@ -249,7 +255,25 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
       return envelope
     }
     const effectiveArgs = { ...validatedArgs, ...(requiresConfirmation ? CONFIRM_ARG_INJECTION[req.tool] ?? {} : {}) }
-    const handlerResult: ToolResult = await handler(effectiveArgs, { ...req.toolContext, db: tx })
+    // C1.5: the ledger row id is minted BEFORE the handler runs so answer
+    // revisions written through the consequence applier reference it.
+    const commitId = crypto.randomUUID()
+    const handlerResult: ToolResult = await handler(effectiveArgs, { ...req.toolContext, db: tx, confirmed, commitId })
+    // C1.5 conditional confirmation: the handler's consequence plan demands
+    // a confirm round-trip and no verified token arrived — mint one against
+    // the locked pre-state; the plan preview is what the customer approves.
+    // The handler has written nothing (contract on ToolResult.requiresConfirmation).
+    if (handlerResult.requiresConfirmation) {
+      const envelope: CommitResult = {
+        outcome: 'requires_confirmation',
+        reason: 'requires_confirmation',
+        effects: [],
+        confirmToken: issueConfirmToken(confirmSecret(), req.conversationId, req.tool, argsHash, stateFingerprint(lockedPre.state)),
+        data: { preview: handlerResult.requiresConfirmation.preview },
+      }
+      await writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, lockedPre.state.phase)
+      return envelope
+    }
     const post = deriveAndExpose(await loadDomainSnapshot(req.conversationId, tx))
     // handler-declared domain effects (B4) merge with the gateway's own
     // advance_phase delta; C1's planner supersedes handler declarations.
@@ -268,7 +292,7 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
     const envelope: CommitResult = handlerResult.success
       ? { outcome: 'applied', effects, phaseDelta, data: { ...handlerResult.data, _uiAction: handlerResult.uiAction, _confirmation: handlerResult.confirmation, _message: handlerResult.message } }
       : { outcome: spokenReason ? outcomeForBlocked(spokenReason) : 'rejected', reason: spokenReason ?? 'handler_rejected', effects: [], data: { error: handlerResult.error } }
-    await writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, post.state.phase)
+    await writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, post.state.phase, handlerResult.success ? commitId : undefined)
     return envelope
   })
 }

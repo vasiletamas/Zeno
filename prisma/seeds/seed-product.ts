@@ -1,5 +1,32 @@
 import { PrismaClient } from '../../lib/generated/prisma/client'
 
+/**
+ * Protect's typed eligibility ruleset (C2 shape, landed with C1.5 — the
+ * consequence planner's ELIGIBILITY edges evaluate against this via the
+ * canonical lib/engines/eligibility.ts module; C2 wires the remaining
+ * consumption points). Authored presentation text lives under `narrative`
+ * and is NEVER evaluated (#9 rule 3).
+ */
+const PROTECT_ELIGIBILITY = {
+  version: 1,
+  rules: [
+    { id: 'min_age', subject: 'product', fact: 'age', op: 'gte', value: 18, reason: 'ineligible_age_minimum' },
+    { id: 'max_age', subject: 'product', fact: 'age', op: 'lte', value: 64, reason: 'ineligible_age_maximum' },
+    { id: 'residency', subject: 'product', fact: 'residency', op: 'equals', value: 'Romania', reason: 'ineligible_residency' },
+    { id: 'bd_cancer', subject: 'addon', fact: 'answer:BD_CANCER_HISTORY', op: 'is_false', reason: 'addon_ineligible_medical_history' },
+    { id: 'bd_cardio', subject: 'addon', fact: 'answer:BD_CARDIOVASCULAR', op: 'is_false', reason: 'addon_ineligible_medical_history' },
+    { id: 'bd_neuro', subject: 'addon', fact: 'answer:BD_NEUROLOGICAL', op: 'is_false', reason: 'addon_ineligible_medical_history' },
+    { id: 'bd_transplant', subject: 'addon', fact: 'answer:BD_TRANSPLANT', op: 'is_false', reason: 'addon_ineligible_medical_history' },
+    { id: 'bd_chronic', subject: 'addon', fact: 'answer:BD_CHRONIC_CONDITIONS', op: 'is_false', reason: 'addon_ineligible_medical_history' },
+    { id: 'bd_hospital', subject: 'addon', fact: 'answer:BD_HOSPITALIZATION_RECENT', op: 'is_false', reason: 'addon_ineligible_medical_history' },
+    { id: 'addon_age_band', subject: 'addon', fact: 'age', op: 'between', value: [18, 64], reason: 'addon_age_band_unavailable' },
+  ],
+  narrative: {
+    healthRequirements: 'Simplified health declaration',
+    notes: 'Maximum cumulative sum at risk across all life policies: 50,000 EUR',
+  },
+}
+
 export async function seedProduct(prisma: PrismaClient) {
   console.log('  Seeding coverage types...')
 
@@ -143,13 +170,7 @@ export async function seedProduct(prisma: PrismaClient) {
         { key: 'selectedAddon_externalTreatment', category: 'PREFERENCE', type: 'boolean' },
         { key: 'budgetPreference', category: 'BUYING_SIGNAL', type: 'enum', options: ['lowest', 'balanced', 'best_coverage'] },
       ],
-      eligibility: {
-        minAge: 18,
-        maxAge: 64,
-        residency: 'Romania',
-        healthRequirements: 'Simplified health declaration',
-        notes: 'Maximum cumulative sum at risk across all life policies: 50,000 EUR',
-      },
+      eligibility: PROTECT_ELIGIBILITY,
       // B3.7 (#1 productDocuments): R6 resolved to before-initiate_payment;
       // flip by seeding accept_quote: ['id_card'] if compliance wants accept-time.
       verificationRequirements: { accept_quote: [], initiate_payment: ['id_card'] },
@@ -478,13 +499,7 @@ PRIORITATE LA CONTRADICȚII
         { key: 'selectedAddon_externalTreatment', category: 'PREFERENCE', type: 'boolean' },
         { key: 'budgetPreference', category: 'BUYING_SIGNAL', type: 'enum', options: ['lowest', 'balanced', 'best_coverage'] },
       ],
-      eligibility: {
-        minAge: 18,
-        maxAge: 64,
-        residency: 'Romania',
-        healthRequirements: 'Simplified health declaration',
-        notes: 'Maximum cumulative sum at risk across all life policies: 50,000 EUR',
-      },
+      eligibility: PROTECT_ELIGIBILITY,
       // B3.7 (#1 productDocuments): R6 resolved to before-initiate_payment;
       // flip by seeding accept_quote: ['id_card'] if compliance wants accept-time.
       verificationRequirements: { accept_quote: [], initiate_payment: ['id_card'] },

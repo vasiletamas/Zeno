@@ -43,8 +43,8 @@ const dntRule = (action: string, kind: 'read' | 'commit'): ActionRule => ({
 function appExposureFromSnapshot(s: DomainSnapshot): ReturnType<typeof applicationExposure> {
   return applicationExposure({
     application: s.application
-      ? { exists: true, status: s.application.status as AppStatus, tier: s.application.tier, level: s.application.level, addon: s.application.addon, answersComplete: s.application.missingCodes.length === 0 }
-      : { exists: false, status: 'OPEN', tier: null, level: null, addon: null, answersComplete: false },
+      ? { exists: true, status: s.application.status as AppStatus, tier: s.application.tier, level: s.application.level, addon: s.application.addon, answersComplete: s.application.missingCodes.length === 0, hasAnswers: s.application.answeredCount > 0 }
+      : { exists: false, status: 'OPEN', tier: null, level: null, addon: null, answersComplete: false, hasAnswers: false },
     dntValidForProduct: s.dnt.valid && (s.product ? s.dnt.coversProductTypes.includes(s.product.insuranceType) : false),
   })
 }
@@ -71,7 +71,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.14.0' // 1.12.0: request_document_upload + productDocuments gate (B3.7); 1.13.0: B4 lifecycle — set_application (no DNT pre-gate, T5.D1) + select_coverage via the pure application rules; legacy mutators retired; selection_incomplete is a generate_quote blocked-reason (#10); 1.14.0: resume_application exposed cross-conversation via the customer-scoped resumable fact, REFERRED answers with_underwriter (B4.6)
+export const engineVersion = '1.15.0' // 1.13.0: B4 lifecycle — set_application (no DNT pre-gate, T5.D1) + select_coverage via the pure application rules; legacy mutators retired; selection_incomplete is a generate_quote blocked-reason (#10); 1.14.0: resume_application exposed cross-conversation via the customer-scoped resumable fact, REFERRED answers with_underwriter (B4.6); 1.15.0: modify_answer exposed on OPEN/PAUSED apps with answers behind the DNT gate (C1.5, erratum 10)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -126,6 +126,7 @@ export const ACTION_RULES: ActionRule[] = [
     blockedReason: (s) => (s.application !== null ? { reason: 'application_already_open', params: { applicationId: s.application.id } } : { reason: 'no_candidate_product' }) },
   // B4.2: lifecycle exposure comes from the pure application rules
   appRule('save_application_answer'),
+  appRule('modify_answer'),
   appRule('select_coverage'),
   // resume works CROSS-conversation (T5.D4): a fresh conversation carries no
   // pointer, so the customer-scoped resumable fact drives exposure too.
