@@ -7,10 +7,24 @@ import type { DiagnosticCheck, Finding } from './types'
 import { PHASE_ORDER, turnPhase } from './types'
 
 export const toolCallFailed: DiagnosticCheck = {
-  id: 'tool_call_failed', description: 'A tool call returned success=false',
-  run: (e) => e.turns.flatMap((t) => t.toolCalls
-    .filter((c) => c.result && c.result.success === false)
-    .map((c): Finding => ({ checkId: 'tool_call_failed', severity: 'error', turn: t.messageIndex, evidence: { tool: c.name, error: c.result?.error ?? null } }))),
+  // Verified from source (F4.6 spot-check): domain-legal non-applies
+  // (requires_confirmation previews, gateway rejections) come back
+  // success=false WITHOUT an error — the wall working, own checks cover
+  // them. Error-carrying failures split by recovery: a later successful
+  // call to the same tool means the agent bounced off a validation wall
+  // and recovered (warn); a failure never followed by success is the
+  // stuck/broken class (error).
+  id: 'tool_call_failed', description: 'A tool call failed with an error; severity by whether the tool ever succeeded afterwards',
+  run: (e) => {
+    const ordered = [...e.turns].sort((a, b) => a.messageIndex - b.messageIndex)
+    const calls = ordered.flatMap((t, i) => t.toolCalls.map((c) => ({ t, seq: i, c })))
+    return calls
+      .filter(({ c }) => c.result && c.result.success === false && c.result.error != null)
+      .map(({ t, seq, c }): Finding => {
+        const recovered = calls.some(({ seq: s2, c: c2 }) => s2 >= seq && c2.name === c.name && c2.result?.success === true)
+        return { checkId: 'tool_call_failed', severity: recovered ? 'warn' : 'error', turn: t.messageIndex, evidence: { tool: c.name, error: c.result?.error ?? null, recovered } }
+      })
+  },
 }
 
 export const toolCallWithoutResult: DiagnosticCheck = {

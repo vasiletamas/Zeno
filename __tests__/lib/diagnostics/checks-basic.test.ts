@@ -3,11 +3,22 @@ import { runDiagnostics, CHECK_CATALOG } from '@/lib/diagnostics'
 import { makeExport, legality, turn } from './export-helpers'
 
 describe('basic diagnostic checks', () => {
-  it('tool_call_failed flags a failed tool result with turn + tool evidence', () => {
+  it('tool_call_failed flags an unrecovered error-carrying failure as ERROR', () => {
     const e = makeExport({ turns: [turn(0, { toolCalls: [{ round: 0, toolCallId: 'x', name: 'sign_dnt', args: {}, partition: 'writing', result: { success: false, durationMs: 5, cached: false, error: 'boom' } }] })] as never })
     const f = runDiagnostics(e).filter((x) => x.checkId === 'tool_call_failed')
     expect(f).toHaveLength(1)
     expect(f[0]).toMatchObject({ severity: 'error', turn: 0, evidence: { tool: 'sign_dnt', error: 'boom' } })
+  })
+  it('tool_call_failed downgrades to WARN when the same tool later succeeds (validation bounce, recovered)', () => {
+    const e = makeExport({ turns: [
+      turn(0, { toolCalls: [{ round: 0, toolCallId: 'x', name: 'write_dnt_answer', args: {}, partition: 'writing', result: { success: false, durationMs: 5, cached: false, error: 'Invalid option' } }] }),
+      turn(1, { toolCalls: [{ round: 0, toolCallId: 'y', name: 'write_dnt_answer', args: {}, partition: 'writing', result: { success: true, durationMs: 5, cached: false } }] }),
+    ] as never })
+    expect(runDiagnostics(e).find((x) => x.checkId === 'tool_call_failed')).toMatchObject({ severity: 'warn', evidence: { recovered: true } })
+  })
+  it('tool_call_failed ignores domain non-applies (success=false without an error)', () => {
+    const e = makeExport({ turns: [turn(0, { toolCalls: [{ round: 0, toolCallId: 'x', name: 'sign_dnt', args: {}, partition: 'writing', result: { success: false, durationMs: 5, cached: false, data: { preview: {} } } }] })] as never })
+    expect(runDiagnostics(e).some((x) => x.checkId === 'tool_call_failed')).toBe(false)
   })
   it('tool_call_without_result flags a call missing its result', () => {
     const e = makeExport({ turns: [turn(0, { toolCalls: [{ round: 0, toolCallId: 'x', name: 'get_dnt_state', args: {}, partition: 'readOnly' }] })] as never })
