@@ -1,83 +1,40 @@
 import { describe, it, expect } from 'vitest'
 import {
-  shouldShowQuestion,
   validateAnswer,
   checkForFlags,
 } from '@/lib/engines/questionnaire-engine'
+import { computeVisibleSet } from '@/lib/engines/dependency-graph'
+import { PROTECT_DEPENDENCY_EDGES } from '@/prisma/seeds/seed-dependency-edges'
 
-// ==========================================
-// shouldShowQuestion
-// ==========================================
+// shouldShowQuestion (parentQuestionId/showWhenValue) was retired in C1.8 —
+// visibility comes from computeVisibleSet over the typed graph (covered in
+// depth by dependency-graph.test.ts). Pin the migrated DNT gates here.
 
-describe('shouldShowQuestion', () => {
-  it('returns true when question has no parent', () => {
-    const result = shouldShowQuestion(
-      { parentQuestionId: null, showWhenValue: null },
-      new Map(),
-    )
-    expect(result).toBe(true)
+describe('graph-based questionnaire visibility (C1.8 migration)', () => {
+  const codes = ['DNT_LIFE_SUBTYPE', 'DNT_LIFE_BUDGET', 'DNT_LIFE_RISK_TOLERANCE', 'DNT_SUSTAINABILITY_IMPORTANCE', 'DNT_SUSTAINABILITY_PREFERENCE']
+  const noSelection = { tier: null, level: null, addon: null }
+
+  it('unanswered DNT_LIFE_SUBTYPE hides every gated life question', () => {
+    const visible = computeVisibleSet(PROTECT_DEPENDENCY_EDGES, codes, { answers: {}, selection: noSelection })
+    expect(visible.has('DNT_LIFE_SUBTYPE')).toBe(true)
+    expect(visible.has('DNT_LIFE_BUDGET')).toBe(false)
+    expect(visible.has('DNT_LIFE_RISK_TOLERANCE')).toBe(false)
   })
 
-  it('returns true when parent answered with matching value', () => {
-    const answersMap = new Map([['parent-1', 'yes']])
-    const result = shouldShowQuestion(
-      { parentQuestionId: 'parent-1', showWhenValue: 'yes' },
-      answersMap,
-    )
-    expect(result).toBe(true)
+  it('financial_protection reveals the financial set but not the investment set', () => {
+    const visible = computeVisibleSet(PROTECT_DEPENDENCY_EDGES, codes, { answers: { DNT_LIFE_SUBTYPE: 'financial_protection' }, selection: noSelection })
+    expect(visible.has('DNT_LIFE_BUDGET')).toBe(true)
+    expect(visible.has('DNT_LIFE_RISK_TOLERANCE')).toBe(false)
+    expect(visible.has('DNT_SUSTAINABILITY_IMPORTANCE')).toBe(false)
   })
 
-  it('returns false when parent answered with non-matching value', () => {
-    const answersMap = new Map([['parent-1', 'no']])
-    const result = shouldShowQuestion(
-      { parentQuestionId: 'parent-1', showWhenValue: 'yes' },
-      answersMap,
-    )
-    expect(result).toBe(false)
-  })
-
-  it('returns false when parent not answered', () => {
-    const result = shouldShowQuestion(
-      { parentQuestionId: 'parent-1', showWhenValue: 'yes' },
-      new Map(),
-    )
-    expect(result).toBe(false)
-  })
-
-  it('returns true when parent answered and showWhenValue is null', () => {
-    const answersMap = new Map([['parent-1', 'anything']])
-    const result = shouldShowQuestion(
-      { parentQuestionId: 'parent-1', showWhenValue: null },
-      answersMap,
-    )
-    expect(result).toBe(true)
-  })
-
-  it('matches boolean showWhenValue "true" with normalized answer "da"', () => {
-    const answersMap = new Map([['parent-1', 'true']])
-    const result = shouldShowQuestion(
-      { parentQuestionId: 'parent-1', showWhenValue: 'true' },
-      answersMap,
-    )
-    expect(result).toBe(true)
-  })
-
-  it('matches comma-separated showWhenValue', () => {
-    const answersMap = new Map([['parent-1', 'quite_important']])
-    const result = shouldShowQuestion(
-      { parentQuestionId: 'parent-1', showWhenValue: 'somewhat,quite_important,very_important' },
-      answersMap,
-    )
-    expect(result).toBe(true)
-  })
-
-  it('rejects comma-separated showWhenValue when not matching', () => {
-    const answersMap = new Map([['parent-1', 'not_necessary']])
-    const result = shouldShowQuestion(
-      { parentQuestionId: 'parent-1', showWhenValue: 'somewhat,quite_important,very_important' },
-      answersMap,
-    )
-    expect(result).toBe(false)
+  it('financial_and_investment reveals investment questions; sustainability preference still gated on importance', () => {
+    const visible = computeVisibleSet(PROTECT_DEPENDENCY_EDGES, codes, { answers: { DNT_LIFE_SUBTYPE: 'financial_and_investment' }, selection: noSelection })
+    expect(visible.has('DNT_LIFE_RISK_TOLERANCE')).toBe(true)
+    expect(visible.has('DNT_SUSTAINABILITY_IMPORTANCE')).toBe(true)
+    expect(visible.has('DNT_SUSTAINABILITY_PREFERENCE')).toBe(false)
+    const withImportance = computeVisibleSet(PROTECT_DEPENDENCY_EDGES, codes, { answers: { DNT_LIFE_SUBTYPE: 'financial_and_investment', DNT_SUSTAINABILITY_IMPORTANCE: 'quite_important' }, selection: noSelection })
+    expect(withImportance.has('DNT_SUSTAINABILITY_PREFERENCE')).toBe(true)
   })
 })
 

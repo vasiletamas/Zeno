@@ -2,14 +2,19 @@
  * Questionnaire Engine
  *
  * Shared logic for DNT, Application, and BD medical questionnaire flows.
- * All three use the same Question/Answer tables but different QuestionGroups.
+ * All three use the same Question table but different QuestionGroups.
  *
- * Design: Pure functions (shouldShowQuestion, validateAnswer, checkForFlags)
- * take pre-fetched data and return results. DB wrapper functions
- * (getNextQuestion, calculateProgress) do DB I/O then delegate to pure functions.
+ * Design: Pure functions (validateAnswer, checkForFlags, deriveFlags) take
+ * pre-fetched data and return results. DB wrapper functions
+ * (getNextQuestion, calculateProgress) do DB I/O then delegate to pure
+ * functions. Visibility comes from computeVisibleSet over the typed
+ * QuestionDependency graph — the ONE dependency store (C1.8, T6.D1); the
+ * legacy parentQuestionId/showWhenValue mechanism is retired.
  */
 
 import { prisma } from '@/lib/db'
+import { computeVisibleSet } from './dependency-graph'
+import { loadDependencyGraph } from './dependency-graph-loader'
 
 // ==========================================
 // TYPES
@@ -25,8 +30,6 @@ export interface QuestionData {
   type: string
   options: unknown
   validationRules: unknown
-  parentQuestionId: string | null
-  showWhenValue: string | null
   orderIndex: number
   isRequired: boolean
 }
@@ -58,50 +61,9 @@ function normalizeBooleanValue(value: string): string | null {
   return null
 }
 
-/**
- * Evaluate conditional visibility for a question.
- *
- * - If parentQuestionId is null: always visible
- * - If parent not answered: hidden
- * - If showWhenValue matches parent answer: visible
- */
-export function shouldShowQuestion(
-  question: { parentQuestionId: string | null; showWhenValue: string | null },
-  answersMap: Map<string, string>,
-): boolean {
-  // No parent → always visible
-  if (!question.parentQuestionId) {
-    return true
-  }
-
-  // Parent not answered → hidden
-  const parentAnswer = answersMap.get(question.parentQuestionId)
-  if (parentAnswer === undefined) {
-    return false
-  }
-
-  // No condition → visible if parent answered
-  if (question.showWhenValue === null || question.showWhenValue === undefined) {
-    return true
-  }
-
-  const showWhen = question.showWhenValue
-
-  // Comma-separated values: show if parent answer matches any
-  if (showWhen.includes(',')) {
-    const allowedValues = showWhen.split(',').map(v => v.trim())
-    return allowedValues.includes(parentAnswer)
-  }
-
-  // Boolean normalization: "true"/"false" showWhenValue
-  if (showWhen === 'true' || showWhen === 'false') {
-    const normalizedAnswer = normalizeBooleanValue(parentAnswer)
-    return normalizedAnswer === showWhen
-  }
-
-  // Exact string match
-  return parentAnswer === showWhen
-}
+// shouldShowQuestion (parentQuestionId/showWhenValue) was retired in C1.8 —
+// visibility is computeVisibleSet over the typed dependency graph, shared
+// with the consequence planner and the domain snapshot (T6.D1).
 
 /**
  * Validate an answer based on the question type.
@@ -492,18 +454,16 @@ export async function getNextQuestion(
   const questionIds = questions.map(q => q.id)
   const answersMap = await loadScopedAnswers(scope, questionIds)
 
+  // Visibility from the ONE dependency store (C1.8)
+  const visible = await visibleCodesForScope(questions, answersMap, scope)
+
   // Find visible questions and next unanswered
   let nextQuestion: QuestionData | null = null
   let visibleCount = 0
   let answeredCount = 0
 
   for (const q of questions) {
-    const questionForVisibility = {
-      parentQuestionId: q.parentQuestionId,
-      showWhenValue: q.showWhenValue,
-    }
-
-    if (!shouldShowQuestion(questionForVisibility, answersMap)) {
+    if (q.code && !visible.has(q.code)) {
       continue
     }
 
@@ -522,8 +482,6 @@ export async function getNextQuestion(
         type: q.type,
         options: q.options,
         validationRules: q.validationRules,
-        parentQuestionId: q.parentQuestionId,
-        showWhenValue: q.showWhenValue,
         orderIndex: q.orderIndex,
         isRequired: q.isRequired,
       }
@@ -568,13 +526,15 @@ export async function calculateProgress(
   const questionIds = questions.map(q => q.id)
   const answersMap = await loadScopedAnswers(scope, questionIds)
 
+  // Visibility from the ONE dependency store (C1.8)
+  const visible = await visibleCodesForScope(questions, answersMap, scope)
+
   // Count visible and answered
   let total = 0
   let answered = 0
 
   for (const q of questions) {
-    const vis = { parentQuestionId: q.parentQuestionId, showWhenValue: q.showWhenValue }
-    if (!shouldShowQuestion(vis, answersMap)) continue
+    if (q.code && !visible.has(q.code)) continue
     total++
     if (answersMap.has(q.id)) answered++
   }
@@ -582,4 +542,31 @@ export async function calculateProgress(
   const percentage = total > 0 ? Math.round((answered / total) * 100) : 0
 
   return { answered, total, percentage }
+}
+
+/**
+ * The scope's visible question codes via computeVisibleSet (C1.8): answers
+ * keyed by CODE, selection facts from the application (DNT sessions carry
+ * none). Questions without a code cannot be gated and stay visible.
+ */
+async function visibleCodesForScope(
+  questions: { id: string; code: string | null }[],
+  answersMap: Map<string, string>,
+  scope: AnswerScope,
+): Promise<Set<string>> {
+  const codes: string[] = []
+  const answers: Record<string, string> = {}
+  for (const q of questions) {
+    if (!q.code) continue
+    codes.push(q.code)
+    const v = answersMap.get(q.id)
+    if (v !== undefined) answers[q.code] = v
+  }
+  let selection: { tier: string | null; level: string | null; addon: boolean | null } = { tier: null, level: null, addon: null }
+  if (scope.kind === 'application') {
+    const app = await prisma.application.findUnique({ where: { id: scope.applicationId }, include: { tier: true, level: true } })
+    if (app) selection = { tier: app.tier?.code ?? null, level: app.level?.code ?? null, addon: app.includesAddon }
+  }
+  const graph = await loadDependencyGraph(prisma)
+  return computeVisibleSet(graph, codes, { answers, selection })
 }

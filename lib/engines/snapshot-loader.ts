@@ -1,7 +1,6 @@
 import { prisma } from '@/lib/db'
 import type { Prisma } from '@/lib/generated/prisma/client'
 import { resolveGroupCodes } from '@/lib/engines/question-groups'
-import { shouldShowQuestion } from '@/lib/engines/questionnaire-engine'
 import { computeVisibleSet } from '@/lib/engines/dependency-graph'
 import { loadDependencyGraph } from '@/lib/engines/dependency-graph-loader'
 import { getActiveAnswers } from '@/lib/engines/answer-store'
@@ -76,20 +75,8 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   // DNT facts. Legacy conversation-stamp semantics survive until B2.6; the
   // customer-scoped aggregate facts (latest Dnt + ACTIVE session) feed the
   // B2 dntExposure predicates. Counting is VISIBILITY-AWARE (B1.6 fix):
-  // conditional questions hidden by answers must not block sign at n-1/n.
-  const countVisible = (
-    questions: { id: string; parentQuestionId: string | null; showWhenValue: string | null }[],
-    answers: Map<string, string>,
-  ) => {
-    let total = 0
-    let answered = 0
-    for (const q of questions) {
-      if (!shouldShowQuestion({ parentQuestionId: q.parentQuestionId, showWhenValue: q.showWhenValue }, answers)) continue
-      total++
-      if (answers.has(q.id)) answered++
-    }
-    return { total, answered }
-  }
+  // conditional questions hidden by answers must not block sign at n-1/n —
+  // visibility from the typed graph (C1.8), sessions carry no selection.
   // aggregate facts (B2.6 — the Dnt aggregate is the ONLY validity source)
   const latestDnt = await db.dnt.findFirst({ where: { customerId: conversation.customerId }, orderBy: { signedAt: 'desc' } })
   const dntValid = latestDnt !== null && latestDnt.status === 'ACTIVE' && latestDnt.validUntil.getTime() > Date.now() && (!prod || latestDnt.productTypesCovered.includes(prod.insuranceType))
@@ -97,9 +84,28 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   let sessionCounts = { total: 0, answered: 0 }
   if (activeDntSession) {
     const sessionCodes = (await resolveGroupCodes(activeDntSession.productId, 'dnt', db)) ?? []
-    const sessionQuestions = sessionCodes.length > 0 ? await db.question.findMany({ where: { group: { code: { in: sessionCodes } } }, select: { id: true, parentQuestionId: true, showWhenValue: true } }) : []
+    const sessionQuestions = sessionCodes.length > 0 ? await db.question.findMany({ where: { group: { code: { in: sessionCodes } } }, select: { id: true, code: true } }) : []
     const sessionAnswerRows = sessionQuestions.length > 0 ? await db.dntAnswer.findMany({ where: { sessionId: activeDntSession.id }, select: { questionId: true, value: true } }) : []
-    sessionCounts = countVisible(sessionQuestions, new Map(sessionAnswerRows.map((a) => [a.questionId, a.value])))
+    const answersById = new Map(sessionAnswerRows.map((a) => [a.questionId, a.value]))
+    const sessionAnswers: Record<string, string> = {}
+    for (const q of sessionQuestions) {
+      const v = q.code ? answersById.get(q.id) : undefined
+      if (q.code && v !== undefined) sessionAnswers[q.code] = v
+    }
+    const dntGraph = await loadDependencyGraph(db)
+    const dntVisible = computeVisibleSet(
+      dntGraph,
+      sessionQuestions.map((q) => q.code).filter((c): c is string => c !== null),
+      { answers: sessionAnswers, selection: { tier: null, level: null, addon: null } },
+    )
+    let total = 0
+    let answered = 0
+    for (const q of sessionQuestions) {
+      if (q.code && !dntVisible.has(q.code)) continue
+      total++
+      if (answersById.has(q.id)) answered++
+    }
+    sessionCounts = { total, answered }
   }
   // quotes: issued (today: DRAFT, non-expired) and accepted — only for a
   // live (non-CANCELLED) application slice

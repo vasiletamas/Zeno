@@ -12,7 +12,8 @@ import {
   calculateProgress,
 } from '@/lib/engines/questionnaire-engine'
 import { resolveGroupCodes, resolveActiveProductId } from '@/lib/engines/question-groups'
-import { shouldShowQuestion } from '@/lib/engines/questionnaire-engine'
+import { computeVisibleSet } from '@/lib/engines/dependency-graph'
+import { loadDependencyGraph } from '@/lib/engines/dependency-graph-loader'
 import { isDntValidFor, isExpiringOrExpired, decideSessionType, computeCoverage, DNT_VALIDITY_DAYS, type DntFact } from '@/lib/engines/dnt-rules'
 import { appendConsentEvents } from '@/lib/customer/consent-service'
 import type { ToolHandler } from '@/lib/tools/types'
@@ -22,6 +23,27 @@ import { bumpInsightOnAnswer } from './insight-bump'
 async function dntGroupCodes(context: { conversationId: string; product?: { id: string } }) {
   const productId = await resolveActiveProductId(context.conversationId, context.product?.id)
   return resolveGroupCodes(productId, 'dnt')
+}
+
+/**
+ * DNT visibility via the ONE dependency store (C1.8): answers keyed by
+ * question CODE; sessions carry no selection facts.
+ */
+async function visibleDntCodes(
+  db: Parameters<ToolHandler>[1]['db'],
+  questions: { id: string; code: string | null }[],
+  answersById: Map<string, string>,
+): Promise<Set<string>> {
+  const codes: string[] = []
+  const answers: Record<string, string> = {}
+  for (const q of questions) {
+    if (!q.code) continue
+    codes.push(q.code)
+    const v = answersById.get(q.id)
+    if (v !== undefined) answers[q.code] = v
+  }
+  const graph = await loadDependencyGraph(db)
+  return computeVisibleSet(graph, codes, { answers, selection: { tier: null, level: null, addon: null } })
 }
 
 // ─────────────────────────────────────────────
@@ -91,10 +113,10 @@ export const getDntQuestions: ToolHandler = async (_args, context) => {
     })
     const groupCodeMap = new Map(groups.map((g) => [g.id, g.code]))
     const lang = context.language ?? 'ro'
-    // visible-by-default: no answers yet, so only unconditional questions show
-    const emptyAnswers = new Map<string, string>()
+    // visible-by-default: no answers yet, so only ungated questions show
+    const visibleSet = await visibleDntCodes(context.db, questions, new Map<string, string>())
     const visible = questions
-      .filter((q) => shouldShowQuestion({ parentQuestionId: q.parentQuestionId, showWhenValue: q.showWhenValue }, emptyAnswers))
+      .filter((q) => !q.code || visibleSet.has(q.code))
       .map((q) => ({
         id: q.id,
         code: q.code,
@@ -258,12 +280,13 @@ async function sessionNextQuestion(
   questions.sort((a, b) => (groupOrder.get(a.groupId) ?? 0) - (groupOrder.get(b.groupId) ?? 0) || a.orderIndex - b.orderIndex)
   const answers = await db.dntAnswer.findMany({ where: { sessionId }, select: { questionId: true, value: true } })
   const answersMap = new Map(answers.map((a) => [a.questionId, a.value]))
+  const visibleSet = await visibleDntCodes(db, questions, answersMap)
   let next: (typeof questions)[number] | null = null
   let total = 0
   let answered = 0
   const pendingCodes: string[] = []
   for (const q of questions) {
-    if (!shouldShowQuestion({ parentQuestionId: q.parentQuestionId, showWhenValue: q.showWhenValue }, answersMap)) continue
+    if (q.code && !visibleSet.has(q.code)) continue
     total++
     if (answersMap.has(q.id)) answered++
     else {

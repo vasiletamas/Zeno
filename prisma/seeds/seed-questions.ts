@@ -15,7 +15,6 @@ export async function seedQuestions(prisma: PrismaClient) {
 
   // ── Helper: upsert a group then upsert all its questions ──────────
   // code -> id across ALL groups (cross-group parent gating, B2/T3.D6)
-  const allQuestionIds: Record<string, string> = {}
 
   async function seedGroup(
     groupDef: {
@@ -36,8 +35,6 @@ export async function seedQuestions(prisma: PrismaClient) {
       insightKey?: string | null
       orderIndex: number
       isRequired?: boolean
-      parentQuestionCode?: string | null
-      showWhenValue?: string | null
       sensitivity?: 'NONE' | 'CONFIRM_ON_MODIFY' | 'CONFIRM_ALWAYS'
     }>,
   ) {
@@ -60,19 +57,11 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
     })
 
-    // Build a map of code -> id for parent question linking. Lookups fall
-    // back to the ACCUMULATED map so parents can live in earlier groups
-    // (B2: DNT_LIFE_SUBTYPE gates the financial/investment/sustainability
-    // groups, T3.D6).
+    // code -> id map (question gating lives in QuestionDependency since
+    // C1.8 — seed-dependency-edges.ts is THE dependency store, T6.D1)
     const questionIdMap: Record<string, string> = {}
 
     for (const q of questions) {
-      // Resolve parent question id if specified (this group, then any prior)
-      let parentQuestionId: string | null = null
-      if (q.parentQuestionCode) {
-        parentQuestionId = questionIdMap[q.parentQuestionCode] ?? allQuestionIds[q.parentQuestionCode] ?? null
-      }
-
       const existing = await prisma.question.findFirst({
         where: { groupId: group.id, text: { equals: q.text } },
       })
@@ -89,13 +78,10 @@ export async function seedQuestions(prisma: PrismaClient) {
             insightKey: q.insightKey ?? null,
             orderIndex: q.orderIndex,
             isRequired: q.isRequired ?? true,
-            parentQuestionId,
-            showWhenValue: q.showWhenValue ?? null,
             sensitivity: q.sensitivity ?? 'NONE',
           },
         })
         questionIdMap[q.code] = existing.id
-        allQuestionIds[q.code] = existing.id
       } else {
         const created = await prisma.question.create({
           data: {
@@ -109,13 +95,10 @@ export async function seedQuestions(prisma: PrismaClient) {
             insightKey: q.insightKey ?? null,
             orderIndex: q.orderIndex,
             isRequired: q.isRequired ?? true,
-            parentQuestionId,
-            showWhenValue: q.showWhenValue ?? null,
             sensitivity: q.sensitivity ?? 'NONE',
           },
         })
         questionIdMap[q.code] = created.id
-        allQuestionIds[q.code] = created.id
       }
     }
 
@@ -354,8 +337,6 @@ export async function seedQuestions(prisma: PrismaClient) {
     [
       {
         code: 'DNT_LIFE_NEEDS_PRIORITY',
-        parentQuestionCode: 'DNT_LIFE_SUBTYPE',
-        showWhenValue: 'financial_protection,financial_and_investment',
         text: {
           en: 'Please rank your life insurance needs by importance (1 = most important, 6 = least important): Personal financial protection, Family financial protection, Child education supplementary income, Personal projects supplementary income, Investments, Pension supplementary income',
           ro: 'Te rugăm să ordonezi nevoile tale de asigurare de viață în funcție de importanță (1 = cea mai importantă, 6 = cea mai puțin importantă): Protecție financiară personală, Protecție financiară a familiei, Venituri suplimentare pentru educația copiilor, Venituri suplimentare pentru proiecte personale, Investiții, Venituri suplimentare pentru pensie',
@@ -366,8 +347,6 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'DNT_LIFE_FAMILY_INCOME',
-        parentQuestionCode: 'DNT_LIFE_SUBTYPE',
-        showWhenValue: 'financial_protection,financial_and_investment',
         text: {
           en: "What is your family's net monthly income?",
           ro: 'Care este valoarea venitului lunar net pe familie?',
@@ -383,8 +362,6 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'DNT_LIFE_MONTHLY_EXPENSES',
-        parentQuestionCode: 'DNT_LIFE_SUBTYPE',
-        showWhenValue: 'financial_protection,financial_and_investment',
         text: {
           en: "What are your family's monthly expenses? (Please specify for: current expenses, occasional expenses, and credits)",
           ro: 'Care sunt cheltuielile lunare ale familiei tale? (Te rugăm să specifici pentru: cheltuieli curente, cheltuieli ocazionale și credite)',
@@ -395,8 +372,6 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'DNT_LIFE_INSURANCE_VALIDITY',
-        parentQuestionCode: 'DNT_LIFE_SUBTYPE',
-        showWhenValue: 'financial_protection,financial_and_investment',
         text: {
           en: 'What duration do you prefer for the life insurance?',
           ro: 'Ce durată preferați pentru asigurarea de viață?',
@@ -411,8 +386,6 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'DNT_LIFE_ACCIDENT_COVERAGE',
-        parentQuestionCode: 'DNT_LIFE_SUBTYPE',
-        showWhenValue: 'financial_protection,financial_and_investment',
         text: {
           en: 'Are you interested in accident coverage? (hospitalization, surgeries, medical expenses, temporary work incapacity)',
           ro: 'Ești interesat de acoperire pentru accidente? (spitalizare, intervenții chirurgicale, cheltuieli medicale, incapacitate temporară de muncă)',
@@ -426,8 +399,6 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'DNT_LIFE_ILLNESS_COVERAGE',
-        parentQuestionCode: 'DNT_LIFE_SUBTYPE',
-        showWhenValue: 'financial_protection,financial_and_investment',
         text: {
           en: 'Are you interested in accident or illness coverage? (hospitalization, surgeries, medical expenses)',
           ro: 'Ești interesat de acoperire pentru accident sau boală? (spitalizare, intervenții chirurgicale, cheltuieli medicale)',
@@ -441,8 +412,6 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'DNT_LIFE_SEVERE_CONDITIONS',
-        parentQuestionCode: 'DNT_LIFE_SUBTYPE',
-        showWhenValue: 'financial_protection,financial_and_investment',
         text: {
           en: 'Are you interested in coverage for severe medical conditions? (serious medical conditions, optimal treatment abroad, for children)',
           ro: 'Ești interesat de acoperire pentru afecțiuni medicale grave? (afecțiuni medicale grave, tratament optim în străinătate, pentru copii)',
@@ -456,8 +425,6 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'DNT_LIFE_INVALIDITY_COVERAGE',
-        parentQuestionCode: 'DNT_LIFE_SUBTYPE',
-        showWhenValue: 'financial_protection,financial_and_investment',
         text: {
           en: 'Are you interested in Grade I invalidity coverage? (grade I invalidity, premium payment waiver)',
           ro: 'Ești interesat de acoperire pentru invaliditate de gradul I? (invaliditate de gradul I, scutire de la plata primelor)',
@@ -471,8 +438,6 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'DNT_LIFE_INDEXATION',
-        parentQuestionCode: 'DNT_LIFE_SUBTYPE',
-        showWhenValue: 'financial_protection,financial_and_investment',
         text: {
           en: 'Are you interested in indexation? (annual increase of benefits and premiums)',
           ro: 'Ești interesat de indexare? (majorarea anuală a beneficiilor și a primelor)',
@@ -486,8 +451,6 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'DNT_LIFE_PAYMENT_FREQUENCY',
-        parentQuestionCode: 'DNT_LIFE_SUBTYPE',
-        showWhenValue: 'financial_protection,financial_and_investment',
         text: {
           en: 'What payment frequency do you prefer for life insurance premiums?',
           ro: 'Ce frecvență de plată preferi pentru primele de asigurare de viață?',
@@ -504,8 +467,6 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'DNT_LIFE_BUDGET',
-        parentQuestionCode: 'DNT_LIFE_SUBTYPE',
-        showWhenValue: 'financial_protection,financial_and_investment',
         text: {
           en: 'What is your available budget for life insurance? (please specify per year and/or integral)',
           ro: 'Care este bugetul disponibil pentru achiziționarea asigurării de viață? (specifică pe an și/sau integral)',
@@ -530,8 +491,6 @@ export async function seedQuestions(prisma: PrismaClient) {
     [
       {
         code: 'DNT_LIFE_INVEST_KNOWLEDGE',
-        parentQuestionCode: 'DNT_LIFE_SUBTYPE',
-        showWhenValue: 'financial_and_investment',
         text: {
           en: 'How well do you understand and use financial instruments? (bank deposits, life insurance, investment products, stock exchange transactions)',
           ro: 'Cât de bine înțelegi și utilizezi instrumente financiare? (depozite bancare, asigurări de viață, produse investiționale, tranzacții bursiere)',
@@ -546,8 +505,6 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'DNT_LIFE_INVEST_OBJECTIVES',
-        parentQuestionCode: 'DNT_LIFE_SUBTYPE',
-        showWhenValue: 'financial_and_investment',
         text: {
           en: 'What are your investment objectives?',
           ro: 'Care sunt obiectivele tale de investiții?',
@@ -562,8 +519,6 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'DNT_LIFE_RISK_TOLERANCE',
-        parentQuestionCode: 'DNT_LIFE_SUBTYPE',
-        showWhenValue: 'financial_and_investment',
         text: {
           en: 'When investing in financial instruments, what level of risk and potential losses can you assume?',
           ro: 'Când decizi să investești în instrumente financiare, ce nivel de risc și pierderi potențiale îți asumi?',
@@ -593,8 +548,6 @@ export async function seedQuestions(prisma: PrismaClient) {
     [
       {
         code: 'DNT_SUSTAINABILITY_IMPORTANCE',
-        parentQuestionCode: 'DNT_LIFE_SUBTYPE',
-        showWhenValue: 'financial_and_investment',
         text: {
           en: 'How important is it for your insurance to follow sustainability principles?',
           ro: 'Cât de important este pentru tine ca asigurarea ta să respecte principiile dezvoltării durabile?',
@@ -616,8 +569,6 @@ export async function seedQuestions(prisma: PrismaClient) {
         },
         type: 'DROPDOWN',
         orderIndex: 2,
-        parentQuestionCode: 'DNT_SUSTAINABILITY_IMPORTANCE',
-        showWhenValue: 'somewhat,quite_important,very_important',
         options: [
           { value: 'no_preference', label: { en: 'I want sustainability but have no clear preference', ro: 'Vreau dezvoltare durabilă, dar nu am o preferință clară' } },
           { value: 'specific', label: { en: 'I want specific sustainability principles followed', ro: 'Vreau ca asigurarea să respecte anumite principii specifice' } },

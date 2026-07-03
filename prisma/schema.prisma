@@ -643,6 +643,9 @@ model QuestionGroup {
   questions Question[]
 }
 
+// C1.8: question gating lives in QuestionDependency (the ONE dependency
+// store, T6.D1) — the legacy parent-question/show-when columns and the
+// questionBranching relation were retired with it.
 model Question {
   id               String   @id @default(cuid())
   groupId          String
@@ -653,8 +656,6 @@ model Question {
   options          Json?
   validationRules  Json?
   insightKey       String?
-  parentQuestionId String?
-  showWhenValue    String?
   sensitivity      QuestionSensitivity @default(NONE) // T6.D3 (C1.2)
   orderIndex       Int
   isRequired       Boolean  @default(true)
@@ -662,8 +663,6 @@ model Question {
   updatedAt        DateTime @updatedAt
 
   group          QuestionGroup @relation(fields: [groupId], references: [id])
-  parentQuestion Question?     @relation("questionBranching", fields: [parentQuestionId], references: [id])
-  childQuestions Question[]    @relation("questionBranching")
   answers        Answer[]
   dntAnswers     DntAnswer[]
 
