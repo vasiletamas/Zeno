@@ -260,6 +260,7 @@ const toolSchemas: Record<string, ZodType> = {
 
   // Payment
   ensure_payment_session: z.object({}).strict(),
+  change_payment_option: z.object({ paymentOption: z.enum(['annual', 'semi_annual', 'quarterly']), confirmToken: z.string().optional() }).strict(),
   get_payment_status: z.object({}).strict(),
 
   // Data Collection

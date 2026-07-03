@@ -112,12 +112,13 @@ export async function buildPendingInstallmentPayment(options: { frequency: 'annu
 
 /**
  * buildAcceptReadyQuote + a real gateway accept_quote at the given frequency
- * — schedule exists, NO Policy row (D2.8, erratum-8 fixture spec). Options:
- * settle marks every installment PAID + the schedule COMPLETED (a fully
- * settled schedule). Returns { ...fx, quoteId, scheduleId,
- * firstInstallmentId, firstInstallmentAmountMinor }.
+ * — schedule exists, NO Policy row (D2.8/D3, erratum-8/5 fixture spec).
+ * Options: settle marks every installment PAID + the schedule COMPLETED;
+ * settleFirstInstallment settles ONLY installment 1 through the real
+ * settlement inbox (Policy is born, schedule ACTIVE). Returns { ...fx,
+ * quoteId, scheduleId, firstInstallmentId, firstInstallmentAmountMinor }.
  */
-export async function buildAcceptedQuoteWithSchedule(options: { frequency: 'annual' | 'semi_annual' | 'quarterly'; settle?: boolean }) {
+export async function buildAcceptedQuoteWithSchedule(options: { frequency: 'annual' | 'semi_annual' | 'quarterly'; settle?: boolean; settleFirstInstallment?: boolean }) {
   const fx = await buildAcceptReadyQuote()
   const accept = (args: Record<string, unknown>) =>
     executeCommit({ tool: 'accept_quote', args, actor: 'agent', customerId: fx.customerId, conversationId: fx.conversationId, toolContext: fixtureCtx(fx.customerId, fx.conversationId) })
@@ -133,6 +134,14 @@ export async function buildAcceptedQuoteWithSchedule(options: { frequency: 'annu
   if (options.settle) {
     await prisma.installment.updateMany({ where: { scheduleId: schedule.id }, data: { status: 'PAID', paidAt: new Date() } })
     await prisma.paymentSchedule.update({ where: { id: schedule.id }, data: { status: 'COMPLETED' } })
+  }
+  if (options.settleFirstInstallment) {
+    const { settlePaymentEvent } = await import('@/lib/payments/settlement')
+    const providerPaymentId = `mock_pay_${crypto.randomUUID()}`
+    await prisma.payment.create({
+      data: { installmentId: schedule.installments[0].id, customerId: fx.customerId, amountMinor: schedule.installments[0].amountMinor, provider: 'MOCK', providerPaymentId, status: 'PENDING' },
+    })
+    await settlePaymentEvent({ provider: 'MOCK', eventId: `fixture_${providerPaymentId}`, event: 'payment_succeeded', providerPaymentId })
   }
   return {
     ...fx,

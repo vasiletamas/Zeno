@@ -12,6 +12,7 @@
 
 import { getPaymentProvider } from '@/lib/payments'
 import { deriveSchedulePosition } from '@/lib/engines/payment-position'
+import { buildSchedule, type PaymentFrequency } from '@/lib/engines/payment-schedule'
 import type { ToolHandler, ToolResult } from '@/lib/tools/types'
 import type { ToolContext } from '@/lib/tools/types'
 import { logError } from '@/lib/errors/logger'
@@ -181,5 +182,81 @@ export const ensurePaymentSession: ToolHandler = async (
       error,
     })
     return { success: false, error: `Failed to ensure payment session: ${message}` }
+  }
+}
+
+/**
+ * change_payment_option (D3.4, T8.D5) — pre-capture re-rating ONLY. The new
+ * installment rows come from the SAME pure schedule engine fed the quote's
+ * acceptance-priced premiumAnnual; the old schedule is retained SUPERSEDED
+ * for audit (supersededById chain) and the accepted Quote is NEVER mutated
+ * (contradiction #3: acceptance evidence is immutable). Any open payment
+ * intent is provider-cancelled and superseded first. requires_confirmation
+ * rides the gateway two-step; legality (capturedCount === 0) lives in the
+ * engine rule.
+ */
+export const changePaymentOption: ToolHandler = async (args, context) => {
+  try {
+    const paymentOption = args.paymentOption as PaymentFrequency
+    const schedule = await loadLiveSchedule(context)
+    if (!schedule) {
+      return { success: false, error: 'payment_not_pending: no payment schedule exists — accept a quote first.' }
+    }
+    // belt — legality is the wall (engine rule, capturedCount === 0)
+    if (schedule.installments.some((i) => i.status === 'PAID')) {
+      return { success: false, error: 'schedule_already_captured: the first installment was already captured — the frequency is fixed for this plan.' }
+    }
+    const quote = await context.db.quote.findUniqueOrThrow({ where: { id: schedule.quoteId }, include: { product: { select: { paymentFrequencyOptions: true } } } })
+    const offered = Object.keys((quote.product.paymentFrequencyOptions as Record<string, unknown> | null) ?? {})
+    if (!offered.includes(paymentOption)) {
+      return { success: false, error: `invalid_args: payment option "${paymentOption}" is not offered for this product (${offered.join(', ')}).` }
+    }
+    if (paymentOption === schedule.frequency) {
+      return { success: false, error: `invalid_args: the payment plan already uses the ${paymentOption} frequency.` }
+    }
+
+    // supersede any open intent — capturable sessions never survive a re-rate
+    const provider = getPaymentProvider()
+    const openAttempt = schedule.installments.flatMap((i) => i.payments).find((p) => p.status === 'PENDING')
+    if (openAttempt?.providerPaymentId) {
+      await provider.cancelPaymentIntent(openAttempt.providerPaymentId)
+      await context.db.payment.updateMany({ where: { providerPaymentId: openAttempt.providerPaymentId, status: 'PENDING' }, data: { status: 'SUPERSEDED' } })
+    }
+
+    const rows = buildSchedule({ premiumAnnual: quote.premiumAnnual, frequency: paymentOption, startAt: new Date() })
+    const newSchedule = await context.db.paymentSchedule.create({
+      data: {
+        quoteId: schedule.quoteId,
+        customerId: schedule.customerId,
+        frequency: paymentOption,
+        totalInstallments: rows.length,
+        currency: schedule.currency,
+        installments: { create: rows },
+      },
+      include: { installments: { orderBy: { sequence: 'asc' } } },
+    })
+    await context.db.paymentSchedule.update({
+      where: { id: schedule.id },
+      data: { status: 'SUPERSEDED', supersededById: newSchedule.id },
+    })
+
+    const oldTotalMinor = schedule.installments.reduce((t, i) => t + i.amountMinor, 0)
+    const newTotalMinor = newSchedule.installments.reduce((t, i) => t + i.amountMinor, 0)
+    return {
+      success: true,
+      effects: ['re_rating'],
+      data: {
+        oldScheduleId: schedule.id,
+        newScheduleId: newSchedule.id,
+        oldFrequency: schedule.frequency,
+        newFrequency: paymentOption,
+        oldTotalMinor,
+        newTotalMinor,
+        firstInstallment: { amountMinor: newSchedule.installments[0].amountMinor, dueAt: newSchedule.installments[0].dueAt.toISOString() },
+      },
+      message: `Payment plan re-rated ${schedule.frequency} → ${paymentOption}: ${newSchedule.totalInstallments} installment(s), first ${(newSchedule.installments[0].amountMinor / 100).toFixed(2)} ${schedule.currency}. The quote itself is unchanged.`,
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
   }
 }

@@ -69,6 +69,7 @@ export const translations: Record<Language, TranslationTable> = {
       application_frozen: 'Cererea a fost înghețată la emiterea ofertei — pentru schimbări, anulăm oferta și deschidem o cerere nouă.',
       manual_underwriting: 'Cererea necesită analiza unui subscriitor — revenim imediat ce avem un răspuns.',
       no_due_installment: 'Nu există nicio rată scadentă de plătit — planul de plată este achitat la zi.',
+      schedule_already_captured: 'Prima rată a fost deja încasată — frecvența de plată nu mai poate fi schimbată pentru acest plan.',
     },
     // Hero section
     hero_headline: 'Dacă mâine primești un diagnostic grav, ai fi pregătit?',
@@ -221,6 +222,7 @@ export const translations: Record<Language, TranslationTable> = {
       application_frozen: 'The application froze when the quote was issued — to change it, we cancel the quote and open a new application.',
       manual_underwriting: 'The application needs an underwriter\'s review — we will continue as soon as there is an answer.',
       no_due_installment: 'There is no due installment to pay — the payment plan is fully up to date.',
+      schedule_already_captured: 'The first installment was already captured — the payment frequency can no longer be changed on this plan.',
     },
     // Hero section
     hero_headline:

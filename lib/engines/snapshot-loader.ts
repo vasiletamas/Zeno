@@ -150,6 +150,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     settled: scheduleRow !== null && scheduleRow.installments.every((i) => i.status === 'PAID' || i.status === 'WAIVED'),
     nextDueAt: nextPending?.dueAt.toISOString() ?? null,
     lastPaymentStatus: null as string | null, // D2.6 settlement wires this
+    capturedCount: scheduleRow?.installments.filter((i) => i.status === 'PAID').length ?? 0,
   }
   // C2.6: identity-class eligibility facts — age via the B0 derivation
   // (DOB or declaredAge, NEVER a 30-fallback), residency from a

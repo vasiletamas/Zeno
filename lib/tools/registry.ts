@@ -30,7 +30,7 @@ import { withdrawConsent } from './handlers/consent-handlers'
 import { getObjectionStrategy } from './handlers/objection-handlers'
 import { collectCustomerField } from './handlers/data-handlers'
 import { escalateToHuman } from './handlers/utility-handlers'
-import { ensurePaymentSession, getPaymentStatus } from './handlers/payment-handlers'
+import { ensurePaymentSession, getPaymentStatus, changePaymentOption } from './handlers/payment-handlers'
 import { resolveReferral, resolveWorkItem } from './handlers/operator-handlers'
 import { startChannelVerification, confirmChannelVerification, requestDocumentUpload } from './handlers/identity-handlers'
 
@@ -963,6 +963,27 @@ registerTool('ensure_payment_session', {
   sideEffect: 'lifecycle',
   kind: 'commit',
 }, ensurePaymentSession)
+
+registerTool('change_payment_option', {
+  description:
+    'Change the payment frequency BEFORE any installment is captured (two-step: the gateway returns a confirmation request; re-call with the token and the SAME paymentOption). ' +
+    'Re-rates the schedule from the accepted premium — the quote itself never changes. Once the first installment is paid the frequency is fixed.',
+  parameters: {
+    type: 'object',
+    properties: {
+      paymentOption: { type: 'string', enum: ['annual', 'semi_annual', 'quarterly'], description: 'The new payment frequency.' },
+    },
+    required: ['paymentOption'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: true,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+  requiresConfirmation: true,
+}, changePaymentOption)
 
 // --- Data Collection ---
 
