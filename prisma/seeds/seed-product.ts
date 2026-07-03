@@ -7,7 +7,7 @@ import { PrismaClient } from '../../lib/generated/prisma/client'
  * consumption points). Authored presentation text lives under `narrative`
  * and is NEVER evaluated (#9 rule 3).
  */
-const PROTECT_ELIGIBILITY = {
+export const PROTECT_ELIGIBILITY = {
   version: 1,
   rules: [
     { id: 'min_age', subject: 'product', fact: 'age', op: 'gte', value: 18, reason: 'ineligible_age_minimum' },
