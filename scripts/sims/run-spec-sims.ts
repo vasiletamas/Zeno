@@ -51,21 +51,29 @@ const ASSERTS: Record<string, (e: ConversationExport) => void> = {
 }
 
 // ---- question-aware answer picking (verify-advance-flow lineage) -----------
+// Enum questions get the EXACT option token where known (the agent passes
+// them through); the refusal policy refuses ONLY the actual signing ask -
+// DNT questions that merely mention consent (marketing, electronic
+// communication) get valid enum answers, otherwise the transcript fills
+// with invalid-option loops the diagnostics rightly flag as stuck.
 function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy']): string {
   const m = msg.toLowerCase()
-  if (policy === 'refuse-consent' && /(gdpr|consimț|de acord|prelucrarea datelor|semn[ăa]m|semnezi)/.test(m)) {
-    return 'nu, nu sunt de acord cu prelucrarea datelor'
+  if (policy === 'refuse-consent' && /(semnez|semnarea|semn[ăa]m|\bsign\b|gdpr|prelucrarea datelor)/.test(m)) {
+    return 'nu, nu sunt de acord cu prelucrarea datelor si nu semnez'
   }
   if (/yes_all/.test(m) || /consultan/.test(m)) return 'yes_all'
+  if (/marketing/.test(m)) return 'nu'
+  if (/electronic|coresponden/.test(m)) return 'da'
   if (/fum[ăa]tor/.test(m)) return 'nu'
   if (/c[âa]ți ani|ce v[âa]rst[ăa]|v[âa]rsta ta/.test(m)) return '35'
   if (/\bcnp\b/.test(m)) return '1960229410014'
   if (/cu cine loc|gospod[ăa]r/.test(m)) return 'singur'
+  if (/sursa|provin/.test(m)) return 'din salariu'
+  if (/2000_5000|interval/.test(m)) return 'intre 2000 si 5000'
   if (/venit|salar/.test(m)) return '5000'
-  if (/ocupa|profesi|lucrezi/.test(m)) return 'angajat'
-  if (/copii/.test(m)) return 'nu'
-  if (/educa|studii/.test(m)) return 'superioare'
-  if (/de acord|prelucrarea datelor|gdpr|semn/.test(m)) return 'da'
+  if (/ocupa|profesi|lucrezi/.test(m)) return 'sunt angajat cu carte de munca (employee)'
+  if (/copii|dependen/.test(m)) return '0'
+  if (/educa|studii/.test(m)) return 'studii universitare (university)'
   return 'da'
 }
 
