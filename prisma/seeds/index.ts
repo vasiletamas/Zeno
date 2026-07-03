@@ -37,6 +37,14 @@ async function main() {
       `CREATE UNIQUE INDEX IF NOT EXISTS "answer_active_unique" ON "Answer"("questionId", "applicationId") WHERE "status" = 'ACTIVE'`,
     )
 
+    // E1.1 (erratum 1): product-level ProductContent rows carry addonId NULL,
+    // which Postgres treats as distinct in the schema's composite unique —
+    // this partial index closes the duplicate-row hole for them (the
+    // composite covers addon-scoped rows).
+    await prisma.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX IF NOT EXISTS "ProductContent_product_level_unique" ON "ProductContent"("productId", "field", "locale", "version") WHERE "addonId" IS NULL`,
+    )
+
     await seedProduct(prisma)
     await seedQuestions(prisma)
     await seedDependencyEdges(prisma)

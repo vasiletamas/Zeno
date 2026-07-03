@@ -14,6 +14,7 @@ import { answerAllDntQuestions } from './dnt-fixtures'
  * SimulationConversation via their references into this set).
  */
 export const DOMAIN_TABLES: string[] = [
+  'ProductContent',
   'Document',
   'SuitabilityWarningAck',
   'CustomerDocument',

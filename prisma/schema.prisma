@@ -213,12 +213,17 @@ model Product {
   // lib/engines/suitability.ts, never evaluated as informal Json.
   suitabilityRules        Json?
   quoteValidityDays       Int      @default(30)
+  // E1 (T11.D1): the DECLARED pricing-example grid — per-product data naming
+  // the variation parameter and sample points; every number derived through
+  // calculateQuote at read time, never authored.
+  pricingExampleGrid      Json?
   isActive                Boolean  @default(true)
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
   pricingTiers        PricingTier[]
   addons              Addon[]
+  productContent      ProductContent[]
   dntSessions         DntSession[]
   questionGroups      QuestionGroup[]
   objectionStrategies ObjectionStrategy[]
@@ -316,6 +321,7 @@ model Addon {
   product         Product            @relation(fields: [productId], references: [id])
   pricingRules    AddonPricingRule[]
   coverageAmounts CoverageAmount[]
+  productContent  ProductContent[]
 
   @@unique([productId, code])
 }
@@ -349,6 +355,50 @@ model ObjectionStrategy {
   product Product @relation(fields: [productId], references: [id])
 
   @@unique([productId, type])
+}
+
+// E1 (T11.D2): versioned, bilingual authored selling claims with a
+// draft→published governance workflow. The agent may only utter claims
+// from PUBLISHED rows; every number it speaks is DERIVED (pricing_examples,
+// eligibility_bounds) — authored content is numeral-free by the publish gate.
+enum ProductContentField {
+  KEY_VALUE_PRODUCT_POINTS
+  SELL_SPECIFIC_INFO
+  SELL_SPECIFIC_ADDON_INFO
+  PRICING_NOTE
+}
+
+enum ProductContentStatus {
+  DRAFT
+  PUBLISHED
+  RETIRED
+}
+
+model ProductContent {
+  id          String               @id @default(cuid())
+  productId   String
+  addonId     String?
+  field       ProductContentField
+  locale      String
+  content     Json
+  version     Int
+  status      ProductContentStatus @default(DRAFT)
+  authoredBy  String
+  approvedBy  String?
+  publishedAt DateTime?
+  retiredAt   DateTime?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  product Product @relation(fields: [productId], references: [id])
+  addon   Addon?  @relation(fields: [addonId], references: [id])
+
+  // E1 erratum 1: this composite covers addon-scoped rows only — Postgres
+  // treats NULLs as distinct, so product-level rows (addonId NULL) are
+  // enforced by the partial unique index "ProductContent_product_level_unique"
+  // created in the seed bootstrap (prisma/seeds/index.ts).
+  @@unique([productId, addonId, field, locale, version])
+  @@index([productId, field, status])
 }
 
 // ==========================================
