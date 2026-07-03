@@ -187,6 +187,22 @@ export async function buildActivatedPolicy(options: { stopAt?: 'PENDING_SUBMISSI
   return fx
 }
 
+/**
+ * An operator-authenticated NextRequest for admin route tests (D4.3,
+ * erratum-5 fixture spec): JSON body + a signToken({ role: 'OPERATOR' })
+ * JWT riding the auth cookie — the definite pattern, no conditionals.
+ */
+export async function operatorRequest(body: Record<string, unknown>) {
+  const { NextRequest } = await import('next/server')
+  const { signToken, COOKIE_NAME } = await import('@/lib/auth/jwt')
+  const token = await signToken({ userId: 'op-fixture', role: 'OPERATOR', email: 'operator@zeno.ro' }, '1h')
+  return new NextRequest('http://localhost/api/admin/policies/x/status', {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+    headers: { cookie: `${COOKIE_NAME}=${token}`, 'content-type': 'application/json' },
+  })
+}
+
 /** buildReadyApplication + a real gateway generate_quote → ISSUED quote. */
 export async function buildIssuedQuote(options: { validUntil?: Date } = {}) {
   const fx = await buildReadyApplication()

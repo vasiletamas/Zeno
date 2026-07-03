@@ -8,6 +8,10 @@
 import type { EmailProvider } from '../types'
 
 export class MockEmailProvider implements EmailProvider {
+  // D4.3 (erratum 2): tests assert outbound sends without a provider
+  // injection point — every send is recorded here (console.log kept).
+  readonly sent: { to: string; subject: string; html: string }[] = []
+
   async send(input: {
     to: string
     subject: string
@@ -16,6 +20,7 @@ export class MockEmailProvider implements EmailProvider {
     replyTo?: string
   }): Promise<{ messageId: string }> {
     const messageId = `mock_email_${Date.now()}`
+    this.sent.push({ to: input.to, subject: input.subject, html: input.html })
 
     // test seam (B3.5): integration tests read the last send (e.g. to pull
     // the OTP code out of the subject) without a provider injection point
