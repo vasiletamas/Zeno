@@ -38,7 +38,7 @@ Feature: The agent is a client of the domain (no privileged access)
     Then the change goes through an action present in available_actions
     And the agent has no operation a GUI client could not also call
 
-  @id:contract/failed-commit-surfaced-not-narrated @agent @backlog
+  @id:contract/failed-commit-surfaced-not-narrated @agent
   Scenario: A commit that fails is surfaced, never narrated as success
     Given the engine returns "rejected" for an attempted commit
     Then the agent tells the customer the action did not complete and why
@@ -56,7 +56,7 @@ Feature: The agent is a client of the domain (no privileged access)
     Then a tool exists and is exposed for that action
     And the agent is never instructed to call a tool it does not have
 
-  @id:contract/never-advance-phase-by-narration @agent @backlog
+  @id:contract/never-advance-phase-by-narration @agent
   Scenario: The agent never advances a phase by narration
     When no committing action has returned "advance_phase"
     Then the agent does not tell the customer the phase has moved on
@@ -112,7 +112,7 @@ Feature: Discovery and consultancy
     Then Zeno calls set_candidate_product again
     And no application exists yet, so nothing else must be torn down
 
-  @id:discovery/example-prices-only-from-product-data @agent @backlog
+  @id:discovery/example-prices-only-from-product-data @agent
   Scenario: Example prices are quoted only from product data
     When the customer asks roughly what it costs
     Then Zeno presents figures from pricing_examples
@@ -190,7 +190,7 @@ Feature: DNT - needs analysis, session, and consent gate
 
   # ---- answering the DNT ----------------------------------------------------
 
-  @id:dnt/walking-questions-one-at-a-time @engine @backlog
+  @id:dnt/walking-questions-one-at-a-time @engine
   Scenario: Walking the DNT questions one at a time
     Given an active DNT session
     When Zeno requests the next step
@@ -232,7 +232,7 @@ Feature: DNT - needs analysis, session, and consent gate
     And the engine reads the answers it already holds and signs the DNT
     And the underwriting questionnaire becomes available
 
-  @id:dnt/refused-consent-blocks-funnel @engine @judge:refusal-explained @backlog
+  @id:dnt/refused-consent-blocks-funnel @engine @judge:refusal-explained
   Scenario: Refused consent blocks the funnel
     When the customer declines consent at sign_dnt
     Then sign_dnt returns "requires_consent"
@@ -425,7 +425,7 @@ Feature: Payment (Stripe handles card entry; Zeno monitors and re-engages)
   Background:
     Given Zeno is in the "payment" phase after an accepted quote
 
-  @id:payment/agent-never-handles-card-data @agent @backlog
+  @id:payment/agent-never-handles-card-data @agent
   Scenario: The agent never handles card data
     When payment is being collected
     Then Zeno hands off to the secure payment UI

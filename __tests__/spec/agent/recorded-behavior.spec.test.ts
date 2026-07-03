@@ -13,15 +13,8 @@ const FIXTURES_DIR = path.join(process.cwd(), '__tests__/fixtures/exports')
 const load = (name: string): ConversationExport => JSON.parse(
   fs.readFileSync(path.join(FIXTURES_DIR, name), 'utf8'))
 
-// TEMPORARY guard: the F1.9 recording run (live LLM, n-of-m) is in flight;
-// the fixtures commit removes this skip. The registered ids stay @backlog
-// until then, so traceability is not weakened by the skip.
-const recorded = fs.existsSync(path.join(FIXTURES_DIR, 'happy-path.export.json'))
-  && fs.existsSync(path.join(FIXTURES_DIR, 'dnt-refusal.export.json'))
-
-describe.skipIf(!recorded)('agent behavior over recorded sims (T12.D4 — assertion substrate is the export)', () => {
-  // the suite body runs at collection even when skipped — guard the reads
-  const happy = recorded ? load('happy-path.export.json') : (null as never as ConversationExport)
+describe('agent behavior over recorded sims (T12.D4 — assertion substrate is the export)', () => {
+  const happy = load('happy-path.export.json')
   it(spec('contract/failed-commit-surfaced-not-narrated') + ' no narration violations on the happy path', () => {
     expect(() => assertNoNarrationViolations(happy)).not.toThrow()
   })
@@ -39,7 +32,7 @@ describe.skipIf(!recorded)('agent behavior over recorded sims (T12.D4 — assert
       expect(JSON.stringify(c.args)).not.toMatch(/card_number|cvv|pan\b/i)
     }
   })
-  const refusal = recorded ? load('dnt-refusal.export.json') : (null as never as ConversationExport)
+  const refusal = load('dnt-refusal.export.json')
   it(spec('dnt/refused-consent-blocks-funnel') + ' after refusal no funnel commit is attempted', () => {
     const after = toolCallsByTurn(refusal).flat()
     expect(() => assertToolNeverCalled(refusal, toToolName('generate_quote'))).not.toThrow()
