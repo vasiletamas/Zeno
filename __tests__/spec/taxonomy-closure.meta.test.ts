@@ -29,10 +29,22 @@ describe('taxonomy closure (T12.D5 §3 — spec, catalog and code welded at CI t
   })
 })
 
-describe('@agent-judge <-> rubric closure', () => {
-  it('judge scenarios and rubrics are 1:1', () => {
-    const judgeIds = parsed.scenarios.filter((s) => s.tags.includes('@agent-judge'))
-      .map((s) => s.tags.find((t) => t.startsWith('@id:'))!.slice(4))
-    expect([...judgeIds].sort()).toEqual(JUDGE_RUBRICS.map((r) => r.specId).sort())
+describe('@judge tag <-> rubric closure (erratum 3 preferred mechanism)', () => {
+  it('every @judge:<rubric-id> tag pairs 1:1 with a registry rubric, on the right scenario', () => {
+    const tagged = parsed.scenarios
+      .filter((s) => s.tags.some((t) => t.startsWith('@judge:')))
+      .map((s) => ({
+        specId: s.tags.find((t) => t.startsWith('@id:'))!.slice(4),
+        rubricId: 'judge/' + s.tags.find((t) => t.startsWith('@judge:'))!.slice('@judge:'.length),
+      }))
+    expect(tagged.map((t) => t.rubricId).sort()).toEqual(JUDGE_RUBRICS.map((r) => r.id).sort())
+    for (const t of tagged) {
+      expect(JUDGE_RUBRICS.find((r) => r.id === t.rubricId)?.specId, t.rubricId).toBe(t.specId)
+    }
+  })
+  it('every @agent-judge-primary scenario carries a @judge tag (no rubric-less judge scenarios)', () => {
+    for (const s of parsed.scenarios.filter((x) => x.tags.includes('@agent-judge'))) {
+      expect(s.tags.some((t) => t.startsWith('@judge:')), s.name).toBe(true)
+    }
   })
 })
