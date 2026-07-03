@@ -7,6 +7,7 @@ import type { ConversationExport } from '@/lib/debug/conversation-export'
 import type { DiagnosticCheck, Finding } from './types'
 import * as basic from './checks-basic'
 import * as behavioral from './checks-behavioral'
+import { blockedActionAttempted, missingConsequences, recomputeDriftFindings, type RecomputeOptions } from './checks-envelope'
 
 const isCheck = (v: unknown): v is DiagnosticCheck =>
   typeof v === 'object' && v !== null && 'id' in v && 'run' in v
@@ -14,10 +15,20 @@ const isCheck = (v: unknown): v is DiagnosticCheck =>
 export const CHECK_CATALOG: DiagnosticCheck[] = [
   ...Object.values(basic),
   ...Object.values(behavioral).filter(isCheck), // skips the exported trigramSimilarity helper
+  blockedActionAttempted,
+  missingConsequences,
 ]
 
-export function runDiagnostics(e: ConversationExport, catalog: DiagnosticCheck[] = CHECK_CATALOG): Finding[] {
-  return catalog.flatMap((c) => c.run(e))
+export function runDiagnostics(
+  e: ConversationExport,
+  catalog: DiagnosticCheck[] = CHECK_CATALOG,
+  opts?: RecomputeOptions,
+): Finding[] {
+  const findings = catalog.flatMap((c) => c.run(e))
+  // recompute_drift is opt-in (erratum 2): synthetic fixtures must never
+  // hit the real deriveAndExpose
+  if (opts?.currentEngineVersion) findings.push(...recomputeDriftFindings(e, opts))
+  return findings
 }
 
 export type { Finding, DiagnosticCheck, FindingSeverity } from './types'
