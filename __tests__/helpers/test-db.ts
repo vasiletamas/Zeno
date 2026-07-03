@@ -14,6 +14,7 @@ import { answerAllDntQuestions } from './dnt-fixtures'
  * SimulationConversation via their references into this set).
  */
 export const DOMAIN_TABLES: string[] = [
+  'Document',
   'SuitabilityWarningAck',
   'CustomerDocument',
   'VerificationChallenge',
@@ -157,4 +158,25 @@ export async function ensureTestProduct() {
       isActive: true,
     },
   })
+}
+
+/**
+ * C3.6 (C errata 1): a DRAFT ("issued" until D1 renames the status) Quote
+ * row for the fixture's application — the report generator's anchor.
+ */
+export async function issueTestQuote(fx: { customerId: string; applicationId: string }): Promise<string> {
+  const app = await prisma.application.findUniqueOrThrow({ where: { id: fx.applicationId } })
+  const quote = await prisma.quote.create({
+    data: {
+      applicationId: fx.applicationId,
+      productId: app.productId,
+      customerId: fx.customerId,
+      premiumAnnual: 190,
+      premiumMonthly: 15.83,
+      coverages: {},
+      status: 'DRAFT',
+      validUntil: new Date(Date.now() + 30 * 86400e3),
+    },
+  })
+  return quote.id
 }

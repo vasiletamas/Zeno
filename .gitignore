@@ -55,3 +55,6 @@ turn*.yml
 # dev-mode debug console traces
 .debug-traces/
 
+
+# D2 document storage (FS provider)
+/storage/

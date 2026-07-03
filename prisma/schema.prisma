@@ -134,6 +134,22 @@ enum QuestionSensitivity {
   CONFIRM_ALWAYS
 }
 
+// D2 (T9.D1) — landed early with C3.6 which registers the quote-keyed
+// suitability report: ONE document registry behind a storage provider,
+// replacing the path-column pattern. D2 seeds IPID/TERMS and wires the
+// disclosure gate; D4 retires suitabilityReportPath.
+enum DocumentKind {
+  IPID
+  TERMS
+  PAYMENT_RECEIPT
+  SUITABILITY_REPORT
+}
+
+enum DocumentSource {
+  STATIC_PER_PRODUCT_VERSION
+  GENERATED
+}
+
 // ==========================================
 // DOMAIN: CORE PRODUCT
 // ==========================================
@@ -384,8 +400,9 @@ model VerificationChallenge {
 }
 
 // B3.7: identity documents. Images live ONLY here, AES-GCM encrypted —
-// never in the ledger or TurnDebug (T14.D5).
-enum DocumentKind {
+// never in the ledger or TurnDebug (T14.D5). (Renamed from DocumentKind at
+// C3.6 — that name belongs to D2's registry of generated/disclosure docs.)
+enum CustomerDocumentKind {
   id_card
 }
 
@@ -400,7 +417,7 @@ enum DocumentStatus {
 model CustomerDocument {
   id                 String         @id @default(cuid())
   customerId         String
-  kind               DocumentKind
+  kind               CustomerDocumentKind
   status             DocumentStatus @default(uploaded)
   encryptedData      Bytes
   dataIv             String
@@ -748,6 +765,24 @@ model Application {
 // acknowledgement of a suitability mismatch, bound to the ruleset version
 // it was shown for (a stale ack never satisfies the gate) and the ledger
 // row that carried the commit.
+model Document {
+  id          String         @id @default(cuid())
+  kind        DocumentKind
+  version     Int
+  language    String
+  storageKey  String
+  contentHash String
+  source      DocumentSource
+  productId   String?
+  customerId  String?
+  quoteId     String?
+  policyId    String?
+  generatedAt DateTime       @default(now())
+
+  @@index([productId, kind, language])
+  @@index([quoteId])
+}
+
 model SuitabilityWarningAck {
   id             String   @id @default(cuid())
   customerId     String

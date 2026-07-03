@@ -17,6 +17,8 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { prisma } from '@/lib/db'
 import { decrypt, maskCnp } from '@/lib/security/encryption'
+// shared compliance-PDF helpers extracted in C3.6 (erratum 3)
+import { getLocalizedText, formatDate, formatCurrency } from './dnt-report-pdf'
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -24,29 +26,6 @@ import { decrypt, maskCnp } from '@/lib/security/encryption'
 
 function getReportsPath(): string {
   return process.env.REPORTS_PATH ?? './tmp/reports'
-}
-
-function getLocalizedText(json: unknown, lang = 'ro'): string {
-  if (!json) return '-'
-  if (typeof json === 'string') return json
-  if (typeof json === 'object' && json !== null) {
-    const obj = json as Record<string, string>
-    return obj[lang] || obj.ro || obj.en || Object.values(obj)[0] || '-'
-  }
-  return '-'
-}
-
-function formatDate(date: Date | null | undefined): string {
-  if (!date) return '-'
-  return new Date(date).toLocaleDateString('ro-RO', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
-}
-
-function formatCurrency(amount: number, currency = 'RON'): string {
-  return `${amount.toLocaleString('ro-RO')} ${currency}`
 }
 
 function formatAddress(address: unknown): string {
