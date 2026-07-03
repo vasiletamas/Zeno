@@ -117,6 +117,26 @@ export interface DebugTurnEndPayload {
   anomalies: unknown[]
 }
 
+/**
+ * Per-turn legality snapshot (F2.1, T14.D2): the deriveAndExpose INPUT
+ * (redacted snapshot) + OUTPUT (state, actions) + the version stamps that
+ * make recompute-and-diff replay meaningful. Emitted at turn start and
+ * after every applied-commit round (point: post_commit, carrying the
+ * gateway ledger row id — F2 erratum 2).
+ */
+export interface DebugLegalityPayload {
+  traceId: string
+  point: 'turn_start' | 'post_commit'
+  commitLedgerId?: string
+  engineVersion: string
+  /** ProductContent version id(s) injected into this turn's prompt (M8 pin 1). */
+  contentVersions: string[]
+  /** REDACTED DomainSnapshot — input of deriveAndExpose, replayable. */
+  snapshot: unknown
+  state: DerivedStateV3
+  actions: ExposedActions
+}
+
 export interface DebugIdentityMemoryEntry {
   id: string
   kind: string
@@ -160,6 +180,7 @@ export type DebugEvent =
   | { event: 'debug:turn_start'; data: DebugTurnStartPayload }
   | { event: 'debug:identity'; data: DebugIdentityPayload }
   | { event: 'debug:gate'; data: DebugGatePayload }
+  | { event: 'debug:legality'; data: DebugLegalityPayload }
   | { event: 'debug:prompt'; data: DebugPromptPayload }
   | { event: 'debug:tool_call'; data: DebugToolCallPayload }
   | { event: 'debug:tool_result'; data: DebugToolResultPayload }
