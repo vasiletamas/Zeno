@@ -382,14 +382,9 @@ export const acceptQuote: ToolHandler = async (args, context) => {
 
     trackQuoteAccepted(quote.customerId, quote.premiumAnnual)
 
-    // Update Conversation status -> COMPLETED
-    await context.db.conversation.update({
-      where: { id: context.conversationId },
-      data: {
-        status: 'COMPLETED',
-        completedAt: new Date(),
-      },
-    })
+    // D2.1 (contradiction #11): acceptance no longer closes the conversation
+    // — a conversation is a channel, ACTIVE until the inactivity sweep
+    // archives it. (D2.5 rewrites this handler narrow.)
 
     // Load tier/level names for uiAction payload
     const appWithPricing = await context.db.application.findUnique({

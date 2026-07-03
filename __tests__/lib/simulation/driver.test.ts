@@ -37,6 +37,7 @@ import { prisma } from '@/lib/db'
 
 const mockSend = vi.mocked(sendSimulationMessage)
 const mockConversationUpdate = vi.mocked(prisma.conversation.update)
+const mockSimConvUpdate = vi.mocked(prisma.simulationConversation.update)
 
 const testPersona: Persona = {
   slug: 'test-persona',
@@ -140,7 +141,7 @@ describe('driveConversation', () => {
     expect(result.error).toContain('Service unavailable')
   })
 
-  it('bridges COMPLETED status into Conversation table when reaching terminal UI action', async () => {
+  it('records COMPLETED on SimulationConversation only — Conversation.status is never written (D2, contradiction #11)', async () => {
     // Turn 0 (opening) — agent immediately emits a terminal UI action
     mockSend.mockResolvedValueOnce({
       content: 'Polita emisa!',
@@ -157,15 +158,16 @@ describe('driveConversation', () => {
       answersMap: {},
     })
 
-    expect(mockConversationUpdate).toHaveBeenCalledWith(
+    expect(mockSimConvUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'conv-1' },
+        where: { conversationId: 'conv-1' },
         data: expect.objectContaining({ status: 'COMPLETED' }),
       }),
     )
+    expect(mockConversationUpdate).not.toHaveBeenCalled()
   })
 
-  it('bridges ABANDONED status into Conversation table on scripted abandon', async () => {
+  it('records ABANDONED on SimulationConversation only on scripted abandon (D2)', async () => {
     const scenario: ScriptedScenario = {
       slug: 'abandon-test',
       name: 'Abandon Test',
@@ -188,12 +190,13 @@ describe('driveConversation', () => {
       answersMap: {},
     })
 
-    expect(mockConversationUpdate).toHaveBeenCalledWith(
+    expect(mockSimConvUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'conv-1' },
+        where: { conversationId: 'conv-1' },
         data: expect.objectContaining({ status: 'ABANDONED' }),
       }),
     )
+    expect(mockConversationUpdate).not.toHaveBeenCalled()
   })
 
   it('does NOT touch Conversation.status on FAILED (system error, not customer outcome)', async () => {

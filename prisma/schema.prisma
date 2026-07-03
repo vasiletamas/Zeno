@@ -11,11 +11,11 @@ datasource db {
 // ENUMS
 // ==========================================
 
+// D2 (contradiction #11): a conversation is a CHANNEL, never a funnel stage —
+// it is ACTIVE or ARCHIVED (inactivity sweep); turns reactivate archived ones.
 enum ConversationStatus {
   ACTIVE
-  IDLE
-  COMPLETED
-  ABANDONED
+  ARCHIVED
 }
 
 // The T5.D6-ratified status vocabulary. REFERRED + CANCELLED joined in E2
@@ -146,6 +146,24 @@ enum DocumentKind {
   TERMS
   PAYMENT_RECEIPT
   SUITABILITY_REPORT
+  POLICY_SCHEDULE
+}
+
+// D2 (contradiction #3): the schedule is the live money truth from
+// acceptance onward — integer minor units, never re-derived from the quote.
+enum PaymentScheduleStatus {
+  PENDING_FIRST_CAPTURE
+  ACTIVE
+  COMPLETED
+  SUPERSEDED
+  ABANDONED
+}
+
+enum InstallmentStatus {
+  PENDING
+  PAID
+  FAILED
+  WAIVED
 }
 
 enum DocumentSource {
@@ -351,6 +369,7 @@ model Customer {
   quotes            Quote[]
   policies          Policy[]
   payments          Payment[]
+  paymentSchedules  PaymentSchedule[]
   referralsMade     Referral[] @relation("referrer")
   referralsReceived Referral[] @relation("referred")
   user              User?
@@ -603,7 +622,7 @@ model Conversation {
   language            String             @default("ro")
   messageCount        Int                @default(0)
   startedAt           DateTime           @default(now())
-  completedAt         DateTime?
+  archivedAt          DateTime?
   lastActivityAt      DateTime           @default(now())
   metadata            Json?
   mode                String             @default("SALES")
@@ -820,14 +839,18 @@ model Quote {
   coverages      Json
   addonsSelected Json?
   status         QuoteStatus @default(ISSUED)
+  // D2 (T7.D6): immutable acceptance evidence — paymentFrequency is written
+  // ONLY by accept_quote, never re-read for money math (the schedule owns it)
+  acceptedAt     DateTime?
   validUntil     DateTime
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
-  application Application @relation(fields: [applicationId], references: [id])
-  product     Product     @relation(fields: [productId], references: [id])
-  customer    Customer    @relation(fields: [customerId], references: [id])
-  policy      Policy?
+  application      Application       @relation(fields: [applicationId], references: [id])
+  product          Product           @relation(fields: [productId], references: [id])
+  customer         Customer          @relation(fields: [customerId], references: [id])
+  policy           Policy?
+  paymentSchedules PaymentSchedule[]
 }
 
 model Policy {
@@ -852,17 +875,54 @@ model Policy {
   quote    Quote     @relation(fields: [quoteId], references: [id])
   customer Customer  @relation(fields: [customerId], references: [id])
   product  Product   @relation(fields: [productId], references: [id])
+}
+
+// D2 (contradiction #3): the schedule is the live money truth from
+// acceptance onward. Integer minor units with an explicit remainder rule
+// (D2.4); a Payment is anchored to the INSTALLMENT it settles, never to the
+// Policy (which does not exist until first capture — contradiction #5).
+model PaymentSchedule {
+  id                String                @id @default(cuid())
+  quoteId           String
+  customerId        String
+  frequency         String
+  status            PaymentScheduleStatus @default(PENDING_FIRST_CAPTURE)
+  totalInstallments Int
+  currency          String                @default("RON")
+  supersededById    String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  quote        Quote         @relation(fields: [quoteId], references: [id])
+  customer     Customer      @relation(fields: [customerId], references: [id])
+  installments Installment[]
+
+  @@index([quoteId, status])
+}
+
+model Installment {
+  id          String            @id @default(cuid())
+  scheduleId  String
+  sequence    Int
+  dueAt       DateTime
+  amountMinor Int
+  status      InstallmentStatus @default(PENDING)
+  paidAt      DateTime?
+
+  schedule PaymentSchedule @relation(fields: [scheduleId], references: [id])
   payments Payment[]
+
+  @@unique([scheduleId, sequence])
 }
 
 model Payment {
   id                String        @id @default(cuid())
-  policyId          String
+  installmentId     String
   customerId        String
-  amount            Float
+  amountMinor       Int
   currency          String        @default("RON")
   provider          PaymentProvider
-  providerPaymentId String?
+  providerPaymentId String?       @unique
   status            PaymentStatus @default(PENDING)
   paidAt            DateTime?
   failureReason     String?
@@ -870,10 +930,39 @@ model Payment {
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
-  policy   Policy   @relation(fields: [policyId], references: [id])
-  customer Customer @relation(fields: [customerId], references: [id])
+  installment Installment @relation(fields: [installmentId], references: [id])
+  customer    Customer    @relation(fields: [customerId], references: [id])
+}
 
-  @@index([providerPaymentId])
+// D2 (T8.D3): the transactional settlement inbox — provider events are
+// deduplicated on (provider, providerEventId); processing is exactly-once.
+model PaymentEvent {
+  id                String          @id @default(cuid())
+  provider          PaymentProvider
+  providerEventId   String
+  providerPaymentId String?
+  kind              String
+  payload           Json
+  processedAt       DateTime        @default(now())
+
+  @@unique([provider, providerEventId])
+}
+
+// D2 (T7.D2): disclosure acknowledgements bound to the exact document
+// identity (kind, version, language) per quote — scalar FKs by design.
+model DisclosureAck {
+  id             String       @id @default(cuid())
+  quoteId        String
+  customerId     String
+  documentId     String
+  kind           DocumentKind
+  version        Int
+  language       String
+  actor          String
+  sourceCommitId String?
+  acknowledgedAt DateTime     @default(now())
+
+  @@unique([quoteId, kind, version, language])
 }
 
 // ==========================================

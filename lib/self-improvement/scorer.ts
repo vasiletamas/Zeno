@@ -20,10 +20,7 @@ interface ConversationWithRelations {
     id: string
     quote: {
       id: string
-      policy: {
-        id: string
-        payments: { status: string }[]
-      } | null
+      paymentSchedules: { installments: { id: string }[] }[]
     } | null
   } | null
   turnTraces: {
@@ -34,9 +31,12 @@ interface ConversationWithRelations {
 }
 
 export async function scoreConversations(): Promise<number> {
+  // D2.1 (contradiction #11): Conversation.status is ACTIVE|ARCHIVED and no
+  // funnel outcome — sim outcomes live on SimulationConversation, so score
+  // conversations whose simulation reached a terminal customer outcome.
   const rawConversations = await prisma.conversation.findMany({
     where: {
-      status: { in: ['COMPLETED', 'ABANDONED'] },
+      simulationConversation: { status: { in: ['COMPLETED', 'ABANDONED'] } },
       score: null, // no ConversationScore yet
     },
     include: {
@@ -55,10 +55,10 @@ export async function scoreConversations(): Promise<number> {
             include: {
               quote: {
                 include: {
-                  policy: {
-                    include: {
-                      payments: { where: { status: 'COMPLETED' }, take: 1 },
-                    },
+                  // D2.1 (contradiction #3): purchase truth = a PAID
+                  // installment on the quote's schedule, never Payment→Policy
+                  paymentSchedules: {
+                    include: { installments: { where: { status: 'PAID' }, take: 1, select: { id: true } } },
                   },
                 },
               },
@@ -76,8 +76,7 @@ export async function scoreConversations(): Promise<number> {
       applicationSubmitted && conv.application!.quote !== null
     const policyPurchased =
       quoteGenerated &&
-      conv.application!.quote!.policy !== null &&
-      (conv.application!.quote!.policy!.payments?.length ?? 0) > 0
+      conv.application!.quote!.paymentSchedules.some((s) => s.installments.length > 0)
 
     const rawScore =
       (quoteGenerated ? 0.3 : 0) +

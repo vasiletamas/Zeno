@@ -35,37 +35,45 @@ export async function runPostPaymentFlow(
   }
 
   // ─── Step 2: Load related records ──────────────────────────
+  // D2.1 re-anchor: a Payment settles an INSTALLMENT; the quote (and its
+  // policy, while accept_quote still creates one — D2.6 flips that) is
+  // reached through the schedule.
   const payment = await prisma.payment.findUniqueOrThrow({
     where: { id: paymentId },
     include: {
-      policy: {
+      installment: {
         include: {
-          quote: {
+          schedule: {
             include: {
-              application: {
+              quote: {
                 include: {
-                  tier: true,
-                  level: true,
+                  application: { include: { tier: true, level: true } },
+                  product: true,
+                  policy: true,
                 },
               },
             },
           },
-          product: true,
         },
       },
       customer: true,
     },
   })
 
-  const { policy, customer } = payment
+  const { customer } = payment
+  const quote = payment.installment.schedule.quote
+  const policy = quote.policy
 
-  trackPaymentCompleted(customer.id, payment.amount)
+  trackPaymentCompleted(customer.id, payment.amountMinor / 100)
 
   // ─── Step 3: Update Policy → SUBMITTED ─────────────────────
-  await prisma.policy.update({
-    where: { id: policy.id },
-    data: { status: 'SUBMITTED' },
-  })
+  // (D2.6 removes this write: paid ≠ submitted — contradiction #5)
+  if (policy) {
+    await prisma.policy.update({
+      where: { id: policy.id },
+      data: { status: 'SUBMITTED' },
+    })
+  }
 
   // Step 3b (retired at D1, M7/IDD timing): the suitability report is
   // generated AT QUOTE ISSUANCE inside generate_quote's transaction — the
@@ -85,7 +93,7 @@ export async function runPostPaymentFlow(
   const appUrl = process.env.APP_URL ?? 'http://localhost:3001'
   let dashboardUrl = `${appUrl}/dashboard`
   if (customer.email) {
-    const conversationId = payment.policy.quote?.application?.originConversationId ?? null
+    const conversationId = quote.application?.originConversationId ?? null
     const { linkToken } = await issueChallenge(
       customer.id, 'email', customer.email, conversationId,
       prisma,
@@ -103,8 +111,7 @@ export async function runPostPaymentFlow(
       const emailProvider = getEmailProvider()
 
       // Extract tier/level names for email
-      const quote = policy.quote
-      const application = quote?.application
+      const application = quote.application
       const tier = application?.tier
       const level = application?.level
 
@@ -115,8 +122,10 @@ export async function runPostPaymentFlow(
       const tierName = tierNameJson?.[customerLanguage] ?? tierNameJson?.ro ?? 'Standard'
       const levelName = levelNameJson?.[customerLanguage] ?? levelNameJson?.ro ?? 'Nivel I'
 
-      // Parse coverages from policy coverageSummary
-      const coverageSummary = policy.coverageSummary as Array<{
+      // Parse coverages from policy coverageSummary (quote currency when the
+      // policy has not been created yet — D2.6 flips creation to settlement)
+      const currency = policy?.currency ?? quote.currency
+      const coverageSummary = (policy?.coverageSummary ?? null) as Array<{
         name: string | Record<string, string>
         amount: number
         currency: string
@@ -125,7 +134,7 @@ export async function runPostPaymentFlow(
       const coverages = (coverageSummary ?? []).map((cov) => ({
         name: typeof cov.name === 'string' ? cov.name : (cov.name[customerLanguage] ?? cov.name.ro ?? ''),
         amount: cov.amount,
-        currency: cov.currency ?? policy.currency,
+        currency: cov.currency ?? currency,
       }))
 
       const { subject, html } = purchaseConfirmationEmail({
@@ -133,8 +142,8 @@ export async function runPostPaymentFlow(
         tierName,
         levelName,
         includesAddon: application?.includesAddon ?? false,
-        premiumMonthly: policy.premiumMonthly,
-        currency: policy.currency,
+        premiumMonthly: policy?.premiumMonthly ?? quote.premiumMonthly,
+        currency,
         coverages,
         dashboardUrl,
         language: customerLanguage,
@@ -164,7 +173,7 @@ export async function runPostPaymentFlow(
 
   console.log(
     `[PostPayment] Completed for payment ${paymentId}: ` +
-      `policy=${policy.id} → SUBMITTED, ` +
+      `policy=${policy ? `${policy.id} → SUBMITTED` : 'none'}, ` +
       `customer=${customer.id} → non-anonymous, ` +
       `emailSent=${emailSent}`,
   )

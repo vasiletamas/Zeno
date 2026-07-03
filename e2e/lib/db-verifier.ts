@@ -71,10 +71,10 @@ export async function verifyHappyPath(
   )
   checks.push(
     check(
-      'Conversation.status = COMPLETED',
-      'COMPLETED',
+      'Conversation stays ACTIVE (D2: a channel, never a funnel stage)',
+      'ACTIVE',
       conversation?.status,
-      conversation?.status === 'COMPLETED',
+      conversation?.status === 'ACTIVE',
     ),
   )
 
@@ -203,8 +203,9 @@ export async function verifyHappyPath(
   // 7. Payment exists, status COMPLETED
   let payment = null
   if (policy) {
+    // D2.1 re-anchor: a Payment settles an installment of the quote's schedule
     payment = await prisma.payment.findFirst({
-      where: { policyId: policy.id },
+      where: { installment: { schedule: { quoteId: policy.quoteId } } },
     })
   }
   checks.push(
@@ -259,10 +260,10 @@ export async function verifyBdRejection(
   )
   checks.push(
     check(
-      'Conversation.status = COMPLETED',
-      'COMPLETED',
+      'Conversation stays ACTIVE (D2: a channel, never a funnel stage)',
+      'ACTIVE',
       conversation?.status,
-      conversation?.status === 'COMPLETED',
+      conversation?.status === 'ACTIVE',
     ),
   )
 
@@ -374,8 +375,9 @@ export async function verifyBdRejection(
   // 6. Payment exists, status COMPLETED
   let payment = null
   if (policy) {
+    // D2.1 re-anchor: a Payment settles an installment of the quote's schedule
     payment = await prisma.payment.findFirst({
-      where: { policyId: policy.id },
+      where: { installment: { schedule: { quoteId: policy.quoteId } } },
     })
   }
   checks.push(
@@ -499,10 +501,10 @@ export async function verifyObjectionHandling(
   // 3. Conversation should still reach completion (sale continues after objections)
   checks.push(
     check(
-      'Conversation.status = COMPLETED',
-      'COMPLETED',
+      'Conversation stays ACTIVE (D2: a channel, never a funnel stage)',
+      'ACTIVE',
       conversation?.status,
-      conversation?.status === 'COMPLETED',
+      conversation?.status === 'ACTIVE',
     ),
   )
 
@@ -596,10 +598,10 @@ export async function verifyChangeOfMind(
   // 4. Conversation completed
   checks.push(
     check(
-      'Conversation.status = COMPLETED',
-      'COMPLETED',
+      'Conversation stays ACTIVE (D2: a channel, never a funnel stage)',
+      'ACTIVE',
       conversation?.status,
-      conversation?.status === 'COMPLETED',
+      conversation?.status === 'ACTIVE',
     ),
   )
 
@@ -659,10 +661,10 @@ export async function verifyDntPauseResume(
   // 4. Conversation completed (the flow should resume and finish)
   checks.push(
     check(
-      'Conversation.status = COMPLETED',
-      'COMPLETED',
+      'Conversation stays ACTIVE (D2: a channel, never a funnel stage)',
+      'ACTIVE',
       conversation?.status,
-      conversation?.status === 'COMPLETED',
+      conversation?.status === 'ACTIVE',
     ),
   )
 

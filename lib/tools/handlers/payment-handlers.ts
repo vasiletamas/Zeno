@@ -96,13 +96,29 @@ export const initiatePayment: ToolHandler = async (
     })
 
     // ─── Step 4: Create Payment record ─────────────────────
+    // D2.1 re-anchor: a Payment settles an INSTALLMENT of the quote's
+    // schedule (contradiction #3). Until D2.5 creates the schedule at
+    // acceptance, none may exist yet — D2.8 finishes this re-anchor.
     const providerEnum = provider.name.toUpperCase() as 'STRIPE' | 'PAYU' | 'MOCK'
+
+    const policyRow = await context.db.policy.findUniqueOrThrow({ where: { id: policyId }, select: { quoteId: true } })
+    const schedule = await context.db.paymentSchedule.findFirst({
+      where: { quoteId: policyRow.quoteId, status: { in: ['PENDING_FIRST_CAPTURE', 'ACTIVE'] } },
+      include: { installments: { where: { status: 'PENDING' }, orderBy: { sequence: 'asc' }, take: 1 } },
+    })
+    const installment = schedule?.installments[0]
+    if (!installment) {
+      return {
+        success: false,
+        error: 'payment_not_pending: no payment schedule with a pending installment exists for this quote.',
+      }
+    }
 
     const payment = await context.db.payment.create({
       data: {
-        policyId,
+        installmentId: installment.id,
         customerId: context.customerId,
-        amount,
+        amountMinor: amount,
         currency,
         provider: providerEnum,
         providerPaymentId: paymentIntent.providerPaymentId,

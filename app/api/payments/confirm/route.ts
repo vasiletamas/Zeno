@@ -87,15 +87,15 @@ export async function POST(request: Request) {
     // Provider says completed (or mock) — run post-payment flow
     const result = await runPostPaymentFlow(paymentId)
 
-    // Load updated policy status
+    // Load updated policy status (D2.1 re-anchor: via the installment chain)
     const updatedPayment = await prisma.payment.findUnique({
       where: { id: paymentId },
-      include: { policy: { select: { status: true } } },
+      include: { installment: { include: { schedule: { include: { quote: { include: { policy: { select: { status: true } } } } } } } } },
     })
 
     return NextResponse.json({
       success: true,
-      policyStatus: updatedPayment?.policy.status ?? 'SUBMITTED',
+      policyStatus: updatedPayment?.installment.schedule.quote.policy?.status ?? 'SUBMITTED',
       emailSent: result.emailSent,
     })
   } catch (error) {
@@ -169,16 +169,19 @@ export async function GET(request: Request) {
     // Run post-payment flow (idempotent — safe for duplicates)
     await runPostPaymentFlow(payment.id)
 
-    // Find conversationId via Payment → Policy → Quote → Application → conversationId
+    // Find conversationId via Payment → Installment → Schedule → Quote →
+    // Application → originConversationId (D2.1 re-anchor)
     const paymentWithRelations = await prisma.payment.findUnique({
       where: { id: payment.id },
       include: {
-        policy: {
+        installment: {
           include: {
-            quote: {
+            schedule: {
               include: {
-                application: {
-                  select: { originConversationId: true },
+                quote: {
+                  include: {
+                    application: { select: { originConversationId: true } },
+                  },
                 },
               },
             },
@@ -188,7 +191,7 @@ export async function GET(request: Request) {
     })
 
     const conversationId =
-      paymentWithRelations?.policy?.quote?.application?.originConversationId
+      paymentWithRelations?.installment.schedule.quote.application?.originConversationId
 
     const appUrl = process.env.APP_URL ?? 'http://localhost:3001'
 

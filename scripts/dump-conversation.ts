@@ -71,7 +71,7 @@ async function main() {
     language: convo.language,
     messageCount: convo.messageCount,
     startedAt: convo.startedAt,
-    completedAt: convo.completedAt,
+    archivedAt: convo.archivedAt,
     customer: convo.customer,
     application,
     metadata: convo.metadata,

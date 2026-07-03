@@ -34,14 +34,13 @@ describe('scoreConversations', () => {
         ],
       },
     ])
+    // D2 (contradiction #3): purchase truth = a PAID installment on the
+    // quote's schedule, never Payment→Policy
     mockAppFindUnique.mockResolvedValue({
       id: 'app-1',
       quote: {
         id: 'quote-1',
-        policy: {
-          id: 'policy-1',
-          payments: [{ status: 'COMPLETED' }],
-        },
+        paymentSchedules: [{ installments: [{ id: 'inst-1' }] }],
       },
     })
     mockCreate.mockResolvedValue({ id: 'score-1' })
@@ -78,7 +77,7 @@ describe('scoreConversations', () => {
     ])
     mockAppFindUnique.mockResolvedValue({
       id: 'app-2',
-      quote: { id: 'quote-2', policy: null },
+      quote: { id: 'quote-2', paymentSchedules: [] },
     })
     mockCreate.mockResolvedValue({ id: 'score-2' })
 

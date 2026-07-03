@@ -337,10 +337,8 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     preloadedInsights = undefined
   }
 
-  // Guard: conversation must be active
-  if (turnCtx.conversation.status === 'COMPLETED' || turnCtx.conversation.status === 'ABANDONED') {
-    throw new Error(`Conversation ${state.conversationId} is ${turnCtx.conversation.status}`)
-  }
+  // D2 (contradiction #11): no terminal-conversation guard — a conversation
+  // is a channel; turns REACTIVATE archived ones (D2.9 wires the flip).
 
   // Guard: must have content
   if (!input.message && !input.syntheticToolCall) {
