@@ -188,17 +188,13 @@ model Product {
   insuranceType           ProductType
   subType                 String
   eligibility             Json
-  features                String[]
   exclusions              String[]
   defaultPlaybook         String   @db.Text
-  pricingExplanation      String   @db.Text
   targetCustomer          String
-  targetAgeRange          String
   contractTerm            String
   gracePeriod             String
   medicalExamRequired     Boolean  @default(false)
   territoryCoverage       String
-  premiumRange            Json?
   paymentFrequencyOptions Json?
   insightKeys             Json?
   // B3.7 (#1 productDocuments): per-commit document requirements, e.g.

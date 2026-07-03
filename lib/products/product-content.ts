@@ -20,11 +20,18 @@ import {
   resolveCoveragePlaceholders,
   type AuthoredLocale,
 } from '@/lib/products/authored-content-validation'
-import {
-  flushProductContextCache,
-  flushCoachingBriefingCache,
-  flushCatalogOverviewCache,
-} from '@/lib/chat/context-loaders'
+
+/**
+ * Erratum 6 hook: downstream caches (context-loaders' productContext /
+ * coachingBriefing / catalogOverview) register a flush callback at module
+ * init; publish calls every hook. Registration-over-import keeps this
+ * module free of a circular dependency on the prompt layer — and a cache
+ * that was never loaded has nothing to flush.
+ */
+const publishFlushHooks: Array<() => void> = []
+export function registerPublishFlushHook(hook: () => void): void {
+  publishFlushHooks.push(hook)
+}
 
 export interface PublishInput { productId: string; addonId: string | null; field: ProductContentField; version: number; approvedBy: string }
 export type PublishResult =
@@ -63,9 +70,7 @@ export async function publishProductContent(input: PublishInput): Promise<Publis
     }),
   ])
   invalidateProductContentCache(input.productId)
-  flushProductContextCache()
-  flushCoachingBriefingCache()
-  flushCatalogOverviewCache()
+  for (const hook of publishFlushHooks) hook()
   return { outcome: 'applied', publishedIds: drafts.map((d) => d.id) }
 }
 
@@ -85,6 +90,16 @@ export async function getPublishedProductContent(productId: string): Promise<Pub
   }
   cache.set(productId, out)
   return out
+}
+
+/** Every published contentId across product AND addon field sets (M8 stamps). */
+export function collectPublishedContentIds(published: PublishedProductContent): string[] {
+  const ids: string[] = []
+  for (const set of Object.values(published.fields)) ids.push(...set.contentIds)
+  for (const addonFields of Object.values(published.addonFields)) {
+    for (const set of Object.values(addonFields)) ids.push(...set.contentIds)
+  }
+  return ids
 }
 
 /** Placeholders resolve in strings AND string arrays (key points are lists). */

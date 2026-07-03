@@ -12,6 +12,25 @@ import { createDocument } from '../../lib/documents/registry'
 type DisclosureKind = 'IPID' | 'TERMS'
 const LANGUAGES = ['ro', 'en'] as const
 
+// E1.8: the IPID's coverage summary is DOCUMENT content authored here,
+// bilingual — it stopped riding the retired (EN-only) features column.
+const IPID_COVERAGE_BULLETS: Record<'ro' | 'en', string[]> = {
+  ro: [
+    'Deces din orice cauză',
+    'Invaliditate permanentă ca urmare a unui accident',
+    'Intervenții chirurgicale ca urmare a unui accident',
+    'Spitalizare ca urmare a unui accident',
+    'Opțional: tratament medical în străinătate (clauza BD)',
+  ],
+  en: [
+    'Death from any cause',
+    'Permanent invalidity from accident',
+    'Surgical interventions from accident',
+    'Hospitalization from accident',
+    'Optional: medical treatment abroad (BD rider)',
+  ],
+}
+
 function localized(json: unknown, lang: string): string {
   if (typeof json === 'string') return json
   const obj = (json ?? {}) as Record<string, string>
@@ -19,7 +38,7 @@ function localized(json: unknown, lang: string): string {
 }
 
 function buildDisclosurePdf(kind: DisclosureKind, lang: 'ro' | 'en', product: {
-  name: unknown; description: unknown; features: string[]; exclusions: string[]
+  name: unknown; description: unknown; exclusions: string[]
   contractTerm: string | null; gracePeriod: string | null
 }): Buffer {
   const doc = new jsPDF()
@@ -36,7 +55,7 @@ function buildDisclosurePdf(kind: DisclosureKind, lang: 'ro' | 'en', product: {
     body.push(localized(product.description, lang))
     body.push('')
     body.push(lang === 'ro' ? 'Acoperiri principale:' : 'Main coverages:')
-    for (const f of product.features) body.push(`• ${f}`)
+    for (const f of IPID_COVERAGE_BULLETS[lang]) body.push(`• ${f}`)
     body.push('')
     body.push(lang === 'ro' ? 'Excluderi:' : 'Exclusions:')
     for (const e of product.exclusions) body.push(`• ${e}`)
@@ -71,7 +90,7 @@ export async function seedDocuments(prisma: PrismaClient): Promise<void> {
       if (existing) continue
       const bytes = buildDisclosurePdf(kind, lang, {
         name: product.name, description: product.description,
-        features: product.features, exclusions: product.exclusions,
+        exclusions: product.exclusions,
         contractTerm: product.contractTerm, gracePeriod: product.gracePeriod,
       })
       await createDocument({

@@ -254,7 +254,6 @@ const listProductsHandler: ToolHandler = async (
         insuranceType: true,
         subType: true,
         targetCustomer: true,
-        premiumRange: true,
       },
       orderBy: { createdAt: 'asc' },
     })

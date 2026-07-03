@@ -1,6 +1,7 @@
 import { PrismaClient } from '../../lib/generated/prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { seedProduct } from './seed-product'
+import { seedProductContent } from './seed-product-content'
 import { seedQuestions } from './seed-questions'
 import { seedObjections } from './seed-objections'
 import { seedAgents } from './seed-agents'
@@ -46,6 +47,7 @@ async function main() {
     )
 
     await seedProduct(prisma)
+    await seedProductContent(prisma)
     await seedQuestions(prisma)
     await seedDependencyEdges(prisma)
     await seedDocuments(prisma)

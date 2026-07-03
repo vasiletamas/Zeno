@@ -53,10 +53,11 @@ describe('main-chat agent constraints', () => {
     expect(mainChat?.systemPrompt).toMatch(/DISCOVERY QUESTIONS MUST BE GROUNDED/)
   })
 
-  it('main-chat system prompt distinguishes pricing ranges from specific quotes', () => {
+  it('main-chat system prompt distinguishes derived pricing examples from specific quotes (E1.8)', () => {
     const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
     expect(mainChat?.systemPrompt).toMatch(/SPECIFIC PRICES ONLY VIA QUOTE/)
-    expect(mainChat?.systemPrompt).toMatch(/premiumRange/)
+    expect(mainChat?.systemPrompt).toMatch(/pricing_examples/)
+    expect(mainChat?.systemPrompt).not.toMatch(/premiumRange/) // the retired column left the prompt
   })
 
   it('routes tier/level/addon through select_coverage after set_application (B4)', () => {

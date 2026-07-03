@@ -1,12 +1,17 @@
 /**
  * Product Handlers
  *
- * compare_products
+ * compare_products — E1.8 (T11.D5): the comparison's claims are published
+ * key_value_product_points (bilingual authored content); the retired
+ * features/premiumRange surfaces are gone and NO premium numbers ride a
+ * pre-quote comparison — prices live in get_product_info.pricing_examples
+ * and real quotes.
  */
 
 import { prisma } from '@/lib/db'
 import type { ToolHandler } from '@/lib/tools/types'
 import { resolveProductRef, listAvailableProductRefs } from '@/lib/tools/resolve-product'
+import { getPublishedProductContent } from '@/lib/products/product-content'
 
 // ─────────────────────────────────────────────
 // compare_products
@@ -61,10 +66,12 @@ export const compareProducts: ToolHandler = async (args, context) => {
 
     const lang = context.language ?? 'ro'
 
-    const comparison = products.map(p => {
+    const comparison = await Promise.all(products.map(async p => {
       const name = p.name as { en: string; ro: string }
       const description = p.description as { en: string; ro: string }
-      const premiumRange = p.premiumRange as Record<string, unknown> | null
+      const published = await getPublishedProductContent(p.id)
+      const points = published.fields.KEY_VALUE_PRODUCT_POINTS
+      const localizedPoints = points ? ((lang === 'ro' ? points.ro : points.en) as string[] | null) : null
 
       return {
         id: p.id,
@@ -73,8 +80,7 @@ export const compareProducts: ToolHandler = async (args, context) => {
         description: description[lang],
         insuranceType: p.insuranceType,
         subType: p.subType,
-        features: p.features,
-        premiumRange,
+        key_value_product_points: localizedPoints ?? [],
         targetCustomer: p.targetCustomer,
         contractTerm: p.contractTerm,
         tiers: p.pricingTiers.map(t => {
@@ -93,7 +99,7 @@ export const compareProducts: ToolHandler = async (args, context) => {
         }),
         addonCount: p.addons.length,
       }
-    })
+    }))
 
     const names = comparison.map(c => c.name).join(' vs ')
 

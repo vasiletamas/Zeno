@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db'
 import { seedProduct } from '@/prisma/seeds/seed-product'
+import { seedProductContent } from '@/prisma/seeds/seed-product-content'
 import { seedQuestions } from '@/prisma/seeds/seed-questions'
 import { seedDependencyEdges } from '@/prisma/seeds/seed-dependency-edges'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
@@ -63,6 +64,7 @@ export async function resetFunnelTables(): Promise<void> {
 export async function resetDb(): Promise<void> {
   await resetFunnelTables()
   await seedProduct(prisma)
+  await seedProductContent(prisma)
   await seedQuestions(prisma)
   await seedDependencyEdges(prisma)
 }
@@ -154,9 +156,7 @@ export async function ensureTestProduct() {
       subType: 'TERM',
       eligibility: {},
       defaultPlaybook: '-',
-      pricingExplanation: '-',
       targetCustomer: '-',
-      targetAgeRange: '18-65',
       contractTerm: '-',
       gracePeriod: '-',
       territoryCoverage: 'RO',

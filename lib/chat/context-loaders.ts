@@ -18,6 +18,8 @@ import { LRUCache } from '@/lib/cache/lru-cache'
 import { findContextHit, type ContextHit } from '@/lib/insights/context-hits'
 import { logInfo } from '@/lib/errors/logger'
 import { calculateAge } from './age'
+import { getPublishedProductContent, collectPublishedContentIds, registerPublishFlushHook } from '@/lib/products/product-content'
+import { derivePricingExamples, type PricingExampleGrid } from '@/lib/engines/pricing-examples'
 import type { PromptSections } from './prompt-builder'
 import type { DerivedStateV3 } from '@/lib/engines/domain-types'
 
@@ -25,9 +27,17 @@ import type { DerivedStateV3 } from '@/lib/engines/domain-types'
 // CACHES
 // ==============================================
 
-const productContextCache = new LRUCache<string, string | null>(5, 10 * 60 * 1000) // 10 min
+const productContextCache = new LRUCache<string, { text: string | null; contentVersions: string[] }>(5, 10 * 60 * 1000) // 10 min
 const coachingBriefingCache = new LRUCache<string, string | null>(5, 10 * 60 * 1000)
 const catalogOverviewCache = new LRUCache<string, string>(2, 10 * 60 * 1000) // keyed by language
+
+// E1.3/E1.8 (erratum 6): a ProductContent publish flushes EVERY prompt-side
+// cache — a compliance retraction must never serve retired claims until TTL.
+registerPublishFlushHook(() => {
+  productContextCache.clear()
+  coachingBriefingCache.clear()
+  catalogOverviewCache.clear()
+})
 
 // ==============================================
 // TYPES
@@ -183,8 +193,26 @@ export function loadStateGrounding(input: StateGroundingInput): string {
 // ==============================================
 
 /**
+ * E1.8 (erratum 8, M8 pin 1): the ProductContent version ids injected into
+ * the most recent productContext load — the turn-debug writer stamps them
+ * so prompt-injected claims are as traceable as tool-returned ones.
+ * HAND-OFF: the TurnDebug reducer consumes this when M8's stamping lands
+ * (observability block F2).
+ */
+let lastInjectedProductContentVersions: string[] = []
+export function getLastInjectedProductContentVersions(): string[] {
+  return lastInjectedProductContentVersions
+}
+
+/**
  * Load product context section.
  * Fetches product with pricing tiers, levels, and addons.
+ *
+ * E1.8 (T11.D5): claims come from PUBLISHED ProductContent key points (the
+ * retired EN-only features column is gone) and the pricing anchor is ONE
+ * derived example span — min/max base premium labeled base-only vs
+ * base+addon (closing the anchoring gap where the base range read as the
+ * full price), every number out of the same calculateQuote arithmetic.
  */
 export async function loadProductContext(
   productId: string,
@@ -192,7 +220,10 @@ export async function loadProductContext(
 ): Promise<string | null> {
   const cacheKey = `${productId}:${language}`
   const cached = productContextCache.get(cacheKey)
-  if (cached !== undefined) return cached
+  if (cached !== undefined) {
+    lastInjectedProductContentVersions = cached.contentVersions
+    return cached.text
+  }
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
@@ -218,43 +249,63 @@ export async function loadProductContext(
   })
 
   if (!product) {
-    productContextCache.set(cacheKey, null)
+    productContextCache.set(cacheKey, { text: null, contentVersions: [] })
+    lastInjectedProductContentVersions = []
     return null
   }
 
   const name = (product.name as unknown as LocalizedText)[language]
   const description = (product.description as unknown as LocalizedText)[language]
 
+  const published = await getPublishedProductContent(product.id)
+  const contentVersions = collectPublishedContentIds(published)
+
   const parts: string[] = []
   parts.push(`Product: ${name}`)
   parts.push(`Type: ${product.insuranceType} / ${product.subType}`)
   parts.push(`Description: ${description}`)
 
-  // Key features
-  if (product.features.length > 0) {
+  // Key points — published authored claims only (T11.D2)
+  const points = published.fields.KEY_VALUE_PRODUCT_POINTS
+  const localizedPoints = points ? ((language === 'ro' ? points.ro : points.en) as string[] | null) : null
+  if (localizedPoints && localizedPoints.length > 0) {
     parts.push('')
-    parts.push('Key Features:')
-    for (const feature of product.features) {
-      parts.push(`- ${feature}`)
+    parts.push('Key points (published content):')
+    for (const point of localizedPoints) {
+      parts.push(`- ${point}`)
     }
   }
 
-  // Pricing tiers and levels — show only the product-level premium RANGE, never per-level numbers.
+  // Pricing anchor — ONE derived example span, base-only vs base+addon
   if (product.pricingTiers.length > 0) {
     parts.push('')
     parts.push('Pricing:')
-    const pr = product.premiumRange as unknown
-    let range: string | undefined
-    if (typeof pr === 'string') {
-      range = pr
-    } else if (pr && typeof pr === 'object') {
-      const o = pr as Record<string, unknown>
-      if (typeof o[language] === 'string') range = o[language] as string
-      else if (typeof o.en === 'string' || typeof o.ro === 'string') range = (o[language] ?? o.en ?? o.ro) as string
-      else if (typeof o.min === 'number' && typeof o.max === 'number') range = `${o.min}-${o.max} ${o.currency ?? 'RON'}/${o.frequency ?? 'year'}`
+    const grid = product.pricingExampleGrid as unknown as PricingExampleGrid | null
+    const examples = grid
+      ? derivePricingExamples(
+          {
+            quoteValidityDays: product.quoteValidityDays,
+            tiers: product.pricingTiers.map((t) => ({
+              code: t.code,
+              name: t.name as { en: string; ro: string },
+              levels: t.levels.map((l) => ({ code: l.code, name: l.name as { en: string; ro: string }, premiumAnnual: l.premiumAnnual })),
+            })),
+            addonRules: (product.addons[0]?.pricingRules ?? []).map((r) => ({ minAge: r.minAge, maxAge: r.maxAge, premiumAnnual: r.premiumAnnual })),
+          },
+          grid,
+        )
+      : []
+    if (examples.length > 0) {
+      const bases = examples.map((e) => e.base.premiumAnnual)
+      const withAddon = examples
+        .map((e) => e.withAddon)
+        .filter((w): w is { premiumAnnual: number; premiumMonthly: number; addonDelta: number } => !!w && 'premiumAnnual' in w)
+        .map((w) => w.premiumAnnual)
+      const addonSpan = withAddon.length > 0 ? `; with the ${product.addons[0]?.code ?? 'addon'} addon the same examples run ${Math.min(...withAddon)}-${Math.max(...withAddon)} RON/year` : ''
+      parts.push(`Example premiums (BASE product only): ${Math.min(...bases)}-${Math.max(...bases)} RON/year across the sampled ages/packages${addonSpan}. Full per-age grid: get_product_info pricing_examples. Customer-specific price: generate_quote only.`)
+    } else {
+      parts.push('Exact pricing is available only via generate_quote, after the application is complete.')
     }
-    if (range) parts.push(`Premium range: ${range}`)
-    else parts.push('Exact pricing is available only via generate_quote, after the application is complete.')
   }
 
   // Addons
@@ -275,7 +326,8 @@ export async function loadProductContext(
   }
 
   const result = parts.join('\n')
-  productContextCache.set(cacheKey, result)
+  productContextCache.set(cacheKey, { text: result, contentVersions })
+  lastInjectedProductContentVersions = contentVersions
   return result
 }
 

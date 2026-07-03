@@ -5,6 +5,9 @@ import { resetDb } from '@/__tests__/helpers/test-db'
 describe('ProductContent model (E1.1)', () => {
   beforeAll(async () => {
     await resetDb()
+    // E1.8: resetDb seeds+publishes the real v1 content — clear it so the
+    // uniqueness probes below own their rows
+    await prisma.productContent.deleteMany({})
   })
 
   it('stores a draft row and enforces (product, addon, field, locale, version) uniqueness', async () => {
