@@ -21,7 +21,9 @@ describe.skipIf(!process.env.DATABASE_URL)('gateway idempotency (#8 replay-first
     const r1 = await executeCommit({ tool: 'set_candidate_product', args: { productId: product.id }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
     const r2 = await executeCommit({ tool: 'set_candidate_product', args: { productId: product.id }, actor: 'gui', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
     expect(r1.outcome).toBe('applied')
-    expect(r2).toEqual(r1) // original envelope, verbatim
+    // F2.2 erratum 2: the original envelope verbatim — ledgerId included —
+    // except disposition, which marks the replay.
+    expect(r2).toEqual({ ...r1, disposition: 'replay' })
     const rows = await prisma.commitLedger.findMany({ where: { conversationId: conv.id, tool: 'set_candidate_product' }, orderBy: { createdAt: 'asc' } })
     expect(rows.map((r) => r.idempotencyDisposition)).toEqual(['fresh', 'replay'])
   })
@@ -54,7 +56,7 @@ describe.skipIf(!process.env.DATABASE_URL)('gateway idempotency (#8 replay-first
     const r1 = await executeCommit({ tool: 'collect_customer_field', args: { field: 'email', value: 'a@b.ro' }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
     expect(r1.outcome).toBe('applied')
     const r2 = await executeCommit({ tool: 'collect_customer_field', args: { field: 'email', value: 'a@b.ro' }, actor: 'agent', conversationId: conv.id, customerId: customer.id, toolContext: ctx })
-    expect(r2).toEqual(r1)
+    expect(r2).toEqual({ ...r1, disposition: 'replay' }) // F2.2 erratum 2
     const rows = await prisma.commitLedger.findMany({ where: { conversationId: conv.id, tool: 'collect_customer_field' }, orderBy: { createdAt: 'asc' } })
     expect(rows.map((r) => r.idempotencyDisposition)).toEqual(['fresh', 'replay'])
     expect(rows.every((r) => r.targetRef === 'field:email')).toBe(true)
