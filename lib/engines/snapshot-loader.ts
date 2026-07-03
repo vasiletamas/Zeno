@@ -69,11 +69,15 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     )
     const visibleCodes = questions.map((q) => q.code).filter((c): c is string => c !== null && visible.has(c))
     const answeredCodes = visibleCodes.filter((c) => activeAnswers[c] !== undefined)
+    // D1 (T7.D1): a Quote row in ANY state freezes its application — the
+    // recovery path is always cancel_quote + a new application.
+    const quoteCount = await db.quote.count({ where: { applicationId: application.id } })
     appState = {
       id: application.id, status: application.status,
       tier: tier?.code ?? null, level: level?.code ?? null, addon: application.includesAddon,
       answeredCount: answeredCodes.length, requiredCount: visibleCodes.length,
       missingCodes: visibleCodes.filter((c) => activeAnswers[c] === undefined),
+      frozen: application.frozenAt !== null || quoteCount > 0,
     }
   }
   // DNT facts. Legacy conversation-stamp semantics survive until B2.6; the
@@ -122,7 +126,9 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   const eligibilityFacts: Record<string, string | number | boolean> = {}
   const age = await getAge(conversation.customerId, new Date(), db)
   if (age !== null) eligibilityFacts.age = age
-  if (identityFacts.fields.cnp && identityFacts.fields.cnp.provenance !== 'conflict') eligibilityFacts.residency = 'Romania'
+  const declaredResidency = await db.customerProfileField.findUnique({ where: { customerId_field: { customerId: conversation.customerId, field: 'residency' } } })
+  if (declaredResidency) eligibilityFacts.residency = declaredResidency.value
+  else if (identityFacts.fields.cnp && identityFacts.fields.cnp.provenance !== 'conflict') eligibilityFacts.residency = 'Romania'
   // the product's typed ruleset, parsed once per snapshot (informal legacy
   // Json → null: no engine-evaluable rules)
   let eligibilityRules: EligibilityRuleSet | null = null

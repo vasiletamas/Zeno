@@ -6,11 +6,12 @@
  * cnp is stored as the AES-GCM JSON envelope and masked on read.
  */
 import { prisma } from '@/lib/db'
+import { cnpBirthDate } from '@/lib/engines/cnp-validation'
 import { Prisma } from '@/lib/generated/prisma/client'
 import { encrypt, decrypt, maskCnp } from '@/lib/security/encryption'
 import { resolveDeclaredWrite, resolveVerifiedWrite, type FieldRecord } from '@/lib/engines/provenance-rules'
 
-export type ProfileFieldName = 'name' | 'cnp' | 'dateOfBirth' | 'declaredAge' | 'email' | 'phone' | 'address'
+export type ProfileFieldName = 'name' | 'cnp' | 'dateOfBirth' | 'declaredAge' | 'email' | 'phone' | 'address' | 'residency'
 
 export type ProfileWriteResult =
   | { outcome: 'applied'; provenance: FieldRecord['provenance']; mirrorConflict?: string }
@@ -120,14 +121,22 @@ export async function getProfile(customerId: string) {
 }
 
 export async function getAge(customerId: string, now = new Date(), db: Db = prisma): Promise<number | null> {
-  const dob = await existingRecord(db, customerId, 'dateOfBirth')
-  if (dob) {
-    const d = new Date(dob.value)
+  const ageFrom = (d: Date): number => {
     let a = now.getFullYear() - d.getFullYear()
     const m = now.getMonth() - d.getMonth()
     if (m < 0 || (m === 0 && now.getDate() < d.getDate())) a--
     return a
   }
+  const dob = await existingRecord(db, customerId, 'dateOfBirth')
+  if (dob) return ageFrom(new Date(dob.value))
   const decl = await existingRecord(db, customerId, 'declaredAge')
-  return decl ? Number(decl.value) : null
+  if (decl) return Number(decl.value)
+  // D1.4: a declared CNP encodes the birth date (B3 decode) — derived,
+  // never guessed. existingRecord already decoded the stored envelope.
+  const cnp = await existingRecord(db, customerId, 'cnp')
+  if (cnp) {
+    const d = cnpBirthDate(cnp.value)
+    if (d) return ageFrom(d)
+  }
+  return null
 }

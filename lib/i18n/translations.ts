@@ -65,6 +65,9 @@ export const translations: Record<Language, TranslationTable> = {
       no_suitability_warning_pending: 'Nu există o avertizare de potrivire de confirmat.',
       product_has_no_investment_component: 'Protect nu are componentă de investiție — este o asigurare de protecție.',
       severe_conditions_demand_needs_addon: 'Pentru afecțiuni medicale grave, potrivirea vine din opțiunea de tratament în străinătate.',
+      compliance_block: 'Pașii de conformitate nu sunt încheiați — analiza de nevoi și acordul GDPR trebuie să fie valide.',
+      application_frozen: 'Cererea a fost înghețată la emiterea ofertei — pentru schimbări, anulăm oferta și deschidem o cerere nouă.',
+      manual_underwriting: 'Cererea necesită analiza unui subscriitor — revenim imediat ce avem un răspuns.',
     },
     // Hero section
     hero_headline: 'Dacă mâine primești un diagnostic grav, ai fi pregătit?',
@@ -213,6 +216,9 @@ export const translations: Record<Language, TranslationTable> = {
       no_suitability_warning_pending: 'There is no suitability warning to acknowledge.',
       product_has_no_investment_component: 'Protect has no investment component — it is a protection product.',
       severe_conditions_demand_needs_addon: 'For severe medical conditions, the fit comes from the treatment-abroad option.',
+      compliance_block: 'The compliance steps are not complete — the needs analysis and GDPR consent must be valid.',
+      application_frozen: 'The application froze when the quote was issued — to change it, we cancel the quote and open a new application.',
+      manual_underwriting: 'The application needs an underwriter\'s review — we will continue as soon as there is an answer.',
     },
     // Hero section
     hero_headline:

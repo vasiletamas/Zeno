@@ -8,7 +8,9 @@
 import crypto from 'crypto'
 import { prisma } from '@/lib/db'
 import { fsStorage } from './storage'
-import type { DocumentKind, DocumentSource } from '@/lib/generated/prisma/client'
+import type { DocumentKind, DocumentSource, Prisma } from '@/lib/generated/prisma/client'
+
+type Db = typeof prisma | Prisma.TransactionClient
 
 export async function createDocument(input: {
   kind: DocumentKind
@@ -20,12 +22,12 @@ export async function createDocument(input: {
   customerId?: string
   quoteId?: string
   policyId?: string
-}) {
+}, db: Db = prisma) {
   const contentHash = crypto.createHash('sha256').update(input.bytes).digest('hex')
   const version = input.version ?? 1
   const storageKey = `${input.kind}/${input.language}/v${version}/${contentHash.slice(0, 16)}.pdf`
   await fsStorage.put(storageKey, input.bytes)
-  return prisma.document.create({
+  return db.document.create({
     data: {
       kind: input.kind, version, language: input.language, storageKey, contentHash,
       source: input.source, productId: input.productId, customerId: input.customerId,

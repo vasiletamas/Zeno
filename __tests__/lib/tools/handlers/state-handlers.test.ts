@@ -38,7 +38,7 @@ describe('getStateHandler', () => {
   it('renders phase/subphase in the message when a subphase is active', async () => {
     loadSnapshotSpy.mockResolvedValueOnce(
       makeSnapshot({
-        application: { id: 'a', status: 'OPEN', tier: null, level: null, addon: null, answeredCount: 0, requiredCount: 6, missingCodes: ['AGE'] },
+        application: { id: 'a', status: 'OPEN', tier: null, level: null, addon: null, answeredCount: 0, requiredCount: 6, missingCodes: ['AGE'], frozen: false },
       }),
     )
 

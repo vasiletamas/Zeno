@@ -109,6 +109,12 @@ export interface ToolResult {
    * returning this MUST NOT have written anything yet.
    */
   requiresConfirmation?: { preview: Record<string, unknown> }
+  /**
+   * D1.4: a SUCCESSFUL apply whose business outcome is a referral (state
+   * changed: REFERRED + WorkItem) — the gateway emits outcome 'referred'
+   * with this reason instead of 'applied'.
+   */
+  referred?: { reason: string }
 }
 
 export interface ToolContext {

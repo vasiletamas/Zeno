@@ -16,6 +16,8 @@ import { computeVisibleSet } from '@/lib/engines/dependency-graph'
 import { loadDependencyGraph } from '@/lib/engines/dependency-graph-loader'
 import { isDntValidFor, isExpiringOrExpired, decideSessionType, computeCoverage, DNT_VALIDITY_DAYS, type DntFact } from '@/lib/engines/dnt-rules'
 import { appendConsentEvents } from '@/lib/customer/consent-service'
+import { setDeclaredField } from '@/lib/customer/profile-service'
+import { validateCnpChecksum } from '@/lib/engines/cnp-validation'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackDntCompleted } from '@/lib/analytics/events'
 import { bumpInsightOnAnswer } from './insight-bump'
@@ -328,6 +330,15 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
       create: { sessionId: session.id, questionId: question.id, value: v.normalizedValue },
       update: { value: v.normalizedValue, answeredAt: new Date() },
     })
+
+    // D1.4: the CNP declared in the DNT is a PROFILE fact (B0 SSOT) — it
+    // feeds age derivation and the residency eligibility fact. Only
+    // checksum-valid CNPs mirror; the DNT answer itself always saves.
+    if (questionCode === 'DNT_CNP' && validateCnpChecksum(v.normalizedValue)) {
+      try {
+        await setDeclaredField(context.customerId, 'cnp', v.normalizedValue, 'dnt', context.db as Parameters<typeof setDeclaredField>[4])
+      } catch { /* profile mirror must never fail the DNT write */ }
+    }
 
     const { next, progress, pendingCodes } = await sessionNextQuestion(context.db, codes, session.id)
     const lang = context.language ?? 'ro'

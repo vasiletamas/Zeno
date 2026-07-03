@@ -45,7 +45,7 @@ export interface CommitRequest {
  * material hash: a same-value resubmit replays, a new value is a fresh commit.
  * Every other commit replays only on identical material args.
  */
-const ONE_SHOT = new Set(['sign_dnt', 'accept_quote', 'generate_quote', 'set_application'])
+const ONE_SHOT = new Set(['sign_dnt', 'accept_quote', 'set_application'])
 
 /**
  * State-guarded commits (B2.5): duplicates are answered by the ENGINE with a
@@ -63,6 +63,11 @@ const REPLAY_EXEMPT = new Set([
   // replayed envelope would lie. Duplicates are answered by the handler's
   // unchanged path (no-op, no second cascade).
   'select_coverage',
+  // D1.4: freeze-at-issue IS the one-shot enforcement (a Quote row in ANY
+  // state blocks with application_frozen) — replaying the original applied
+  // envelope after cancel/expiry would lie about a dead quote, so duplicates
+  // are answered by legality, never by the ledger.
+  'generate_quote',
 ])
 
 /**
@@ -297,9 +302,15 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
     // dnt_session_incomplete).
     const errPrefix = typeof handlerResult.error === 'string' ? handlerResult.error.split(':')[0].trim() : ''
     const spokenReason = (REASON_CODES as readonly string[]).includes(errPrefix) ? (errPrefix as ReasonCode) : null
+    // D1.4: a referral is an APPLIED state change with its own outcome word
+    const handlerNeeds = Array.isArray((handlerResult.data as { needs?: unknown } | undefined)?.needs)
+      ? ((handlerResult.data as { needs: string[] }).needs)
+      : undefined
     const envelope: CommitResult = handlerResult.success
-      ? { outcome: 'applied', effects, phaseDelta, data: { ...handlerResult.data, _uiAction: handlerResult.uiAction, _confirmation: handlerResult.confirmation, _message: handlerResult.message } }
-      : { outcome: spokenReason ? outcomeForBlocked(spokenReason) : 'rejected', reason: spokenReason ?? 'handler_rejected', effects: [], data: { error: handlerResult.error } }
+      ? handlerResult.referred
+        ? { outcome: 'referred', reason: handlerResult.referred.reason as ReasonCode, effects, phaseDelta, data: { ...handlerResult.data, _message: handlerResult.message } }
+        : { outcome: 'applied', effects, phaseDelta, data: { ...handlerResult.data, _uiAction: handlerResult.uiAction, _confirmation: handlerResult.confirmation, _message: handlerResult.message } }
+      : { outcome: spokenReason ? outcomeForBlocked(spokenReason) : 'rejected', reason: spokenReason ?? 'handler_rejected', effects: [], needs: handlerNeeds, data: { error: handlerResult.error } }
     await writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, post.state.phase, handlerResult.success ? commitId : undefined)
     return envelope
   })

@@ -10,7 +10,7 @@ function rowMap(rows: Array<{ label: string; value: string }>): Record<string, s
 describe('deriveStateDebugRows (DerivedStateV3)', () => {
   it('renders an APPLICATION/DNT state with phase/subphase and missingCodes', () => {
     const { state } = deriveAndExpose(makeSnapshot({
-      application: { id: 'a', status: 'OPEN', tier: 'standard', level: 'l1', addon: false, answeredCount: 2, requiredCount: 6, missingCodes: ['AGE', 'OCCUPATION'] },
+      application: { id: 'a', status: 'OPEN', tier: 'standard', level: 'l1', addon: false, answeredCount: 2, requiredCount: 6, missingCodes: ['AGE', 'OCCUPATION'], frozen: false },
     }))
     const m = rowMap(deriveStateDebugRows(state))
     expect(m['phase']).toBe('APPLICATION/DNT')

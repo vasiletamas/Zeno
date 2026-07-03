@@ -73,7 +73,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.18.0' // 1.16.0: pinned questionnaire surface (C1.ADD-1/2); 1.17.0: discovery eligibility verdict DERIVED per turn (C2.6) — INELIGIBLE blocks set_application with the failed-rule reason, unknown never a wall; 1.18.0: suitability documented-warning flow (C3.4) — acknowledge_suitability_warning exposed while a warn_and_allow mismatch awaits ack, generate_quote blocked suitability_warning_unacknowledged (warn) or the mismatch's own reason (hard_block)
+export const engineVersion = '1.19.0' // 1.16.0: pinned questionnaire surface (C1.ADD-1/2); 1.17.0: discovery eligibility verdict DERIVED per turn (C2.6) — INELIGIBLE blocks set_application with the failed-rule reason, unknown never a wall; 1.18.0: suitability documented-warning flow (C3.4) — acknowledge_suitability_warning exposed while a warn_and_allow mismatch awaits ack, generate_quote blocked suitability_warning_unacknowledged (warn) or the mismatch's own reason (hard_block); 1.19.0: freeze-at-issue (D1) — a Quote row in ANY state blocks generate_quote with application_frozen
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -196,8 +196,11 @@ export const ACTION_RULES: ActionRule[] = [
     exposedWhen: (s, d) => s.application !== null && suitabilityAckNeeded(s, d),
     blockedReason: (s, d) => (s.application !== null && d.suitability !== null && !suitabilityAckNeeded(s, d) ? { reason: 'no_suitability_warning_pending' } : null) },
   { action: 'generate_quote', kind: 'commit',
-    exposedWhen: (s, d) => d.phase === 'APPLICATION' && appExposureFromSnapshot(s).available.includes('generate_quote') && s.consents.gdprProcessing && !suitabilityAckNeeded(s, d) && !suitabilityHardBlocked(s, d),
+    exposedWhen: (s, d) => d.phase === 'APPLICATION' && !s.application?.frozen && appExposureFromSnapshot(s).available.includes('generate_quote') && s.consents.gdprProcessing && !suitabilityAckNeeded(s, d) && !suitabilityHardBlocked(s, d),
     blockedReason: (s, d) => {
+      // D1 (T7.D1): a Quote row in ANY state froze the application — the
+      // one-app-one-quote invariant; recovery is cancel_quote + re-apply.
+      if (s.application?.frozen) return { reason: 'application_frozen' }
       if (d.phase === 'QUOTE') return { reason: 'quote_already_issued' }
       // C3.4 (erratum 2): the suitability gate surfaces FIRST — the
       // documented-warning step is actionable the moment the DNT is signed,

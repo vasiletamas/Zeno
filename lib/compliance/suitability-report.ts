@@ -4,20 +4,21 @@
  * computed from the signed DNT facts, registers the PDF in the Document
  * registry (D2 contract) keyed to the quote.
  *
- * EXPLICIT NON-GOAL (M9 coupled flip): lib/payments/post-payment.ts still
- * calls generateDntReport — D1's quote-issuance package wires
- * generateSuitabilityReport(quoteId) into generate_quote's apply AND
- * deletes the post-payment call in the same package, so there is never a
- * window with zero or two report paths.
+ * Wired into generate_quote's apply at D1 (the M9 flip): the post-payment
+ * generateDntReport call died in the same package — one report path,
+ * never zero or two.
  */
 import { prisma } from '@/lib/db'
+import type { Prisma } from '@/lib/generated/prisma/client'
 import { evaluateSuitability, parseSuitabilityRuleSet, type SuitabilityResult } from '@/lib/engines/suitability'
 import { createDocument } from '@/lib/documents/registry'
 import { buildSuitabilityPdf } from './dnt-report-pdf'
 
+type Db = typeof prisma | Prisma.TransactionClient
+
 /** The signed Dnt's answers (questionCode → value) via B1's aggregate. */
-async function loadDntFacts(customerId: string): Promise<Record<string, string>> {
-  const signedDnt = await prisma.dnt.findFirst({
+async function loadDntFacts(customerId: string, db: Db): Promise<Record<string, string>> {
+  const signedDnt = await db.dnt.findFirst({
     where: { customerId, status: 'ACTIVE' },
     orderBy: { signedAt: 'desc' },
     include: { sourceSession: { include: { answers: { include: { question: { select: { code: true } } } } } } },
@@ -28,17 +29,17 @@ async function loadDntFacts(customerId: string): Promise<Record<string, string>>
   )
 }
 
-export async function generateSuitabilityReport(quoteId: string): Promise<{
+export async function generateSuitabilityReport(quoteId: string, db: Db = prisma): Promise<{
   buffer: Buffer
   documentId: string
   meta: { verdict: SuitabilityResult['verdict']; ruleSetVersion: number }
 }> {
-  const quote = await prisma.quote.findUniqueOrThrow({
+  const quote = await db.quote.findUniqueOrThrow({
     where: { id: quoteId },
     include: { product: true, customer: true, application: { include: { tier: true, level: true } } },
   })
   const ruleSet = parseSuitabilityRuleSet(quote.product.suitabilityRules)
-  const dntFacts = await loadDntFacts(quote.customerId)
+  const dntFacts = await loadDntFacts(quote.customerId, db)
   const result = evaluateSuitability(ruleSet, dntFacts)
   const buffer = await buildSuitabilityPdf({
     quote: {
@@ -63,6 +64,6 @@ export async function generateSuitabilityReport(quoteId: string): Promise<{
     customerId: quote.customerId,
     quoteId: quote.id,
     productId: quote.productId,
-  })
+  }, db)
   return { buffer, documentId: doc.id, meta: { verdict: result.verdict, ruleSetVersion: ruleSet.version } }
 }

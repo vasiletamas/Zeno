@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { derivePhase } from '@/lib/engines/derive-and-expose'
 import { makeSnapshot } from './snapshot-fixtures'
 
-const openApp = { id: 'app-1', status: 'OPEN' as const, tier: null, level: null, addon: null, answeredCount: 0, requiredCount: 6, missingCodes: ['Q1'] }
+const openApp = { id: 'app-1', status: 'OPEN' as const, tier: null, level: null, addon: null, answeredCount: 0, requiredCount: 6, missingCodes: ['Q1'], frozen: false }
 const validDnt = { signed: true, valid: true, validUntil: '2027-01-01T00:00:00.000Z', coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0, facts: {} }
 
 describe('derivePhase — pinned #10 table', () => {
@@ -20,16 +20,16 @@ describe('derivePhase — pinned #10 table', () => {
     expect(derivePhase(makeSnapshot({ application: openApp, dnt: validDnt }))).toEqual({ phase: 'APPLICATION', subphase: 'QUESTIONNAIRE' })
   })
   it('APPLICATION/QUOTE_GENERATION: complete, no issued quote (selection incompleteness is NOT a subphase)', () => {
-    const done = { ...openApp, status: 'COMPLETED' as const, answeredCount: 6, missingCodes: [] }
+    const done = { ...openApp, status: 'COMPLETED' as const, answeredCount: 6, missingCodes: [], frozen: false }
     expect(derivePhase(makeSnapshot({ application: done, dnt: validDnt }))).toEqual({ phase: 'APPLICATION', subphase: 'QUOTE_GENERATION' })
   })
   it('QUOTE: an issued, unexpired quote exists', () => {
-    const done = { ...openApp, status: 'COMPLETED' as const, answeredCount: 6, missingCodes: [] }
+    const done = { ...openApp, status: 'COMPLETED' as const, answeredCount: 6, missingCodes: [], frozen: false }
     const s = makeSnapshot({ application: done, dnt: validDnt, quote: { id: 'q1', status: 'ISSUED', premiumAnnual: 500, validUntil: '2027-01-01T00:00:00.000Z', expired: false } })
     expect(derivePhase(s)).toEqual({ phase: 'QUOTE', subphase: null })
   })
   it('expired issued quote falls back to QUOTE_GENERATION (regenerate-loop killed)', () => {
-    const done = { ...openApp, status: 'COMPLETED' as const, answeredCount: 6, missingCodes: [] }
+    const done = { ...openApp, status: 'COMPLETED' as const, answeredCount: 6, missingCodes: [], frozen: false }
     const s = makeSnapshot({ application: done, dnt: validDnt, quote: { id: 'q1', status: 'ISSUED', premiumAnnual: 500, validUntil: '2024-01-01T00:00:00.000Z', expired: true } })
     expect(derivePhase(s)).toEqual({ phase: 'APPLICATION', subphase: 'QUOTE_GENERATION' })
   })

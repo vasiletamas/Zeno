@@ -36,8 +36,13 @@ export const resolveReferral: ToolHandler = async (args, context) => {
     if (decision === 'approve') {
       // B4 status machine: REFERRED → OPEN is the underwriter-approval
       // re-entry (canTransition); the follow-up system generate_quote runs
-      // on the OPEN, answers-complete application.
-      await context.db.application.update({ where: { id: refs.applicationId }, data: { status: 'OPEN' } })
+      // on the OPEN, answers-complete application. D1: approval CONSUMES the
+      // escalate flags — the underwriter reviewed exactly them; the audit
+      // trail lives on the WorkItem. Leaving them would re-refer forever.
+      const app = await context.db.application.findUnique({ where: { id: refs.applicationId }, select: { flagsForReview: true } })
+      const remaining = (Array.isArray(app?.flagsForReview) ? (app!.flagsForReview as Array<Record<string, unknown>>) : [])
+        .filter((f) => f?.action !== 'escalate')
+      await context.db.application.update({ where: { id: refs.applicationId }, data: { status: 'OPEN', flagsForReview: JSON.parse(JSON.stringify(remaining)) } })
       await context.db.workItem.update({
         where: { id: item.id },
         data: { status: 'RESOLVED', resolutionCode: 'approved', resolution: note ?? null, resolvedBy, resolvedAt: new Date() },

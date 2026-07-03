@@ -6,7 +6,13 @@
 
 import { calculateQuote } from '@/lib/engines/quote-engine'
 import type { QuoteInput } from '@/lib/engines/quote-engine'
-import { verifyConsents } from '@/lib/compliance/consent-check'
+import { decideQuoteIssue } from '@/lib/engines/quote-decision'
+import { evaluateEligibility } from '@/lib/engines/eligibility'
+import { deriveSuitability } from '@/lib/engines/derive-and-expose'
+import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
+import { getAge } from '@/lib/customer/profile-service'
+import { createReferralWorkItem } from '@/lib/work-items/referral'
+import { generateSuitabilityReport } from '@/lib/compliance/suitability-report'
 import { loadActiveApplication } from './application-handlers'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackQuoteGenerated, trackQuoteAccepted } from '@/lib/analytics/events'
@@ -17,39 +23,88 @@ import { trackQuoteGenerated, trackQuoteAccepted } from '@/lib/analytics/events'
 
 export const generateQuote: ToolHandler = async (_args, context) => {
   try {
-    // Verify GDPR consents before generating quote
-    const consents = await verifyConsents(context.conversationId)
-    if (!consents.valid) {
-      return {
-        success: false,
-        error: `GDPR consents required: missing ${consents.missing.join(', ')}`,
-      }
-    }
-
-    // B4: the conversation points at the customer-scoped application; the
-    // questionnaire-completeness gate lives in exposure (missingCodes),
-    // and the status machine keeps the app OPEN until D1's quote lifecycle
-    // pins the completion transition.
     const application = await loadActiveApplication(context)
     if (!application) {
-      return { success: false, error: 'No application found.' }
+      return { success: false, error: 'no_open_application: no application found.' }
+    }
+    // T7.D1 belt (legality is the wall): a Quote row in ANY state — or a
+    // set frozenAt — freezes the application; recovery is cancel_quote + a
+    // new application, never a re-issue.
+    const quoteCount = await context.db.quote.count({ where: { applicationId: application.id } })
+    if (quoteCount > 0 || application.frozenAt !== null) {
+      return { success: false, error: 'application_frozen: the application froze when its quote was issued — cancel the quote and open a new application to change anything.' }
     }
     if (application.status !== 'OPEN') {
-      return {
-        success: false,
-        error: `Application is not quotable (status: ${application.status}).`,
-      }
+      return { success: false, error: `illegal_status_transition: a ${application.status} application is not quotable.` }
     }
-
-    // Need tierId + levelId
     if (!application.tierId || !application.levelId) {
+      return { success: false, error: 'selection_incomplete: choose the package and level first (select_coverage).' }
+    }
+
+    // ── the typed decision (D1.3): identity → compliance → eligibility →
+    // suitability → referral — every input engine-derived, nothing guessed
+    const snapshot = await loadDomainSnapshot(context.conversationId, context.db)
+    const age = await getAge(application.customerId, new Date(), context.db as Parameters<typeof getAge>[2])
+    const eligibilityRules = snapshot.product?.eligibilityRules ?? null
+    const eligFacts = {
+      ...snapshot.eligibilityFacts,
+      ...Object.fromEntries(Object.entries(snapshot.answers).map(([c, v]) => [`answer:${c}`, v])),
+    }
+    const productElig = eligibilityRules ? evaluateEligibility(eligibilityRules, eligFacts, 'product') : { verdict: 'eligible' as const, failedRules: [], missingFacts: [] }
+    const addonElig = eligibilityRules && application.includesAddon ? evaluateEligibility(eligibilityRules, eligFacts, 'addon') : null
+    const mergedElig = {
+      verdict: (productElig.verdict === 'ineligible' || addonElig?.verdict === 'ineligible')
+        ? 'ineligible' as const
+        : (productElig.verdict === 'unknown' || addonElig?.verdict === 'unknown') ? 'unknown' as const : 'eligible' as const,
+      failedRules: [...productElig.failedRules, ...(addonElig?.failedRules ?? [])].map((f) => ({ rule: f.rule.id, reason: f.reason })),
+      missingFacts: [...new Set([...productElig.missingFacts, ...(addonElig?.missingFacts ?? [])])],
+    }
+    const suitabilityRules = snapshot.product?.suitabilityRules ?? null
+    const suitability = deriveSuitability(snapshot) ?? { verdict: 'suitable' as const, mismatches: [] }
+    const flags = (application.flagsForReview as Array<{ questionCode?: string; reason?: string; action?: string }> | null) ?? []
+    const decision = decideQuoteIssue({
+      eligibility: mergedElig,
+      suitability: { verdict: suitability.verdict, mismatches: suitability.mismatches.map((m) => ({ rule: m.rule.id, reason: m.reason })) },
+      suitabilityWarningAcked: suitabilityRules !== null && snapshot.suitabilityAcks.some((a) => a.ruleSetVersion === suitabilityRules.version),
+      suitabilityPolicy: suitabilityRules?.mode ?? 'warn_and_allow',
+      consents: { gdprProcessing: snapshot.consents.gdprProcessing },
+      dnt: { validForProductType: snapshot.dnt.valid && (snapshot.product ? snapshot.dnt.coversProductTypes.includes(snapshot.product.insuranceType) : false) },
+      identity: { hasDobOrCnp: age !== null },
+      escalationFlags: flags.filter((f) => f.action === 'escalate').map((f) => f.questionCode ?? f.reason ?? 'flag'), // erratum 9 mapping
+    })
+    const decided = JSON.parse(JSON.stringify({ ...decision, decidedAt: new Date().toISOString() }))
+
+    if (decision.outcome === 'requires_identity') {
+      // T7.D4: the decision is an audit fact even when it demands data
+      await context.db.application.update({ where: { id: application.id }, data: { quoteDecision: decided } })
+      return { success: false, error: 'requires_identity: the quote needs identity facts first.', data: { needs: decision.needs } }
+    }
+    if (decision.outcome === 'rejected') {
+      await context.db.application.update({ where: { id: application.id }, data: { quoteDecision: decided } })
+      return { success: false, error: `${decision.reason}: the quote decision rejected the application.` }
+    }
+    if (decision.outcome === 'referred') {
+      // REFERRED + WorkItem in this same gateway transaction (E2 contract)
+      await context.db.application.update({ where: { id: application.id }, data: { status: 'REFERRED', quoteDecision: decided } })
+      await createReferralWorkItem({
+        applicationId: application.id,
+        customerId: application.customerId,
+        conversationId: context.conversationId,
+        reason: `manual_underwriting: ${flags.filter((f) => f.action === 'escalate').map((f) => f.reason ?? f.questionCode).join('; ') || 'escalation flags present'}`,
+      }, context.db as Parameters<typeof createReferralWorkItem>[1])
       return {
-        success: false,
-        error: 'Application is missing package or premium level selection.',
+        success: true,
+        referred: { reason: 'manual_underwriting' },
+        effects: ['eligibility_recheck'],
+        data: { referred: true, applicationId: application.id },
+        message: 'The application was referred for manual underwriting — an operator will review it. The customer will be notified of the outcome.',
       }
     }
 
-    // Load PricingLevel with PricingTier
+    // ── issued: price with the DERIVED age (the 30-fallback is dead — the
+    // decision above guarantees age is known), create the ISSUED quote and
+    // FREEZE the application in this same transaction (T7.D1)
+    const customerAge = age! // decision guarantees non-null
     const pricingLevel = await context.db.pricingLevel.findUnique({
       where: { id: application.levelId },
       include: { tier: true },
@@ -57,29 +112,10 @@ export const generateQuote: ToolHandler = async (_args, context) => {
     if (!pricingLevel) {
       return { success: false, error: 'Pricing level not found.' }
     }
-
-    // Calculate customer age from Customer.dateOfBirth
-    let customerAge = 30 // fallback
-    const customer = await context.db.customer.findUnique({
-      where: { id: application.customerId },
-    })
-    if (customer?.dateOfBirth) {
-      const today = new Date()
-      const dob = customer.dateOfBirth
-      customerAge = today.getFullYear() - dob.getFullYear()
-      const monthDiff = today.getMonth() - dob.getMonth()
-      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
-        customerAge--
-      }
-    }
-
-    // Load base CoverageAmounts for this pricing level
     const baseCoverageAmounts = await context.db.coverageAmount.findMany({
       where: { pricingLevelId: pricingLevel.id },
       include: { coverageType: true },
     })
-
-    // Filter age-based coverages
     const baseCoverages = baseCoverageAmounts
       .filter(ca => {
         if (ca.isAgeBased) {
@@ -97,35 +133,16 @@ export const generateQuote: ToolHandler = async (_args, context) => {
         currency: ca.currency,
       }))
 
-    // Load addon pricing if applicable
     let addonPricingRule: { premiumAnnual: number } | null = null
-    let addonCoverages: {
-      code: string
-      name: { en: string; ro: string }
-      amount: number
-      currency: string
-    }[] = []
-
+    let addonCoverages: { code: string; name: { en: string; ro: string }; amount: number; currency: string }[] = []
     if (application.includesAddon) {
-      // Find addon for this product
       const addon = await context.db.addon.findFirst({
         where: { productId: application.productId, isActive: true },
-        include: {
-          pricingRules: true,
-          coverageAmounts: { include: { coverageType: true } },
-        },
+        include: { pricingRules: true, coverageAmounts: { include: { coverageType: true } } },
       })
-
       if (addon) {
-        // Find pricing rule matching customer age
-        const matchingRule = addon.pricingRules.find(
-          r => customerAge >= r.minAge && customerAge <= r.maxAge,
-        )
-        if (matchingRule) {
-          addonPricingRule = { premiumAnnual: matchingRule.premiumAnnual }
-        }
-
-        // Addon coverages
+        const matchingRule = addon.pricingRules.find(r => customerAge >= r.minAge && customerAge <= r.maxAge)
+        if (matchingRule) addonPricingRule = { premiumAnnual: matchingRule.premiumAnnual }
         addonCoverages = addon.coverageAmounts.map(ca => ({
           code: ca.coverageType.code,
           name: ca.coverageType.name as { en: string; ro: string },
@@ -135,84 +152,60 @@ export const generateQuote: ToolHandler = async (_args, context) => {
       }
     }
 
-    // Detect payment frequency from application answers
-    let paymentFrequency: 'annual' | 'semi_annual' | 'quarterly' = 'annual'
-    const paymentQuestion = await context.db.question.findFirst({
-      where: { code: 'PAYMENT_FREQUENCY' },
-    })
-    if (paymentQuestion) {
-      const paymentAnswer = await context.db.answer.findFirst({
-        where: {
-          questionId: paymentQuestion.id,
-          applicationId: application.id,
-          status: 'ACTIVE',
-        },
-      })
-      if (paymentAnswer) {
-        const val = paymentAnswer.value as string
-        if (val === 'semi_annual' || val === 'quarterly') {
-          paymentFrequency = val
-        }
-      }
-    }
-
-    // Load product for quoteValidityDays
-    const product = await context.db.product.findUnique({
-      where: { id: application.productId },
-    })
-
-    // Build QuoteInput
+    const product = await context.db.product.findUnique({ where: { id: application.productId } })
     const quoteInput: QuoteInput = {
       tierCode: pricingLevel.tier.code,
       levelCode: pricingLevel.code,
       customerAge,
       includesAddon: application.includesAddon,
-      paymentFrequency,
-      pricingLevel: {
-        premiumAnnual: pricingLevel.premiumAnnual,
-        name: pricingLevel.name as { en: string; ro: string },
-      },
-      pricingTier: {
-        name: pricingLevel.tier.name as { en: string; ro: string },
-      },
+      paymentFrequency: 'annual', // display default; the CONTRACT frequency is elected at accept (T7.D3)
+      pricingLevel: { premiumAnnual: pricingLevel.premiumAnnual, name: pricingLevel.name as { en: string; ro: string } },
+      pricingTier: { name: pricingLevel.tier.name as { en: string; ro: string } },
       baseCoverages,
       addonPricingRule,
       addonCoverages,
       quoteValidityDays: product?.quoteValidityDays ?? 30,
     }
-
     const result = calculateQuote(quoteInput)
 
-    // Quote.applicationId is @unique — a re-quote after re_rating REPLACES
-    // the expired row (D1's quote lifecycle owns richer history later).
-    const quoteData = {
-      productId: application.productId,
-      customerId: application.customerId,
-      premiumAnnual: result.premiumAnnual,
-      premiumMonthly: result.premiumMonthly,
-      premiumSemiAnnual: result.premiumSemiAnnual,
-      premiumQuarterly: result.premiumQuarterly,
-      paymentFrequency,
-      currency: 'RON',
-      coverages: JSON.parse(JSON.stringify({
-        baseCoverages: result.baseCoverages,
-        addonCoverages: result.addonCoverages,
-        basePremiumAnnual: result.basePremiumAnnual,
-        addonPremiumAnnual: result.addonPremiumAnnual,
-        pricingTierLabel: result.pricingTierLabel,
-        pricingLevelLabel: result.pricingLevelLabel,
-      })),
-      addonsSelected: application.includesAddon
-        ? JSON.parse(JSON.stringify({ included: true, addonPremiumAnnual: result.addonPremiumAnnual }))
-        : undefined,
-      status: 'ISSUED' as const,
-      validUntil: result.validUntil,
-    }
-    const quote = await context.db.quote.upsert({
-      where: { applicationId: application.id },
-      create: { applicationId: application.id, ...quoteData },
-      update: quoteData,
+    const quote = await context.db.quote.create({
+      data: {
+        applicationId: application.id,
+        productId: application.productId,
+        customerId: application.customerId,
+        premiumAnnual: result.premiumAnnual,
+        premiumMonthly: result.premiumMonthly,
+        premiumSemiAnnual: result.premiumSemiAnnual,
+        premiumQuarterly: result.premiumQuarterly,
+        paymentFrequency: null, // elected at accept_quote, never at issue (T7.D3)
+        currency: 'RON',
+        coverages: JSON.parse(JSON.stringify({
+          baseCoverages: result.baseCoverages,
+          addonCoverages: result.addonCoverages,
+          basePremiumAnnual: result.basePremiumAnnual,
+          addonPremiumAnnual: result.addonPremiumAnnual,
+          pricingTierLabel: result.pricingTierLabel,
+          pricingLevelLabel: result.pricingLevelLabel,
+        })),
+        addonsSelected: application.includesAddon
+          ? JSON.parse(JSON.stringify({ included: true, addonPremiumAnnual: result.addonPremiumAnnual }))
+          : undefined,
+        status: 'ISSUED' as const,
+        validUntil: result.validUntil,
+      },
     })
+    await context.db.application.update({
+      where: { id: application.id },
+      data: { status: 'COMPLETED', completedAt: new Date(), frozenAt: new Date(), quoteDecision: decided },
+    })
+
+    // M7/IDD timing (C3.6 flip): the suitability report registers AT
+    // issuance, inside this transaction; the post-payment path died with it.
+    try {
+      await generateSuitabilityReport(quote.id, context.db as Parameters<typeof generateSuitabilityReport>[1])
+    } catch (e) {
+      console.error('[generate_quote] suitability report generation failed (quote stands):', e)
+    }
 
     trackQuoteGenerated(application.customerId, result.premiumAnnual)
 
@@ -225,7 +218,6 @@ export const generateQuote: ToolHandler = async (_args, context) => {
         premiumMonthly: result.premiumMonthly,
         premiumSemiAnnual: result.premiumSemiAnnual,
         premiumQuarterly: result.premiumQuarterly,
-        paymentFrequency,
         basePremiumAnnual: result.basePremiumAnnual,
         addonPremiumAnnual: result.addonPremiumAnnual,
         baseCoverages: result.baseCoverages as unknown as Record<string, unknown>[],
@@ -233,8 +225,9 @@ export const generateQuote: ToolHandler = async (_args, context) => {
         pricingTierLabel: result.pricingTierLabel as unknown as Record<string, unknown>,
         pricingLevelLabel: result.pricingLevelLabel as unknown as Record<string, unknown>,
         validUntil: result.validUntil.toISOString(),
+        applicationFrozen: true,
       },
-      message: `Quote generated: ${result.premiumAnnual} RON/year (${result.premiumMonthly} RON/month). Valid until ${result.validUntil.toISOString().split('T')[0]}.`,
+      message: `Quote issued: ${result.premiumAnnual} RON/year (${result.premiumMonthly} RON/month), valid until ${result.validUntil.toISOString().split('T')[0]}. The application is now frozen — changes require cancelling the quote and re-applying.`,
       uiAction: {
         type: 'show_quote',
         payload: {

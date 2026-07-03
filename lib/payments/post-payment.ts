@@ -16,7 +16,6 @@ import { prisma } from '@/lib/db'
 import { getEmailProvider } from '@/lib/email'
 import { issueChallenge } from '@/lib/customer/verification-service'
 import { purchaseConfirmationEmail } from '@/lib/email/templates/purchase-confirmation'
-import { generateDntReport } from '@/lib/compliance/dnt-report'
 import { trackPaymentCompleted } from '@/lib/analytics/events'
 import { logError } from '@/lib/errors/logger'
 
@@ -68,20 +67,10 @@ export async function runPostPaymentFlow(
     data: { status: 'SUBMITTED' },
   })
 
-  // ─── Step 3b: Generate DNT suitability report PDF ─────────
-  try {
-    await generateDntReport(policy.id)
-    console.log(`[PostPayment] DNT report generated for policy ${policy.id}`)
-  } catch (error) {
-    // PDF failure must not block the payment flow
-    logError({
-      layer: 'tool',
-      category: 'post_payment',
-      message: `DNT report generation failed for policy ${policy.id}`,
-      context: { policyId: policy.id, paymentId },
-      error,
-    })
-  }
+  // Step 3b (retired at D1, M7/IDD timing): the suitability report is
+  // generated AT QUOTE ISSUANCE inside generate_quote's transaction — the
+  // post-policy generateDntReport call died with the flip (one report
+  // path, never zero or two).
 
   // ─── Step 4: Mint the re-entry link (B3.6: challenge primitive) ─
   // The link rides the purchase-confirmation email below, so the
