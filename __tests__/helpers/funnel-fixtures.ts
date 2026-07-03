@@ -151,6 +151,42 @@ export async function buildAcceptedQuoteWithSchedule(options: { frequency: 'annu
   }
 }
 
+/**
+ * The full D2 money path (D4.2, erratum-5 fixture spec):
+ * buildAcceptedQuoteWithSchedule(annual) + ensure_payment_session + a real
+ * settlement-inbox capture → Policy in PENDING_SUBMISSION with issuedAt
+ * stamped by settlement. Returns { ...fx, quoteId, scheduleId, policyId,
+ * issuedAt }.
+ */
+export async function buildPaidPolicy() {
+  const fx = await buildAcceptedQuoteWithSchedule({ frequency: 'annual' })
+  const ensure = await executeCommit({ tool: 'ensure_payment_session', args: {}, actor: 'agent', customerId: fx.customerId, conversationId: fx.conversationId, toolContext: fixtureCtx(fx.customerId, fx.conversationId) })
+  if (ensure.outcome !== 'applied') throw new Error(`buildPaidPolicy: ensure_payment_session ${ensure.outcome} (${ensure.reason})`)
+  const payment = await prisma.payment.findFirstOrThrow({ where: { customerId: fx.customerId, status: 'PENDING' } })
+  const { settlePaymentEvent } = await import('@/lib/payments/settlement')
+  await settlePaymentEvent({ provider: 'MOCK', eventId: `fixture_paid_${payment.id}`, event: 'payment_succeeded', providerPaymentId: payment.providerPaymentId! })
+  const policy = await prisma.policy.findFirstOrThrow({ where: { quoteId: fx.quoteId } })
+  return { ...fx, policyId: policy.id, issuedAt: policy.issuedAt! }
+}
+
+/**
+ * buildPaidPolicy + mark_submitted + activate_policy('AZT-123') as operator
+ * commits (D4.4/D4.5, erratum-5 fixture spec). stopAt stops the pipeline
+ * early. Returns { ...fx, policyId, issuedAt }.
+ */
+export async function buildActivatedPolicy(options: { stopAt?: 'PENDING_SUBMISSION' | 'SUBMITTED' } = {}) {
+  const fx = await buildPaidPolicy()
+  const op = (tool: string, args: Record<string, unknown>) =>
+    executeCommit({ tool, args, actor: 'operator', customerId: fx.customerId, conversationId: fx.conversationId, toolContext: fixtureCtx(fx.customerId, fx.conversationId) })
+  if (options.stopAt === 'PENDING_SUBMISSION') return fx
+  const sub = await op('mark_submitted', { policyId: fx.policyId })
+  if (sub.outcome !== 'applied') throw new Error(`buildActivatedPolicy: mark_submitted ${sub.outcome} (${sub.reason})`)
+  if (options.stopAt === 'SUBMITTED') return fx
+  const act = await op('activate_policy', { policyId: fx.policyId, allianzPolicyNumber: 'AZT-123' })
+  if (act.outcome !== 'applied') throw new Error(`buildActivatedPolicy: activate_policy ${act.outcome} (${act.reason})`)
+  return fx
+}
+
 /** buildReadyApplication + a real gateway generate_quote → ISSUED quote. */
 export async function buildIssuedQuote(options: { validUntil?: Date } = {}) {
   const fx = await buildReadyApplication()

@@ -81,7 +81,7 @@ const REPLAY_EXEMPT = new Set([
  * based legality is REPLACED by the actor gate (operator|system only). The
  * hygiene test excludes them from the registry↔ACTION_RULES parity check.
  */
-export const OPERATOR_TOOLS = new Set(['resolve_referral', 'resolve_work_item'])
+export const OPERATOR_TOOLS = new Set(['resolve_referral', 'resolve_work_item', 'mark_submitted', 'activate_policy', 'cancel_submission'])
 
 export function resolveTargetRef(tool: string, args: Record<string, unknown>, state: DerivedStateV3, conversationId: string): string {
   // repeatable commits — addressed entity from ARGS (erratum 4)
@@ -92,6 +92,8 @@ export function resolveTargetRef(tool: string, args: Record<string, unknown>, st
   if (tool === 'write_question_answer') return `app_answer:${String(args.questionCode ?? 'auto')}`
   if (tool === 'modify_answer') return `app_answer:${String(args.questionCode ?? 'unknown')}`
   if (tool === 'withdraw_consent') return `consent:${String(args.kind ?? 'unknown')}`
+  // D4.2: policy-scoped operator commits key on the policy from ARGS
+  if (OPERATOR_TOOLS.has(tool) && typeof args.policyId === 'string') return `policy:${args.policyId}`
   if (OPERATOR_TOOLS.has(tool)) return `work_item:${String(args.workItemId ?? 'unknown')}`
   // one-shot / entity-scoped commits — stable natural key
   if (tool === 'sign_dnt') return `dnt_session:${state.dnt.activeSessionId ?? 'none'}` // B2.6: customer-scoped renewals may recur per conversation

@@ -61,12 +61,16 @@ enum QuoteStatus {
   CANCELLED
 }
 
+// D4.1 (T9.D3): explicit machine with exclusive owners (lib/engines/
+// policy-machine.ts). LAPSED is reachable only from ACTIVE, owner = system
+// job (M16: detection deferred; the transition row exists already).
 enum PolicyStatus {
   PENDING_SUBMISSION
   SUBMITTED
   ACTIVE
   CANCELLED
   EXPIRED
+  LAPSED
 }
 
 enum PaymentStatus {
@@ -202,6 +206,9 @@ model Product {
   // resolved to before-initiate_payment; flip by seeding accept_quote:
   // ["id_card"] if compliance wants accept-time.
   verificationRequirements Json?
+  // D4.2: distance-channel free-look default per OG 85/2004 — the constant is
+  // FLAGGED FOR LEGAL/COMPLIANCE CONFIRMATION (channel-dependent 30 vs 20).
+  freeLookDays            Int      @default(30)
   // C3.2 (M7): typed SuitabilityRuleSet { version, mode, rules } — parsed by
   // lib/engines/suitability.ts, never evaluated as informal Json.
   suitabilityRules        Json?
@@ -868,8 +875,10 @@ model Policy {
   paymentFrequency    String?
   currency            String       @default("RON")
   coverageSummary         Json
-  suitabilityReportPath  String?
-  issuedAt               DateTime?
+  suitabilityReportPath  String? // dies at D4.6 with its dashboard consumers (erratum 1 ordering)
+  issuedAt               DateTime? // single-meaning: FIRST CAPTURE, written only by settlement (D2.6)
+  activatedAt            DateTime?
+  freeLookEndsAt         DateTime? // frozen per-policy snapshot at activation (T9.D2)
   createdAt              DateTime     @default(now())
   updatedAt              DateTime     @updatedAt
 

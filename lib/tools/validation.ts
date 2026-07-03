@@ -190,6 +190,19 @@ const requestDocumentUploadSchema = z.object({
 // OPERATOR QUEUE (E2.4)
 // ==============================================
 
+const markSubmittedSchema = z.object({
+  policyId: z.string().min(1, 'Policy id is required'),
+}).strict()
+
+const activatePolicySchema = z.object({
+  policyId: z.string().min(1, 'Policy id is required'),
+  allianzPolicyNumber: z.string().min(1, 'The Allianz policy number is mandatory'),
+}).strict()
+
+const cancelSubmissionSchema = z.object({
+  policyId: z.string().min(1, 'Policy id is required'),
+}).strict()
+
 const resolveReferralSchema = z.object({
   workItemId: z.string().min(1, 'Work item id is required'),
   decision: z.enum(['approve', 'reject']),
@@ -279,6 +292,9 @@ const toolSchemas: Record<string, ZodType> = {
 
   // Operator queue
   resolve_referral: resolveReferralSchema,
+  mark_submitted: markSubmittedSchema,
+  activate_policy: activatePolicySchema,
+  cancel_submission: cancelSubmissionSchema,
   resolve_work_item: resolveWorkItemSchema,
 }
 

@@ -32,6 +32,7 @@ import { collectCustomerField } from './handlers/data-handlers'
 import { escalateToHuman } from './handlers/utility-handlers'
 import { ensurePaymentSession, getPaymentStatus, changePaymentOption } from './handlers/payment-handlers'
 import { resolveReferral, resolveWorkItem } from './handlers/operator-handlers'
+import { markSubmitted, activatePolicy, cancelSubmission } from './handlers/policy-operator-handlers'
 import { startChannelVerification, confirmChannelVerification, requestDocumentUpload } from './handlers/identity-handlers'
 
 // ==============================================
@@ -1102,6 +1103,61 @@ registerTool('request_document_upload', {
 // --- Operator queue (E2.4) ---
 // Never agent-exposed: no ACTION_RULES entry; the gateway's OPERATOR_TOOLS
 // actor gate (operator|system only) replaces exposure-based legality.
+
+registerTool('mark_submitted', {
+  description: 'Operator: mark a paid policy as submitted to the insurer (PENDING_SUBMISSION → SUBMITTED).',
+  parameters: {
+    type: 'object',
+    properties: {
+      policyId: { type: 'string', description: 'The policy to mark submitted.' },
+    },
+    required: ['policyId'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ['ADMIN', 'OPERATOR'],
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+}, markSubmitted)
+
+registerTool('activate_policy', {
+  description: 'Operator: activate a submitted policy with its Allianz policy number (SUBMITTED → ACTIVE). Writes activation/effective dates and freezes the free-look window.',
+  parameters: {
+    type: 'object',
+    properties: {
+      policyId: { type: 'string', description: 'The policy to activate.' },
+      allianzPolicyNumber: { type: 'string', description: 'The Allianz policy number — mandatory.' },
+    },
+    required: ['policyId', 'allianzPolicyNumber'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ['ADMIN', 'OPERATOR'],
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+}, activatePolicy)
+
+registerTool('cancel_submission', {
+  description: 'Operator: cancel a pre-activation policy (Allianz rejection) — PENDING_SUBMISSION/SUBMITTED → CANCELLED. Captured payments are refunded.',
+  parameters: {
+    type: 'object',
+    properties: {
+      policyId: { type: 'string', description: 'The policy whose submission to cancel.' },
+    },
+    required: ['policyId'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ['ADMIN', 'OPERATOR'],
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+}, cancelSubmission)
 
 registerTool('resolve_referral', {
   description:

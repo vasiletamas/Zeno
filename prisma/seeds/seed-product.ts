@@ -496,6 +496,9 @@ PRIORITATE LA CONTRADICȚII
         quarterly: { label: { en: 'Quarterly', ro: 'Trimestrial' }, multiplier: 0.25 },
       },
       quoteValidityDays: 30,
+      // D4.2: OG 85/2004 distance-channel default — FLAGGED FOR LEGAL
+      // CONFIRMATION (channel-dependent 30 vs 20)
+      freeLookDays: 30,
     },
     create: {
       code: 'protect',
@@ -826,6 +829,9 @@ PRIORITATE LA CONTRADICȚII
         quarterly: { label: { en: 'Quarterly', ro: 'Trimestrial' }, multiplier: 0.25 },
       },
       quoteValidityDays: 30,
+      // D4.2: OG 85/2004 distance-channel default — FLAGGED FOR LEGAL
+      // CONFIRMATION (channel-dependent 30 vs 20)
+      freeLookDays: 30,
     },
   })
   console.log(`    Product "${product.code}" upserted (id: ${product.id})`)

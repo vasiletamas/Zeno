@@ -1,0 +1,89 @@
+/**
+ * Policy Operator Handlers (D4.2, M5 — T9.D3)
+ *
+ * mark_submitted / activate_policy / cancel_submission run through the
+ * commit gateway with actor=operator (the OPERATOR_TOOLS actor gate rejects
+ * everyone else). Every transition is legality-checked against the pure
+ * policy machine — the free-form any→any admin edits died with these.
+ * State rides context.db (the gateway transaction) so the policy update
+ * lands atomically with the CommitLedger row.
+ *
+ * Operator commits are keyed to the policy's ORIGIN conversation, resolved
+ * by the caller (deviation from D4 erratum 6 recorded: a nullable
+ * conversationId would break the per-conversation advisory-lock key and the
+ * pinned ledger shape; E2's resolve_referral established the
+ * caller-resolves-conversation pattern instead).
+ *
+ * Activation writes the T9.D2 per-policy free-look snapshot: freeLookEndsAt
+ * is FROZEN from Product.freeLookDays at activation — later product-config
+ * changes never move a sold policy's window. cancel_submission gains the
+ * refund system-effect at D4.5 (contradiction #5's second trigger).
+ */
+import { canPolicyTransition, type PolicyStatusV3 } from '@/lib/engines/policy-machine'
+import type { ToolHandler } from '@/lib/tools/types'
+
+export const markSubmitted: ToolHandler = async (args, context) => {
+  try {
+    const policyId = args.policyId as string
+    const policy = await context.db.policy.findUnique({ where: { id: policyId } })
+    if (!policy) return { success: false, error: `not_exposed: policy ${policyId} not found` }
+    if (!canPolicyTransition(policy.status as PolicyStatusV3, 'SUBMITTED', 'operator')) {
+      return { success: false, error: `illegal_status_transition: ${policy.status} → SUBMITTED is not an operator transition.` }
+    }
+    await context.db.policy.update({ where: { id: policy.id }, data: { status: 'SUBMITTED' } })
+    return { success: true, data: { policyId: policy.id, status: 'SUBMITTED' }, message: 'Policy marked as submitted to the insurer.' }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
+
+export const activatePolicy: ToolHandler = async (args, context) => {
+  try {
+    const policyId = args.policyId as string
+    const allianzPolicyNumber = args.allianzPolicyNumber as string
+    const policy = await context.db.policy.findUnique({ where: { id: policyId }, include: { product: { select: { freeLookDays: true } } } })
+    if (!policy) return { success: false, error: `not_exposed: policy ${policyId} not found` }
+    if (!canPolicyTransition(policy.status as PolicyStatusV3, 'ACTIVE', 'operator')) {
+      return { success: false, error: `illegal_status_transition: ${policy.status} → ACTIVE is not an operator transition.` }
+    }
+    const activatedAt = new Date()
+    const effectiveUntil = new Date(activatedAt)
+    effectiveUntil.setUTCFullYear(effectiveUntil.getUTCFullYear() + 1) // 1-year contractTerm
+    const freeLookEndsAt = new Date(activatedAt.getTime() + policy.product.freeLookDays * 86_400_000) // frozen snapshot (T9.D2)
+    await context.db.policy.update({
+      where: { id: policy.id },
+      // issuedAt untouched — single-meaning: first capture (D2.6)
+      data: { status: 'ACTIVE', allianzPolicyNumber, activatedAt, effectiveFrom: activatedAt, effectiveUntil, freeLookEndsAt },
+    })
+    return {
+      success: true,
+      effects: ['terminal'],
+      data: { policyId: policy.id, status: 'ACTIVE', allianzPolicyNumber, activatedAt: activatedAt.toISOString(), freeLookEndsAt: freeLookEndsAt.toISOString() },
+      message: `Policy activated with Allianz number ${allianzPolicyNumber}; free-look until ${freeLookEndsAt.toISOString().split('T')[0]}.`,
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
+
+export const cancelSubmission: ToolHandler = async (args, context) => {
+  try {
+    const policyId = args.policyId as string
+    const policy = await context.db.policy.findUnique({ where: { id: policyId } })
+    if (!policy) return { success: false, error: `not_exposed: policy ${policyId} not found` }
+    if (!canPolicyTransition(policy.status as PolicyStatusV3, 'CANCELLED', 'operator')) {
+      return { success: false, error: `illegal_status_transition: ${policy.status} → CANCELLED is not an operator transition (post-activation cancellation is the engine's free-look).` }
+    }
+    await context.db.policy.update({ where: { id: policy.id }, data: { status: 'CANCELLED' } })
+    // D4.5 attaches executeFullRefund here (contradiction #5: pre-activation
+    // cancellation / Allianz rejection refunds every captured payment).
+    return {
+      success: true,
+      effects: ['terminal'],
+      data: { policyId: policy.id, status: 'CANCELLED' },
+      message: 'Policy submission cancelled.',
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
