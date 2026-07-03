@@ -31,4 +31,19 @@ describe('recomputeAndDiff (F2.3, T14.D2)', () => {
     const derive = () => { throw new Error('never called') }
     expect(recomputeAndDiff([turn([])], { currentEngineVersion: '1.33.0', derive: derive as never })).toEqual([])
   })
+  // F2.7 regression: Postgres jsonb does NOT preserve object key order, so
+  // the stored state's nested objects come back with permuted keys. The
+  // comparison must be canonical (key-order-insensitive), else every replay
+  // reports phantom same_version_drift.
+  it('key-order permutation from the jsonb round-trip is NOT drift', () => {
+    const stored = entry({
+      state: { phase: 'DISCOVERY', selection: { tier: null, addon: null, level: null } },
+      actions: { available: [], blocked: [{ action: 'accept_quote', reason: 'requires_disclosures', params: { b: 1, a: 2 } }] },
+    })
+    const derive = () => ({
+      state: { phase: 'DISCOVERY', selection: { tier: null, level: null, addon: null } },
+      actions: { available: [], blocked: [{ action: 'accept_quote', params: { a: 2, b: 1 }, reason: 'requires_disclosures' }] },
+    })
+    expect(recomputeAndDiff([turn([stored])], { currentEngineVersion: '1.33.0', derive: derive as never })).toEqual([])
+  })
 })

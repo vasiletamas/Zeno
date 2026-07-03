@@ -27,6 +27,23 @@ export interface LegalityDiff {
 
 type DeriveFn = (snapshot: unknown) => { state: Record<string, unknown>; actions: { available: string[]; blocked: { action: string; reason: string }[] } }
 
+// Postgres jsonb does NOT preserve object key order, so stored values come
+// back with permuted keys — comparison must be canonical or every replay
+// reports phantom drift (F2.7 regression).
+function sortKeys(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(sortKeys)
+  if (v && typeof v === 'object') {
+    return Object.fromEntries(
+      Object.keys(v as Record<string, unknown>)
+        .sort()
+        .map((k) => [k, sortKeys((v as Record<string, unknown>)[k])]),
+    )
+  }
+  return v
+}
+const canonical = (v: unknown): string | undefined =>
+  v === undefined ? undefined : JSON.stringify(sortKeys(v))
+
 export function recomputeAndDiff(
   turns: DebugTurn[],
   opts: { currentEngineVersion: string; derive?: DeriveFn },
@@ -39,13 +56,13 @@ export function recomputeAndDiff(
       const storedState = entry.state as unknown as Record<string, unknown>
       const stateDiff: string[] = []
       for (const key of new Set([...Object.keys(storedState), ...Object.keys(fresh.state)])) {
-        const a = JSON.stringify(storedState[key])
-        const b = JSON.stringify(fresh.state[key])
+        const a = canonical(storedState[key])
+        const b = canonical(fresh.state[key])
         if (a !== b) stateDiff.push(`${key}: ${a ?? 'null'} -> ${b ?? 'null'}`)
       }
       const addedAvailable = fresh.actions.available.filter((x) => !entry.actions.available.includes(x))
       const removedAvailable = entry.actions.available.filter((x) => !fresh.actions.available.includes(x))
-      const blockedChanged = JSON.stringify(entry.actions.blocked) === JSON.stringify(fresh.actions.blocked) ? [] : ['blocked set changed']
+      const blockedChanged = canonical(entry.actions.blocked) === canonical(fresh.actions.blocked) ? [] : ['blocked set changed']
       if (stateDiff.length || addedAvailable.length || removedAvailable.length || blockedChanged.length) {
         diffs.push({
           messageIndex: t.messageIndex,

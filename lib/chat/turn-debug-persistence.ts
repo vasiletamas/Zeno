@@ -23,6 +23,11 @@ export async function persistTurnDebug(input: PersistTurnDebugInput): Promise<vo
   const payload = buildTurnDebugPayload(input.events)
   if (!payload) return
 
+  // debug:turn_start fires before the turn context (and with it the real
+  // message count) is loaded, so the reduced payload always says 0. Stamp
+  // the turn-end value — replay tables and export ordering read this.
+  payload.messageIndex = input.messageIndex
+
   // Round-trip through JSON to drop any non-serializable values, matching the
   // existing turnTrace.create pattern in orchestrator.ts.
   const json = JSON.parse(JSON.stringify(payload))
