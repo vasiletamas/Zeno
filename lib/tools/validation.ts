@@ -140,6 +140,12 @@ const getQuoteDetailsSchema = z.object({
   quoteId: z.string().optional(),
 }).strict()
 
+// D1.5: no material args — the gateway owns the two-step (confirm token),
+// so there is no literal-true confirmation flag here.
+const cancelQuoteSchema = z.object({
+  confirmToken: z.string().optional(),
+}).strict()
+
 const modifyQuoteSchema = z.object({}).strict()
 
 // ==============================================
@@ -245,6 +251,7 @@ const toolSchemas: Record<string, ZodType> = {
   generate_quote: generateQuoteSchema,
   accept_quote: acceptQuoteSchema,
   get_quote_details: getQuoteDetailsSchema,
+  cancel_quote: cancelQuoteSchema,
   modify_quote: modifyQuoteSchema,
 
   // BD Eligibility

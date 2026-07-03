@@ -90,7 +90,7 @@ export function resolveTargetRef(tool: string, args: Record<string, unknown>, st
   if (OPERATOR_TOOLS.has(tool)) return `work_item:${String(args.workItemId ?? 'unknown')}`
   // one-shot / entity-scoped commits — stable natural key
   if (tool === 'sign_dnt') return `dnt_session:${state.dnt.activeSessionId ?? 'none'}` // B2.6: customer-scoped renewals may recur per conversation
-  if (tool === 'accept_quote' || tool === 'modify_quote') return `quote:${state.quote?.id ?? 'none'}`
+  if (tool === 'accept_quote' || tool === 'cancel_quote' || tool === 'modify_quote') return `quote:${state.quote?.id ?? 'none'}`
   if (tool === 'generate_quote' || tool === 'set_application') return `application:${state.application?.id ?? 'none'}`
   if (tool === 'initiate_payment') return `policy:${state.policy?.id ?? 'none'}`
   return `conversation:${conversationId}`
@@ -165,6 +165,21 @@ async function writeReplayRow(db: Db, req: CommitRequest, prior: CommitLedger): 
   return prior.envelope as unknown as CommitResult
 }
 
+/**
+ * Lazy expiry (D1.5, T7.D5 — erratum 1): whenever legality computes
+ * quote_expired for the targeted commit — cancel_quote and accept_quote share
+ * this — the row is normalized to EXPIRED opportunistically (CAS-guarded on
+ * ISSUED + past validUntil) before the rejected envelope goes out. No
+ * background sweeper: expiry persists exactly when someone acts on the quote.
+ */
+async function persistQuoteExpiry(db: Db, state: DerivedStateV3): Promise<void> {
+  if (!state.quote) return
+  await db.quote.updateMany({
+    where: { id: state.quote.id, status: 'ISSUED', validUntil: { lt: new Date() } },
+    data: { status: 'EXPIRED' },
+  })
+}
+
 async function ledgeredReject(db: Db, req: CommitRequest, targetRef: string, argsHash: string, reason: ReasonCode, phase: string): Promise<CommitResult> {
   const envelope: CommitResult = { outcome: 'rejected', reason, effects: [] }
   await writeLedger(db, req, targetRef, argsHash, envelope, phase, phase)
@@ -202,6 +217,7 @@ export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
   if (!OPERATOR_TOOLS.has(req.tool) && !pre.actions.available.includes(req.tool)) {
     const blocked = pre.actions.blocked.find((b) => b.action === req.tool)
     const reason = blocked?.reason ?? 'not_exposed'
+    if (reason === 'quote_expired') await persistQuoteExpiry(prisma, pre.state)
     const envelope: CommitResult = { outcome: outcomeForBlocked(reason), reason, effects: [], needs: blocked?.params?.needs as string[] | undefined }
     await writeLedger(prisma, req, targetRef, argsHash, envelope, pre.state.phase, pre.state.phase)
     return envelope
@@ -263,6 +279,7 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
     if (!OPERATOR_TOOLS.has(req.tool) && !lockedPre.actions.available.includes(req.tool)) {
       const blocked = lockedPre.actions.blocked.find((b) => b.action === req.tool)
       const reason = blocked?.reason ?? 'not_exposed'
+      if (reason === 'quote_expired') await persistQuoteExpiry(tx, lockedPre.state)
       const envelope: CommitResult = { outcome: outcomeForBlocked(reason), reason, effects: [] }
       await writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, lockedPre.state.phase)
       return envelope

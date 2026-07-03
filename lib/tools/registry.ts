@@ -20,7 +20,7 @@ import { getDntState, getDntQuestions, getDntNextQuestion, openDntSession, write
 import { setApplication, getNextQuestionInfo, writeQuestionAnswer, modifyAnswer, resumeApplication, cancelApplication, getLastApplicationInfo } from './handlers/application-handlers'
 import { selectCoverage } from './handlers/select-coverage-handlers'
 import { acknowledgeSuitabilityWarning } from './handlers/suitability-handlers'
-import { generateQuote, getQuoteDetails, acceptQuote, modifyQuote } from './handlers/quote-handlers'
+import { generateQuote, getQuoteDetails, acceptQuote, cancelQuote, modifyQuote } from './handlers/quote-handlers'
 import { compareProducts } from './handlers/product-handlers'
 import { previewProductRequirements } from './handlers/preview-handlers'
 import { getStateHandler } from './handlers/state-handlers'
@@ -883,6 +883,24 @@ registerTool('get_quote_details', {
   allowedRoles: ALL_ROLES,
   kind: 'read',
 }, getQuoteDetails)
+
+registerTool('cancel_quote', {
+  description:
+    'Cancel the issued quote — terminal and confirmed in two steps (the gateway returns a confirmation request first; re-call with the token). ' +
+    'The frozen application stays as the record of what was priced: to get a different quote, start a NEW application (previous answers are offered as prefill proposals). This is the only change path once a quote exists.',
+  parameters: {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: true,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+  requiresConfirmation: true,
+}, cancelQuote)
 
 registerTool('modify_quote', {
   description: 'Expire the current quote and reopen the application for package re-selection.',

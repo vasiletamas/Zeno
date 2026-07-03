@@ -1,12 +1,13 @@
 /**
  * Quote Handlers
  *
- * generate_quote, get_quote_details, accept_quote, modify_quote
+ * generate_quote, get_quote_details, accept_quote, cancel_quote, modify_quote
  */
 
 import { calculateQuote } from '@/lib/engines/quote-engine'
 import type { QuoteInput } from '@/lib/engines/quote-engine'
 import { decideQuoteIssue } from '@/lib/engines/quote-decision'
+import { canQuoteTransition, type QuoteStatusV3 } from '@/lib/engines/quote-lifecycle'
 import { evaluateEligibility } from '@/lib/engines/eligibility'
 import { deriveSuitability } from '@/lib/engines/derive-and-expose'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
@@ -426,6 +427,54 @@ export const acceptQuote: ToolHandler = async (args, context) => {
           totalCoverage,
         } as unknown as Record<string, unknown>,
       },
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
+
+// ─────────────────────────────────────────────
+// cancel_quote (D1.5)
+// ─────────────────────────────────────────────
+
+export const cancelQuote: ToolHandler = async (_args, context) => {
+  try {
+    const application = await loadActiveApplication(context)
+    if (!application) {
+      return { success: false, error: 'no_open_application: no application found.' }
+    }
+    const quote = await context.db.quote.findFirst({
+      where: { applicationId: application.id, status: 'ISSUED' },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!quote) {
+      return { success: false, error: 'no_issued_quote: there is no issued quote to cancel.' }
+    }
+    // The transition table is the SSOT; expiry never lives here — the
+    // gateway persists EXPIRED pre-legality (erratum 1), so an expired quote
+    // is rejected before this handler runs.
+    if (!canQuoteTransition(quote.status as QuoteStatusV3, 'CANCELLED')) {
+      return { success: false, error: `illegal_status_transition: a ${quote.status} quote cannot be cancelled.` }
+    }
+    const cas = await context.db.quote.updateMany({
+      where: { id: quote.id, status: 'ISSUED' },
+      data: { status: 'CANCELLED' },
+    })
+    if (cas.count === 0) {
+      return { success: false, error: 'illegal_status_transition: the quote left ISSUED between legality and apply.' }
+    }
+    // T13.D2 recovery: release the conversation pointer. The frozen
+    // application stays as the audit record of what was priced — the only
+    // change path is a NEW application, prefilled via B4 proposals.
+    await context.db.conversation.update({
+      where: { id: context.conversationId },
+      data: { activeApplicationId: null },
+    })
+    return {
+      success: true,
+      effects: ['terminal'],
+      data: { cancelledQuoteId: quote.id, applicationId: application.id },
+      message: 'Quote cancelled. The application stays frozen for the record — to get a different quote, start a new application (previous answers are offered as prefill).',
     }
   } catch (error) {
     return { success: false, error: String(error) }

@@ -73,7 +73,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.19.0' // 1.16.0: pinned questionnaire surface (C1.ADD-1/2); 1.17.0: discovery eligibility verdict DERIVED per turn (C2.6) — INELIGIBLE blocks set_application with the failed-rule reason, unknown never a wall; 1.18.0: suitability documented-warning flow (C3.4) — acknowledge_suitability_warning exposed while a warn_and_allow mismatch awaits ack, generate_quote blocked suitability_warning_unacknowledged (warn) or the mismatch's own reason (hard_block); 1.19.0: freeze-at-issue (D1) — a Quote row in ANY state blocks generate_quote with application_frozen
+export const engineVersion = '1.20.0' // 1.17.0: discovery eligibility verdict DERIVED per turn (C2.6) — INELIGIBLE blocks set_application with the failed-rule reason, unknown never a wall; 1.18.0: suitability documented-warning flow (C3.4) — acknowledge_suitability_warning exposed while a warn_and_allow mismatch awaits ack, generate_quote blocked suitability_warning_unacknowledged (warn) or the mismatch's own reason (hard_block); 1.19.0: freeze-at-issue (D1) — a Quote row in ANY state blocks generate_quote with application_frozen; 1.20.0: cancel_quote exposure (D1.5) — live ISSUED quote only, quote_expired/quote_already_accepted precise blocks; accept_quote answers time-expiry with quote_expired (lazy-expiry trigger)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -214,7 +214,21 @@ export const ACTION_RULES: ActionRule[] = [
       return null
     } },
   { action: 'accept_quote', kind: 'commit', exposedWhen: (_s, d) => d.phase === 'QUOTE',
-    blockedReason: (s, d) => (d.phase === 'PAYMENT' || d.phase === 'POLICY' ? { reason: 'quote_already_accepted' } : s.application !== null && d.phase !== 'QUOTE' ? { reason: 'no_issued_quote' } : null) },
+    blockedReason: (s, d) => (d.phase === 'PAYMENT' || d.phase === 'POLICY' ? { reason: 'quote_already_accepted' }
+      // D1.5 (erratum 1): time-expiry answers with quote_expired — the gateway
+      // persists EXPIRED opportunistically off this reason (lazy expiry is a
+      // gateway concern shared by cancel_quote and accept_quote, T7.D5).
+      : s.quote !== null && s.quote.expired ? { reason: 'quote_expired', params: { quoteId: s.quote.id } }
+      : s.application !== null && d.phase !== 'QUOTE' ? { reason: 'no_issued_quote' } : null) },
+  // D1.5: cancel_quote — the only quote transition the customer drives;
+  // exposed exactly while a live (non-expired) ISSUED quote exists. The
+  // transition table makes ACCEPTED terminal; recovery after cancel is a NEW
+  // application prefilled via B4 (T13.D2).
+  { action: 'cancel_quote', kind: 'commit', exposedWhen: (s) => s.quote !== null && !s.quote.expired,
+    blockedReason: (s) => (
+      s.quote !== null && s.quote.expired ? { reason: 'quote_expired', params: { quoteId: s.quote.id } }
+      : s.acceptedQuote !== null ? { reason: 'quote_already_accepted' }
+      : null) },
   { action: 'modify_quote', kind: 'commit', exposedWhen: (_s, d) => d.phase === 'QUOTE' },
   { action: 'initiate_payment', kind: 'commit', exposedWhen: (s) => s.policy !== null && s.policy.status === 'PENDING_SUBMISSION' },
 ]
