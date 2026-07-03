@@ -12,8 +12,12 @@ import type { ToolDefinition, ToolHandler, ToolContext, ToolResult } from './typ
 import { prisma } from '@/lib/db'
 import { LRUCache } from '@/lib/cache/lru-cache'
 import { resolveProductRef, listAvailableProductRefs } from './resolve-product'
-import { shapeProductInfo, type RawProduct } from './shape-product-info'
-import { calculateAge } from '@/lib/chat/age'
+import { shapeProductInfo, type RawProduct, type DerivedProductInputs } from './shape-product-info'
+import { getAge } from '@/lib/customer/profile-service'
+import { derivePricingExamples, type PricingExampleGrid, type PricingTree } from '@/lib/engines/pricing-examples'
+import { deriveEligibilityBounds, parseEligibilityRuleSet, type EligibilityBounds } from '@/lib/engines/eligibility'
+import { getPublishedProductContent, type PublishedProductContent, type PublishedFieldSet } from '@/lib/products/product-content'
+import type { LocalizedContent } from './shape-product-info'
 
 // --- Handler imports ---
 import { getDntState, getDntQuestions, getDntNextQuestion, openDntSession, writeDntAnswer, signDnt } from './handlers/dnt-handlers'
@@ -268,8 +272,71 @@ const listProductsHandler: ToolHandler = async (
   }
 }
 
+// ── E1.7 (erratum 5): concrete derived-input mappers ─────────────────
+
+/** The prisma include tree → the pure PricingTree derivePricingExamples eats. */
+function buildPricingTree(product: {
+  quoteValidityDays: number
+  pricingTiers: { code: string; name: unknown; levels: { code: string; name: unknown; premiumAnnual: number }[] }[]
+  addons: { pricingRules: { minAge: number; maxAge: number; premiumAnnual: number }[] }[]
+}): PricingTree {
+  return {
+    quoteValidityDays: product.quoteValidityDays,
+    tiers: product.pricingTiers.map((t) => ({
+      code: t.code,
+      name: t.name as { en: string; ro: string },
+      levels: t.levels.map((l) => ({ code: l.code, name: l.name as { en: string; ro: string }, premiumAnnual: l.premiumAnnual })),
+    })),
+    addonRules: (product.addons[0]?.pricingRules ?? []).map((r) => ({ minAge: r.minAge, maxAge: r.maxAge, premiumAnnual: r.premiumAnnual })),
+  }
+}
+
+function fieldSetToLocalized(set: PublishedFieldSet | undefined): LocalizedContent | null {
+  if (!set) return null
+  return { ro: set.ro, en: set.en }
+}
+
+/** Product-level published fields → the shaper's content slice. */
+function mapPublished(published: PublishedProductContent): DerivedProductInputs['content'] {
+  return {
+    keyValueProductPoints: fieldSetToLocalized(published.fields.KEY_VALUE_PRODUCT_POINTS),
+    sellSpecificInfo: fieldSetToLocalized(published.fields.SELL_SPECIFIC_INFO),
+    pricingNote: fieldSetToLocalized(published.fields.PRICING_NOTE),
+    contentVersions: collectVersionIds(published),
+  }
+}
+
+/** Addon-scoped published fields re-keyed by addon CODE for the shaper. */
+function mapAddonPublished(
+  published: PublishedProductContent,
+  addons: { id: string; code: string }[],
+): DerivedProductInputs['addonContent'] {
+  const out: DerivedProductInputs['addonContent'] = {}
+  for (const addon of addons) {
+    const fields = published.addonFields[addon.id]
+    if (!fields) continue
+    out[addon.code] = { sellSpecificAddonInfo: fieldSetToLocalized(fields.SELL_SPECIFIC_ADDON_INFO) }
+  }
+  return out
+}
+
+/** Every published contentId across product AND addon field sets (M8 stamps). */
+function collectVersionIds(published: PublishedProductContent): string[] {
+  const ids: string[] = []
+  for (const set of Object.values(published.fields)) ids.push(...set.contentIds)
+  for (const addonFields of Object.values(published.addonFields)) {
+    for (const set of Object.values(addonFields)) ids.push(...set.contentIds)
+  }
+  return ids
+}
+
 /**
  * get_product_info — fetch a single product by code or id.
+ *
+ * E1.7: the payload's numbers are ENGINE-DERIVED (pricing_examples via
+ * calculateQuote over Product.pricingExampleGrid; eligibility_bounds from
+ * the typed rules) and its claims are PUBLISHED ProductContent only.
+ * contentVersions ride the data envelope for M8 turn-stamping.
  */
 const getProductInfoHandler: ToolHandler = async (
   args: Record<string, unknown>,
@@ -323,25 +390,39 @@ const getProductInfoHandler: ToolHandler = async (
       return { success: false, error: `Product not found after resolve: ${ref.id}` }
     }
 
-    // Resolve the customer's age (best-effort) to trim age-banded coverages.
-    // Any failure here just means we return all age bands. Reads the
-    // dateOfBirth mirror column, which the B0 profile-service maintains.
+    // B0: the ONE derived-age source (DOB else declaredAge — never a guess);
+    // failure just means all age bands are returned.
     let age: number | undefined
     try {
-      const customer = await prisma.customer.findUnique({
-        where: { id: context.customerId },
-        select: { dateOfBirth: true },
-      })
-      if (customer?.dateOfBirth) {
-        age = calculateAge(customer.dateOfBirth, new Date()) ?? undefined
-      }
+      age = (await getAge(context.customerId)) ?? undefined
     } catch {
       // age is optional — fall back to all bands
     }
 
+    const grid = product.pricingExampleGrid as unknown as PricingExampleGrid | null
+    const pricingExamples = grid ? derivePricingExamples(buildPricingTree(product), grid) : []
+
+    let eligibilityBounds: EligibilityBounds = { minAge: null, maxAge: null, otherRuleCodes: [] }
+    try {
+      eligibilityBounds = deriveEligibilityBounds(parseEligibilityRuleSet(product.eligibility))
+    } catch {
+      // legacy/informal rule shapes yield no numbers — presentation must not invent them
+    }
+
+    const published = await getPublishedProductContent(product.id)
+    const derived: DerivedProductInputs = {
+      pricingExamples,
+      eligibilityBounds,
+      content: mapPublished(published),
+      addonContent: mapAddonPublished(published, product.addons),
+    }
+
     return {
       success: true,
-      data: { product: shapeProductInfo(product as unknown as RawProduct, { age }) as unknown as Record<string, unknown> },
+      data: {
+        product: shapeProductInfo(product as unknown as RawProduct, { age, derived }) as unknown as Record<string, unknown>,
+        contentVersions: derived.content.contentVersions,
+      },
       message: `Product details for ${product.code}.`,
     }
   } catch (err: unknown) {

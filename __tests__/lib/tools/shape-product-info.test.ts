@@ -93,6 +93,22 @@ const RAW = {
 // coverageType) — exactly what the handler passes in. Cast mirrors the handler.
 const raw = RAW as unknown as RawProduct
 
+// E1.7: derived inputs the handler computes — pricing examples via
+// calculateQuote, bounds via the eligibility projection, published claims
+const derivedInputs = {
+  pricingExamples: [{ age: 25, tier: 'standard', level: 'level_1', currency: 'RON' as const,
+    base: { premiumAnnual: 190, premiumMonthly: 15.83 },
+    withAddon: { premiumAnnual: 390, premiumMonthly: 32.5, addonDelta: 200 } }],
+  eligibilityBounds: { minAge: 18, maxAge: 64, otherRuleCodes: ['residency'] },
+  content: {
+    keyValueProductPoints: { ro: ['fara examen medical'], en: ['no medical exam'] },
+    sellSpecificInfo: { ro: 'narativ', en: 'narrative' },
+    pricingNote: { ro: 'cum functioneaza pretul', en: 'how pricing works' },
+    contentVersions: ['pc_1', 'pc_2'],
+  },
+  addonContent: { TREATMENT_ABROAD_BD: { sellSpecificAddonInfo: { ro: 'info BD', en: 'BD info' } } },
+}
+
 describe('shapeProductInfo', () => {
   it('drops the coaching playbook and internal/raw fields', () => {
     const out = shapeProductInfo(raw)
@@ -104,14 +120,40 @@ describe('shapeProductInfo', () => {
     expect((out as unknown as Record<string, unknown>).id).toBeUndefined()
     // keeps customer-relevant scalars
     expect(out.code).toBe('protect')
-    expect(out.pricingExplanation).toBe('Standard I=190 …')
-    // C2.3 (#9 rule 3): bounds DERIVED from the rules; narrative passes as
-    // prose; raw rule Json never rides the payload
-    expect(out.eligibility).toEqual({
-      eligibility_bounds: { minAge: 18, maxAge: 64, otherRuleCodes: ['residency'] },
-      narrative: { notes: 'Maximum cumulative sum at risk: 50,000 EUR' },
-    })
+    // C2.3 (#9 rule 3) carried into E1.7: narrative passes as prose; raw
+    // rule Json never rides the payload
+    expect(out.eligibility_narrative).toEqual({ notes: 'Maximum cumulative sum at risk: 50,000 EUR' })
     expect(json).not.toContain('ineligible_age_minimum')
+  })
+
+  it('returns engine-derived pricing_examples and eligibility_bounds — never authored numbers', () => {
+    const shaped = shapeProductInfo(raw, { age: 25, derived: derivedInputs })
+    expect(shaped.pricing_examples).toEqual(derivedInputs.pricingExamples)
+    expect(shaped.eligibility_bounds).toEqual({ minAge: 18, maxAge: 64, otherRuleCodes: ['residency'] })
+  })
+
+  it('exposes only published authored claims; legacy claim surfaces are gone', () => {
+    const shaped = shapeProductInfo(raw, { age: 25, derived: derivedInputs }) as unknown as Record<string, unknown>
+    expect(shaped.key_value_product_points).toEqual(derivedInputs.content.keyValueProductPoints)
+    expect(shaped.sell_specific_info).toEqual(derivedInputs.content.sellSpecificInfo)
+    expect(shaped.pricing_note).toEqual(derivedInputs.content.pricingNote)
+    expect(shaped).not.toHaveProperty('pricingExplanation')
+    expect(shaped).not.toHaveProperty('features')
+    expect(shaped).not.toHaveProperty('premiumRange')
+    expect(shaped).not.toHaveProperty('targetAgeRange')
+    expect(shaped).not.toHaveProperty('eligibility')
+  })
+
+  it('folds addon selling info into addons[] (T11.D3 — no get_product_addon_info)', () => {
+    const shaped = shapeProductInfo(raw, { age: 25, derived: derivedInputs })
+    const bd = shaped.addons.find((a) => a.code === 'TREATMENT_ABROAD_BD')!
+    expect(bd.sell_specific_addon_info).toEqual({ ro: 'info BD', en: 'BD info' })
+  })
+
+  it('still strips structured per-level premiums outside pricing_examples (no-leak invariant kept)', () => {
+    const shaped = shapeProductInfo(raw, { age: 25, derived: derivedInputs })
+    const json = JSON.stringify(shaped.packages)
+    expect(json).not.toContain('premiumAnnual')
   })
 
   it('dedups coverage types into a legend; coverage rows reference by code (not inlined)', () => {
