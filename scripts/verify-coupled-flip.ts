@@ -5,8 +5,8 @@
  * acknowledge_disclosures → accept_quote(quarterly, two-step token) →
  * schedule of 4 integer-minor installments summing exactly to
  * round(premiumAnnual*100), Quote ACCEPTED with acceptance evidence, ZERO
- * Policy rows, Conversation ACTIVE → initiate_payment on the first due
- * installment → settlePaymentEvent(success) delivered TWICE with the same
+ * Policy rows, Conversation ACTIVE → ensure_payment_session on the first
+ * due installment → settlePaymentEvent(success) delivered TWICE with the same
  * eventId → exactly ONE Policy in PENDING_SUBMISSION with issuedAt,
  * installment 1 PAID, schedule ACTIVE, duplicate disposition 'replay'.
  *
@@ -146,14 +146,15 @@ async function main() {
     policiesAtAccept === 0 && convRow.status === 'ACTIVE',
     JSON.stringify({ policies: policiesAtAccept, conv: convRow.status }))
 
-  // (6) initiate_payment on the first due installment (gateway legality live)
-  const pay = await commit('initiate_payment', {}, cid, conv)
+  // (6) ensure_payment_session on the first due installment (D3.3 — gateway
+  // legality live; mode is engine output)
+  const pay = await commit('ensure_payment_session', {}, cid, conv)
   const payment = await prisma.payment.findFirst({ where: { customerId: cid } })
-  check('initiate_payment: PENDING Payment on installment 1 with the installment amount',
-    pay.outcome === 'applied' && payment !== null && payment.installmentId === schedule.installments[0].id && payment.amountMinor === schedule.installments[0].amountMinor,
+  check('ensure_payment_session: mode=started, PENDING Payment on installment 1 with the installment amount',
+    pay.outcome === 'applied' && (pay.data as { mode?: string })?.mode === 'started' && payment !== null && payment.installmentId === schedule.installments[0].id && payment.amountMinor === schedule.installments[0].amountMinor,
     JSON.stringify({ outcome: pay.outcome, reason: pay.reason, data: pay.data, amountMinor: payment?.amountMinor }))
   if (!payment?.providerPaymentId) {
-    console.log(`\n==== coupled flip: aborted at initiate_payment — PASS ${passes}/8 ====`)
+    console.log(`\n==== coupled flip: aborted at ensure_payment_session — PASS ${passes}/8 ====`)
     process.exit(1)
   }
 
