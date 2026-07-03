@@ -16,7 +16,7 @@ async function main() {
   const customer = await prisma.customer.create({ data: { isAnonymous: true, language: 'ro' } })
   const conv = await prisma.conversation.create({ data: { customerId: customer.id } })
   const ctx = { customerId: customer.id, conversationId: conv.id, language: 'ro', db: prisma } as unknown as ToolContext
-  const mk = (actor: 'agent' | 'gui') => executeCommit({ tool: 'set_candidate_product', args: { productId: product.id, confidence: 80 }, actor, conversationId: conv.id, customerId: customer.id, toolContext: ctx })
+  const mk = (actor: 'agent' | 'gui') => executeCommit({ tool: 'set_candidate_product', args: { productId: product.id }, actor, conversationId: conv.id, customerId: customer.id, toolContext: ctx })
   const [a, b] = await Promise.all([mk('agent'), mk('gui')])
   const fresh = await prisma.commitLedger.count({ where: { conversationId: conv.id, idempotencyDisposition: 'fresh', outcome: 'applied' } })
   console.log({ a: a.outcome, b: b.outcome, freshApplied: fresh })
