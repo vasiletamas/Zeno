@@ -338,6 +338,7 @@ model Customer {
   insights          CustomerInsight[]
   profileFields     CustomerProfileField[]
   consentEvents     ConsentEvent[]
+  suitabilityWarningAcks SuitabilityWarningAck[]
   dnts              Dnt[]
   dntSessions       DntSession[]
   verificationChallenges VerificationChallenge[]
@@ -738,8 +739,29 @@ model Application {
   level        PricingLevel? @relation(fields: [levelId], references: [id])
   quote        Quote?
   answers      Answer[]
+  suitabilityWarningAcks SuitabilityWarningAck[]
 
   @@index([customerId, status])
+}
+
+// C3.4 (M7): the documented-warning audit row — the customer's explicit
+// acknowledgement of a suitability mismatch, bound to the ruleset version
+// it was shown for (a stale ack never satisfies the gate) and the ledger
+// row that carried the commit.
+model SuitabilityWarningAck {
+  id             String   @id @default(cuid())
+  customerId     String
+  applicationId  String
+  productCode    String
+  ruleSetVersion Int
+  mismatches     Json
+  acknowledgedAt DateTime @default(now())
+  sourceCommitId String
+
+  customer    Customer    @relation(fields: [customerId], references: [id])
+  application Application @relation(fields: [applicationId], references: [id])
+
+  @@unique([customerId, applicationId, ruleSetVersion])
 }
 
 model Quote {

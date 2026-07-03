@@ -3,6 +3,8 @@ import { seedProduct } from '@/prisma/seeds/seed-product'
 import { seedQuestions } from '@/prisma/seeds/seed-questions'
 import { seedDependencyEdges } from '@/prisma/seeds/seed-dependency-edges'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
+import { openDntSession, writeDntAnswer, signDnt } from '@/lib/tools/handlers/dnt-handlers'
+import { answerAllDntQuestions } from './dnt-fixtures'
 
 /**
  * The ONE truncate list for the real-DB integration ring (plan A2.ADD-1).
@@ -12,6 +14,7 @@ import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
  * SimulationConversation via their references into this set).
  */
 export const DOMAIN_TABLES: string[] = [
+  'SuitabilityWarningAck',
   'CustomerDocument',
   'VerificationChallenge',
   'WorkItem',
@@ -107,6 +110,30 @@ export async function seedMinimalProtectFixture(options: { tier?: string; level?
 /** Erratum 4: thin wrapper over A1's snapshot loader for integration tests. */
 export async function loadSnapshot(conversationId: string) {
   return loadDomainSnapshot(conversationId)
+}
+
+/**
+ * C3.4 (C errata 1): open a DNT session, write the given facts through the
+ * real B2 surface, fill the remaining visible questions with defaults and
+ * sign — leaving the customer with an ACTIVE Dnt whose facts drive the
+ * suitability verdict. Facts are written FIRST so the default-filler never
+ * overwrites them (write order matters for gated questions: put the gate
+ * first, e.g. DNT_LIFE_SUBTYPE before DNT_LIFE_SEVERE_CONDITIONS).
+ */
+export async function signDntWithFacts(
+  fx: { customerId: string; conversationId: string },
+  facts: Record<string, string>,
+): Promise<void> {
+  const ctx = { customerId: fx.customerId, conversationId: fx.conversationId, language: 'ro', db: prisma } as unknown as import('@/lib/tools/types').ToolContext
+  const opened = await openDntSession({}, ctx)
+  if (!opened.success) throw new Error(`signDntWithFacts: open_dnt_session failed: ${opened.error}`)
+  for (const [questionCode, value] of Object.entries(facts)) {
+    const w = await writeDntAnswer({ questionCode, value }, ctx)
+    if (!w.success) throw new Error(`signDntWithFacts: write_dnt_answer(${questionCode}) failed: ${w.error}`)
+  }
+  await answerAllDntQuestions(fx.customerId, fx.conversationId)
+  const signed = await signDnt({ confirmSignature: true, consent: { gdpr: true, aiDisclosure: true } }, ctx)
+  if (!signed.success) throw new Error(`signDntWithFacts: sign_dnt failed: ${signed.error}`)
 }
 
 export async function ensureTestProduct() {

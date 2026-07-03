@@ -16,7 +16,7 @@ export function makeSnapshot(overrides: Partial<DomainSnapshot> = {}): DomainSna
     dnt: { signed: false, valid: false, validUntil: null, coversProductTypes: [], answeredCount: 0, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0, facts: {} },
     application: null, resumableApplication: null, quote: null, acceptedQuote: null,
     schedule: { exists: false, settled: false, nextDueAt: null, lastPaymentStatus: null },
-    policy: null, eligibilityFacts: {},
+    policy: null, eligibilityFacts: {}, suitabilityAcks: [],
     documents: { requirementsByTool: {}, validated: [] },
     openItems: [], circuit: { openTools: [] }, degraded: [], answers: {},
     ...overrides,

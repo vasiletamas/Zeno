@@ -141,6 +141,10 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     })
     dntFacts = Object.fromEntries(signedAnswers.filter((a) => a.question.code).map((a) => [a.question.code as string, a.value]))
   }
+  // C3.4: acks for the active application (documented-warning state)
+  const suitabilityAcks = application && application.status !== 'CANCELLED'
+    ? await db.suitabilityWarningAck.findMany({ where: { customerId: conversation.customerId, applicationId: application.id }, select: { ruleSetVersion: true } })
+    : []
   return {
     conversationId, customerId: conversation.customerId,
     product: prod ? { id: prod.id, code: prod.code, insuranceType: prod.insuranceType, eligibilityRules, suitabilityRules } : null,
@@ -170,7 +174,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     acceptedQuote: accepted ? { id: accepted.id, acceptedAt: accepted.updatedAt.toISOString() } : null,
     schedule: { exists: false, settled: false, nextDueAt: null, lastPaymentStatus: null }, // Block D (PaymentSchedule) re-points
     policy: policy ? { id: policy.id, status: policy.status } : null,
-    eligibilityFacts,
+    eligibilityFacts, suitabilityAcks,
     documents: {
       requirementsByTool: (prod?.verificationRequirements as Record<string, string[]> | null) ?? {},
       validated: [...new Set(validatedDocs.map((d) => d.kind as string))],

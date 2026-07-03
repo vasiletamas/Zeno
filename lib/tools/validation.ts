@@ -115,6 +115,8 @@ const resumeApplicationSchema = z.object({
   applicationId: z.string().optional(),
 }).strict()
 
+const acknowledgeSuitabilityWarningSchema = z.object({}).strict()
+
 const cancelApplicationSchema = z.object({
   reason: z.string().optional(),
   confirmToken: z.string().optional(),
@@ -236,6 +238,7 @@ const toolSchemas: Record<string, ZodType> = {
   select_coverage: selectCoverageSchema,
   resume_application: resumeApplicationSchema,
   cancel_application: cancelApplicationSchema,
+  acknowledge_suitability_warning: acknowledgeSuitabilityWarningSchema,
   get_last_application_info: z.object({}).strict(),
 
   // Quote

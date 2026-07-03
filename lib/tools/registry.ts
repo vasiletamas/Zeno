@@ -19,6 +19,7 @@ import { calculateAge } from '@/lib/chat/age'
 import { getDntState, getDntQuestions, getDntNextQuestion, openDntSession, writeDntAnswer, signDnt } from './handlers/dnt-handlers'
 import { setApplication, getNextQuestionInfo, writeQuestionAnswer, modifyAnswer, resumeApplication, cancelApplication, getLastApplicationInfo } from './handlers/application-handlers'
 import { selectCoverage } from './handlers/select-coverage-handlers'
+import { acknowledgeSuitabilityWarning } from './handlers/suitability-handlers'
 import { generateQuote, getQuoteDetails, acceptQuote, modifyQuote } from './handlers/quote-handlers'
 import { compareProducts } from './handlers/product-handlers'
 import { previewProductRequirements } from './handlers/preview-handlers'
@@ -758,6 +759,23 @@ registerTool('select_coverage', {
   sideEffect: 'lifecycle',
   kind: 'commit',
 }, selectCoverage)
+
+registerTool('acknowledge_suitability_warning', {
+  description:
+    'Record the customer\'s explicit acknowledgement of a suitability warning (demands-and-needs mismatch) so the quote can proceed. ' +
+    'Use ONLY after presenting the mismatch reasons from the blocked generate_quote and the customer explicitly chooses to continue. Takes no arguments — the engine records its own current verdict.',
+  parameters: {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'consent',
+  kind: 'commit',
+}, acknowledgeSuitabilityWarning)
 
 registerTool('resume_application', {
   description: 'Resume the customer\'s existing application — works across conversations and channels. Unpauses a PAUSED application and returns the current position (next question, progress, selection).',

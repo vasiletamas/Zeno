@@ -73,7 +73,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.17.0' // 1.15.0: modify_answer exposed on OPEN/PAUSED apps with answers behind the DNT gate (C1.5, erratum 10); 1.16.0: pinned questionnaire surface (C1.ADD-1/2) — write_question_answer renames the save commit, get_next_question read with branching provenance, check_bd_eligibility retired; 1.17.0: discovery eligibility verdict DERIVED per turn (C2.6) — DerivedStateV3.eligibility from the typed rules, INELIGIBLE blocks set_application with the failed-rule reason (erratum 3), unknown never a wall
+export const engineVersion = '1.18.0' // 1.16.0: pinned questionnaire surface (C1.ADD-1/2); 1.17.0: discovery eligibility verdict DERIVED per turn (C2.6) — INELIGIBLE blocks set_application with the failed-rule reason, unknown never a wall; 1.18.0: suitability documented-warning flow (C3.4) — acknowledge_suitability_warning exposed while a warn_and_allow mismatch awaits ack, generate_quote blocked suitability_warning_unacknowledged (warn) or the mismatch's own reason (hard_block)
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -113,6 +113,24 @@ export function deriveSuitability(s: DomainSnapshot): SuitabilityResult | null {
  * planner's and the D1 gate's business). Facts = identity-class facts from
  * the B0 derivation plus prefixed active-answer facts. No rules → unknown.
  */
+/**
+ * C3.4 (M7.2b, erratum 2): the documented-warning state. In warn_and_allow
+ * mode a non-suitable verdict demands the customer's acknowledgement for
+ * THIS ruleset version before a quote; hard_block mode rejects outright
+ * (D1's gateSuitability mirrors this — one predicate, two hosts).
+ */
+function suitabilityAckNeeded(s: DomainSnapshot, d: Derived): boolean {
+  const rules = s.product?.suitabilityRules
+  if (!rules || !d.suitability || d.suitability.verdict === 'suitable') return false
+  if (rules.mode !== 'warn_and_allow') return false
+  return !s.suitabilityAcks.some((a) => a.ruleSetVersion === rules.version)
+}
+
+function suitabilityHardBlocked(s: DomainSnapshot, d: Derived): boolean {
+  const rules = s.product?.suitabilityRules
+  return !!rules && rules.mode === 'hard_block' && d.suitability?.verdict === 'unsuitable'
+}
+
 export function deriveEligibility(s: DomainSnapshot): DerivedStateV3['eligibility'] {
   const rules = s.product?.eligibilityRules
   if (!rules) return { verdict: 'unknown', missingFacts: [], failedReasons: [] }
@@ -172,10 +190,21 @@ export const ACTION_RULES: ActionRule[] = [
     exposedWhen: (s) => appExposureFromSnapshot(s).available.includes('resume_application') || (s.resumableApplication !== null && s.resumableApplication.status !== 'REFERRED'),
     blockedReason: (s) => ((s.application?.status ?? s.resumableApplication?.status) === 'REFERRED' ? { reason: 'with_underwriter' } : null) },
   appRule('cancel_application'),
+  // C3.4: the documented-warning commit — exposed exactly while a
+  // warn_and_allow mismatch awaits the customer's acknowledgement.
+  { action: 'acknowledge_suitability_warning', kind: 'commit',
+    exposedWhen: (s, d) => s.application !== null && suitabilityAckNeeded(s, d),
+    blockedReason: (s, d) => (s.application !== null && d.suitability !== null && !suitabilityAckNeeded(s, d) ? { reason: 'no_suitability_warning_pending' } : null) },
   { action: 'generate_quote', kind: 'commit',
-    exposedWhen: (s, d) => d.phase === 'APPLICATION' && appExposureFromSnapshot(s).available.includes('generate_quote') && s.consents.gdprProcessing,
+    exposedWhen: (s, d) => d.phase === 'APPLICATION' && appExposureFromSnapshot(s).available.includes('generate_quote') && s.consents.gdprProcessing && !suitabilityAckNeeded(s, d) && !suitabilityHardBlocked(s, d),
     blockedReason: (s, d) => {
       if (d.phase === 'QUOTE') return { reason: 'quote_already_issued' }
+      // C3.4 (erratum 2): the suitability gate surfaces FIRST — the
+      // documented-warning step is actionable the moment the DNT is signed,
+      // before questionnaire/selection completeness; hard_block rejects with
+      // the mismatch's own reason.
+      if (suitabilityHardBlocked(s, d)) return { reason: (d.suitability!.mismatches[0]?.reason ?? 'not_exposed') as ReasonCode, params: { mismatches: d.suitability!.mismatches.map((m) => m.reason) } }
+      if (suitabilityAckNeeded(s, d)) return { reason: 'suitability_warning_unacknowledged', params: { mismatches: d.suitability!.mismatches.map((m) => m.reason), ruleSetVersion: s.product!.suitabilityRules!.version } }
       const b = appExposureFromSnapshot(s).blocked.find((x) => x.action === 'generate_quote')
       if (b) return { reason: b.reason as ReasonCode, params: b.params }
       if (appExposureFromSnapshot(s).available.includes('generate_quote') && !s.consents.gdprProcessing) return { reason: 'requires_consent', params: { kind: 'gdpr_processing' } }

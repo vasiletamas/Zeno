@@ -61,6 +61,10 @@ export const translations: Record<Language, TranslationTable> = {
       addon_age_band_unavailable: 'Opțiunea de tratament în străinătate nu este disponibilă pentru această vârstă.',
       one_facet_per_commit: 'Schimbăm pe rând: întâi pachetul, apoi nivelul, apoi opțiunea suplimentară.',
       eligibility_facts_missing: 'Mai avem nevoie de câteva date pentru a verifica eligibilitatea (de exemplu vârsta).',
+      suitability_warning_unacknowledged: 'Produsul nu se potrivește complet nevoilor declarate — putem continua doar după ce confirmi că ai înțeles diferența.',
+      no_suitability_warning_pending: 'Nu există o avertizare de potrivire de confirmat.',
+      product_has_no_investment_component: 'Protect nu are componentă de investiție — este o asigurare de protecție.',
+      severe_conditions_demand_needs_addon: 'Pentru afecțiuni medicale grave, potrivirea vine din opțiunea de tratament în străinătate.',
     },
     // Hero section
     hero_headline: 'Dacă mâine primești un diagnostic grav, ai fi pregătit?',
@@ -205,6 +209,10 @@ export const translations: Record<Language, TranslationTable> = {
       addon_age_band_unavailable: 'The treatment-abroad option is not available for this age.',
       one_facet_per_commit: 'One change at a time: first the package, then the level, then the add-on.',
       eligibility_facts_missing: 'A few more details are needed to check eligibility (for example your age).',
+      suitability_warning_unacknowledged: 'The product does not fully match the declared needs — we can continue only after you confirm you understand the difference.',
+      no_suitability_warning_pending: 'There is no suitability warning to acknowledge.',
+      product_has_no_investment_component: 'Protect has no investment component — it is a protection product.',
+      severe_conditions_demand_needs_addon: 'For severe medical conditions, the fit comes from the treatment-abroad option.',
     },
     // Hero section
     hero_headline:
