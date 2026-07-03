@@ -27,6 +27,18 @@ export const PROTECT_ELIGIBILITY = {
   },
 }
 
+// COMPLIANCE INPUT REQUIRED (M7.4): v1 rule content is a mechanical
+// placeholder validated by the engine tests; the demands-and-needs mapping
+// must be confirmed by compliance before production.
+export const PROTECT_SUITABILITY = {
+  version: 1,
+  mode: 'warn_and_allow',
+  rules: [
+    { id: 'investment_demand', fact: 'DNT_LIFE_SUBTYPE', op: 'equals', value: 'financial_and_investment', whenMatched: 'mismatch', reason: 'product_has_no_investment_component' },
+    { id: 'severe_conditions_demand', fact: 'DNT_LIFE_SEVERE_CONDITIONS', op: 'equals', value: 'yes', whenMatched: 'conditional', reason: 'severe_conditions_demand_needs_addon' },
+  ],
+}
+
 export async function seedProduct(prisma: PrismaClient) {
   console.log('  Seeding coverage types...')
 
@@ -171,6 +183,7 @@ export async function seedProduct(prisma: PrismaClient) {
         { key: 'budgetPreference', category: 'BUYING_SIGNAL', type: 'enum', options: ['lowest', 'balanced', 'best_coverage'] },
       ],
       eligibility: PROTECT_ELIGIBILITY,
+      suitabilityRules: PROTECT_SUITABILITY,
       // B3.7 (#1 productDocuments): R6 resolved to before-initiate_payment;
       // flip by seeding accept_quote: ['id_card'] if compliance wants accept-time.
       verificationRequirements: { accept_quote: [], initiate_payment: ['id_card'] },
@@ -500,6 +513,7 @@ PRIORITATE LA CONTRADICȚII
         { key: 'budgetPreference', category: 'BUYING_SIGNAL', type: 'enum', options: ['lowest', 'balanced', 'best_coverage'] },
       ],
       eligibility: PROTECT_ELIGIBILITY,
+      suitabilityRules: PROTECT_SUITABILITY,
       // B3.7 (#1 productDocuments): R6 resolved to before-initiate_payment;
       // flip by seeding accept_quote: ['id_card'] if compliance wants accept-time.
       verificationRequirements: { accept_quote: [], initiate_payment: ['id_card'] },

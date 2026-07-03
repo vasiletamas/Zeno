@@ -164,6 +164,9 @@ model Product {
   // resolved to before-initiate_payment; flip by seeding accept_quote:
   // ["id_card"] if compliance wants accept-time.
   verificationRequirements Json?
+  // C3.2 (M7): typed SuitabilityRuleSet { version, mode, rules } — parsed by
+  // lib/engines/suitability.ts, never evaluated as informal Json.
+  suitabilityRules        Json?
   quoteValidityDays       Int      @default(30)
   isActive                Boolean  @default(true)
   createdAt               DateTime @default(now())
