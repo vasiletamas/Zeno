@@ -25,6 +25,7 @@ import { buildToolContext } from './context-builder'
 import { createSSEStream, pickStatusMessage, type SSEEvent } from './stream-handler'
 import type { ToolContext, PipelineResult, ToolResult } from '@/lib/tools/types'
 import { buildPrompt, type GateSelection, type PromptSections } from './prompt-builder'
+import { accumulateTurnUsage } from './turn-usage'
 import { getRequiredSectionsFor, formatDerivedBriefing } from './phase-sections-map'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { deriveAndExpose, engineVersion } from '@/lib/engines/derive-and-expose'
@@ -132,6 +133,10 @@ interface TurnState {
   savedMessageId: string | null
   totalInputTokens: number
   totalOutputTokens: number
+  totalCacheReadTokens: number
+  totalCacheWriteTokens: number
+  llmCalls: number
+  cacheHitCalls: number
   provider: string | null
   model: string | null
   startMs: number
@@ -172,6 +177,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     savedMessageId: null,
     totalInputTokens: 0,
     totalOutputTokens: 0,
+    totalCacheReadTokens: 0,
+    totalCacheWriteTokens: 0,
+    llmCalls: 0,
+    cacheHitCalls: 0,
     provider: null,
     model: null,
     startMs: Date.now(),
@@ -643,6 +652,8 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       stablePrefix: buildResult.stablePrefix ?? null,
       dynamicSuffix: buildResult.dynamicSuffix ?? null,
       totalChars: (buildResult.stablePrefix?.length ?? 0) + (buildResult.dynamicSuffix?.length ?? 0),
+      stablePrefixChars: buildResult.stablePrefix?.length ?? 0,
+      dynamicSuffixChars: buildResult.dynamicSuffix?.length ?? 0,
       traceId: state.traceId,
     },
   })
@@ -876,8 +887,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         yield { event: 'content', data: { text: chunk.content } }
       }
       if (chunk.type === 'done' && chunk.usage) {
-        state.totalInputTokens += chunk.usage.promptTokens
-        state.totalOutputTokens += chunk.usage.completionTokens
+        accumulateTurnUsage(state, chunk.usage)
       }
     }
   } else {
@@ -972,8 +982,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           roundToolCalls = chunk.toolCalls
         }
         if (chunk.type === 'done' && chunk.usage) {
-          state.totalInputTokens += chunk.usage.promptTokens
-          state.totalOutputTokens += chunk.usage.completionTokens
+          accumulateTurnUsage(state, chunk.usage)
         }
       }
 
@@ -1520,6 +1529,11 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       cost: getTurnCost(state.traceId),
       latencyMs,
       anomalies: getTurnAnomalies(state.traceId),
+      totalCacheReadTokens: state.totalCacheReadTokens,
+      totalCacheWriteTokens: state.totalCacheWriteTokens,
+      llmCalls: state.llmCalls,
+      cacheHitCalls: state.cacheHitCalls,
+      toolDefChars: JSON.stringify(tools ?? []).length,
     },
   })
 

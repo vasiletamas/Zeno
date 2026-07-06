@@ -71,6 +71,9 @@ export interface DebugPromptPayload {
   stablePrefix: string | null
   dynamicSuffix: string | null
   totalChars: number
+  /** A1 cost telemetry: cacheable vs per-turn split of totalChars. */
+  stablePrefixChars: number
+  dynamicSuffixChars: number
 }
 
 export interface DebugToolCallPayload {
@@ -117,6 +120,13 @@ export interface DebugTurnEndPayload {
   cost: number | null
   latencyMs: number
   anomalies: unknown[]
+  /** A1 cache telemetry, accumulated across every LLM round of the turn. */
+  totalCacheReadTokens?: number
+  totalCacheWriteTokens?: number
+  llmCalls?: number
+  cacheHitCalls?: number
+  /** Serialized size of the tool definitions sent on this turn's LLM calls. */
+  toolDefChars?: number
 }
 
 /**
