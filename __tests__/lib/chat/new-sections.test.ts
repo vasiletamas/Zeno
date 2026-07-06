@@ -40,4 +40,13 @@ describe('new (phase,subphase) sections', () => {
     expect(loadPaymentContext(r.state)).toBeNull()
     expect(loadPolicyContext(r.state)).toBeNull()
   })
+  it('dntContext: the card collects, the agent narrates (Task 2.2, D1) — no prose option enumeration, typed answers map to exact option values', () => {
+    const r = deriveAndExpose(makeSnapshot({ application: { id: 'a', status: 'OPEN', tier: null, level: null, addon: null, answeredCount: 0, requiredCount: 6, missingCodes: ['Q1'], frozen: false }, dnt: { signed: false, valid: false, validUntil: null, coversProductTypes: [], answeredCount: 2, totalCount: 5, sessionActive: true, latest: null, activeSessionId: 's1', sessionType: 'NEW', sessionAnswered: 2, sessionTotal: 5, facts: {}, pendingCode: 'DNT_FAMILY_SIZE' } }))
+    const text = loadDntContext(r.state)
+    expect(text).toMatch(/NEVER enumerate the options in prose/i)
+    expect(text).toContain('Opțiuni:')  // named as the forbidden pattern
+    expect(text).toMatch(/invite the customer to tap/i)
+    expect(text).toMatch(/map it to the EXACT option value/i)
+    expect(text).toMatch(/NEVER pass raw free text/i)
+  })
 })

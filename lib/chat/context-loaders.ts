@@ -829,7 +829,9 @@ export function loadDntContext(state: DerivedStateV3): string | null {
     // Salvaged questionnaire-facilitation guidance (A5.1 audit):
     'If the customer interrupts with a question or concern, answer it fully FIRST, then offer to resume — never force resumption.',
     'Medical/health questions: frame them before asking (needed for the insurance assessment, treated confidentially), keep a neutral non-judgmental tone, never comment on the answers.',
-    'Active questionnaire questions render as UI cards — do not repeat the card text; keep your transitions brief and warm.',
+    // Task 2.2 (D1): the CARD collects, the agent narrates.
+    'Active DNT and questionnaire questions render as UI CARDS with tappable option buttons — the card collects the answer. NEVER enumerate the options in prose (no "Opțiuni:" lists — the card already shows them); briefly frame the question in one warm sentence and invite the customer to tap an option on the card.',
+    'If the customer TYPES an answer instead of tapping, map it to the EXACT option value from the tool result (e.g. "da, sunt sănătos" on a yes/no question → value "yes"; "lucrez la stat" on the occupation question → value "employee") and pass THAT value to write_dnt_answer — NEVER pass raw free text as the value of an option question.',
   ].join('\n')
 }
 
