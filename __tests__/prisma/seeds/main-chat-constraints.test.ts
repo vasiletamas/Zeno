@@ -91,5 +91,6 @@ describe('main-chat agent constraints', () => {
     const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
     expect(mainChat?.systemPrompt).toMatch(/CUSTOMER FIELD DISCIPLINE/)
     expect(mainChat?.systemPrompt).toMatch(/NEVER re-collect a field/i)
+    expect(mainChat?.systemPrompt).toMatch(/never ask the customer to retype/i)
   })
 })
