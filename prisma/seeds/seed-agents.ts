@@ -236,7 +236,7 @@ export const AGENTS: AgentDef[] = [
     provider: 'OPENAI',
     model: 'gpt-5.4',
     fallbackProvider: 'ANTHROPIC',
-    fallbackModel: 'claude-sonnet-4-20250514',
+    fallbackModel: 'claude-sonnet-5', // P1-8: claude-sonnet-4-20250514 retired 2026-06-15 — failover 404ed and the turn died
     temperature: 0.7,
     maxTokens: 4096,
     systemPrompt: MAIN_CHAT_PROMPT,
