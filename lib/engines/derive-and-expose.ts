@@ -87,7 +87,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.33.0' // 1.33.0: get_open_items read exposed (E4.3, M2 — the ONE list read); 1.32.0: request_erasure/request_data_export exposed (E3, M3) — erasure always offerable and consent-halt exempt, export behind the verified_channel identity row; 1.31.0: set_application ineligible block params carry the derived age bounds (E1.6, T11.D4); 1.30.0: request_cancellation exposed via the deterministic free-look rule (D4.5, T9.D2) — outside_free_look precise block; 1.29.0: get_policy_info customer-scoped read + POLICY phase derives from the customer-scoped policy (D4.4, T9.D5/D6); 1.28.0: change_payment_option exposed pre-capture only (D3.4, T8.D5); 1.27.0: ensure_payment_session replaces the legacy initiate tool (D3.3, T8.D4); 1.26.0: get_payment_status read exposed on schedule existence (D3.2); 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application; 1.23.0: acknowledge_disclosures exposed on the live issued quote (D2.3, T7.D2); 1.24.0: accept_quote legality through the pure acceptQuoteLegality predicate (D2.5, T7.D6) — expiry → transition → verified_channel identity → disclosure acks; 1.25.0: the payment commit rides the schedule (D2.8) — due PENDING installment exposes, settled answers no_due_installment, no Policy prerequisite
+export const engineVersion = '1.34.0' // 1.34.0: verification endgame first-class (Task 1.1, D5) — start_channel_verification blocked verification_already_pending while a live challenge exists (gateway resend escape), confirm_channel_verification leads NEXT_BEST_PRIORITY; 1.33.0: get_open_items read exposed (E4.3, M2 — the ONE list read); 1.32.0: request_erasure/request_data_export exposed (E3, M3) — erasure always offerable and consent-halt exempt, export behind the verified_channel identity row; 1.31.0: set_application ineligible block params carry the derived age bounds (E1.6, T11.D4); 1.30.0: request_cancellation exposed via the deterministic free-look rule (D4.5, T9.D2) — outside_free_look precise block; 1.29.0: get_policy_info customer-scoped read + POLICY phase derives from the customer-scoped policy (D4.4, T9.D5/D6); 1.28.0: change_payment_option exposed pre-capture only (D3.4, T8.D5); 1.27.0: ensure_payment_session replaces the legacy initiate tool (D3.3, T8.D4); 1.26.0: get_payment_status read exposed on schedule existence (D3.2); 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application; 1.23.0: acknowledge_disclosures exposed on the live issued quote (D2.3, T7.D2); 1.24.0: accept_quote legality through the pure acceptQuoteLegality predicate (D2.5, T7.D6) — expiry → transition → verified_channel identity → disclosure acks; 1.25.0: the payment commit rides the schedule (D2.8) — due PENDING installment exposes, settled answers no_due_installment, no Policy prerequisite
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -187,8 +187,14 @@ export const ACTION_RULES: ActionRule[] = [
   { action: 'collect_customer_field', kind: 'commit', exposedWhen: always },
   { action: 'withdraw_consent', kind: 'commit', exposedWhen: (s) => s.consents.hasAnyEvents },
   // B3.5: verification is offerable at any point (soft, never a wall pre-gate);
-  // confirm only makes sense while a live challenge is pending.
-  { action: 'start_channel_verification', kind: 'commit', exposedWhen: always },
+  // confirm only makes sense while a live challenge is pending. Task 1.1 (D5):
+  // while a LIVE challenge is pending, re-issuing silently invalidates the
+  // code the customer is reading (the recorded endgame killer) — blocked
+  // verification_already_pending; the gateway's escape (explicit resend:true
+  // or a NEW target) is the only way through.
+  { action: 'start_channel_verification', kind: 'commit',
+    exposedWhen: (s) => s.identity.pendingChallenge === null,
+    blockedReason: (s) => (s.identity.pendingChallenge !== null ? { reason: 'verification_already_pending', params: { channel: s.identity.pendingChallenge.channel } } : null) },
   { action: 'confirm_channel_verification', kind: 'commit', exposedWhen: (s) => s.identity.pendingChallenge !== null },
   // B3.7: offerable while any product-required document is still unvalidated
   { action: 'request_document_upload', kind: 'commit', exposedWhen: (s) => Object.values(s.documents.requirementsByTool).flat().some((k) => !s.documents.validated.includes(k)) },
@@ -301,7 +307,11 @@ export const ACTION_RULES: ActionRule[] = [
     blockedReason: (s) => (s.schedule.exists && (s.schedule.settled || s.schedule.nextDueAt === null) ? { reason: 'no_due_installment' } : null) },
 ]
 
-const NEXT_BEST_PRIORITY = ['ensure_payment_session', 'accept_quote', 'generate_quote', 'select_coverage', 'write_question_answer', 'sign_dnt', 'write_dnt_answer', 'open_dnt_session', 'set_application', 'set_candidate_product', 'list_products']
+// Task 1.1 (D5): confirm_channel_verification leads — it is only exposed
+// while a live challenge is pending (10-min TTL), and during that window the
+// one correct move is confirming the digits the customer supplies; anything
+// else (set_candidate_product in the recorded conversation) derails the close.
+const NEXT_BEST_PRIORITY = ['confirm_channel_verification', 'ensure_payment_session', 'accept_quote', 'generate_quote', 'select_coverage', 'write_question_answer', 'sign_dnt', 'write_dnt_answer', 'open_dnt_session', 'set_application', 'set_candidate_product', 'list_products']
 
 export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequirements?: IdentityRequirementsTable }): DeriveAndExposeResult {
   const d: Derived = { ...derivePhase(s), eligibility: deriveEligibility(s), suitability: deriveSuitability(s) }

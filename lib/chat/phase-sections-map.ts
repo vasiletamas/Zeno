@@ -1,4 +1,5 @@
 import type { Phase, AppSubphase, DerivedStateV3, ExposedActions } from '@/lib/engines/domain-types'
+import { maskVerificationTarget } from '@/lib/customer/verification-service'
 
 // TARGET map (A4.3, T10.D4). Every removal from the A1 content-preserving map
 // carries its 'retired because X' note in
@@ -41,6 +42,15 @@ export function formatDerivedBriefing(state: DerivedStateV3, actions: ExposedAct
   // and tool results are not replayed across turns — this line is the model's only
   // durable source for the exact code (2026-07-06 debug report).
   if (state.dnt.sessionActive && state.dnt.pendingCode) lines.push(`DNT current question code: ${state.dnt.pendingCode} — pass this EXACT code to write_dnt_answer for the current answer. To correct an already-answered DNT question, call write_dnt_answer with THAT question's own code instead (answers are write-or-change; get_dnt_questions lists all codes) — never write the correction into the current question.`)
+  // Task 1.1 (D5): the endgame that killed the recorded sale — while a code
+  // is in flight the ONE correct move is confirming the digits the customer
+  // supplies; a re-send silently invalidates the code they are reading.
+  if (state.identity.pendingChallenge) {
+    const pc = state.identity.pendingChallenge
+    const to = pc.target ? maskVerificationTarget(pc.channel, pc.target) : `the customer's ${pc.channel}`
+    const attempts = pc.attemptsRemaining !== undefined && pc.attemptsRemaining < 5 ? ` ${pc.attemptsRemaining} attempts remaining.` : ''
+    lines.push(`Verification: code sent via ${pc.channel} to ${to}, awaiting the 6-digit code.${attempts} When the customer supplies digits, call confirm_channel_verification with them. Do NOT resend — a new send invalidates the code already in their inbox; only if the customer explicitly asks for a new code, call start_channel_verification with resend: true.`)
+  }
   if (state.phase === 'QUOTE' && state.quote) lines.push(`Quote valid until: ${state.quote.validUntil.slice(0, 10)}`)
   if (state.phase === 'PAYMENT') lines.push(`Payment status: ${state.schedule.lastPaymentStatus ?? 'pending'}`)
   if (state.flagsForReview.length > 0) lines.push(`Flags for review: ${state.flagsForReview.join(', ')}`)

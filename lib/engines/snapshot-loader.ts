@@ -29,7 +29,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   const identityFacts = await getIdentityFacts(conversation.customerId, db)
   const pendingChallenge = await db.verificationChallenge.findFirst({
     where: { customerId: conversation.customerId, consumedAt: null, expiresAt: { gt: new Date() } },
-    select: { channel: true },
+    select: { channel: true, target: true, attemptsRemaining: true },
     orderBy: { createdAt: 'desc' },
   })
   const validatedDocs = await db.customerDocument.findMany({
@@ -223,7 +223,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
       tier: deriveIdentityTier(identityFacts),
       fields: Object.fromEntries(Object.entries(identityFacts.fields).map(([k, v]) => [k, { provenance: v.provenance }])),
       verifiedChannels: identityFacts.verifiedChannels,
-      pendingChallenge: pendingChallenge ? { channel: pendingChallenge.channel } : null,
+      pendingChallenge: pendingChallenge ? { channel: pendingChallenge.channel, target: pendingChallenge.target, attemptsRemaining: pendingChallenge.attemptsRemaining } : null,
     },
     consents,
     dnt: {

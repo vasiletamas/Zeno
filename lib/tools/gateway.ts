@@ -129,6 +129,19 @@ export function toUnavailable(err: unknown): CommitResult {
   return { outcome: 'unavailable', reason: 'temporarily_unavailable', effects: [], data: { retryable: true, retryAfterMs: 20_000, error: err instanceof Error ? err.name : 'unknown' } }
 }
 
+/**
+ * Task 1.1 (D5): verification_already_pending is the ONE block an argument
+ * can lift — an explicit resend (resend: true) or a NEW target re-issues the
+ * challenge (issueChallenge expires the prior row); a silent same-target
+ * re-send is what invalidated the live code in the recorded conversation.
+ */
+function verificationResendEscape(req: CommitRequest, reason: ReasonCode, state: DerivedStateV3): boolean {
+  if (req.tool !== 'start_channel_verification' || reason !== 'verification_already_pending') return false
+  if (req.args.resend === true) return true
+  const pendingTarget = state.identity.pendingChallenge?.target
+  return typeof req.args.target === 'string' && !!pendingTarget && req.args.target.trim().toLowerCase() !== pendingTarget.toLowerCase()
+}
+
 function outcomeForBlocked(reason: ReasonCode): CommitResult['outcome'] {
   if (reason === 'requires_consent') return 'requires_consent'
   if (reason === 'requires_identity') return 'requires_identity'
@@ -236,9 +249,11 @@ export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
   if (!OPERATOR_TOOLS.has(req.tool) && !pre.actions.available.includes(req.tool)) {
     const blocked = pre.actions.blocked.find((b) => b.action === req.tool)
     const reason = blocked?.reason ?? 'not_exposed'
-    if (reason === 'quote_expired') await persistQuoteExpiry(prisma, pre.state)
-    const envelope: CommitResult = { outcome: outcomeForBlocked(reason), reason, effects: [], needs: blocked?.params?.needs as string[] | undefined }
-    return writeLedger(prisma, req, targetRef, argsHash, envelope, pre.state.phase, pre.state.phase)
+    if (!verificationResendEscape(req, reason, pre.state)) {
+      if (reason === 'quote_expired') await persistQuoteExpiry(prisma, pre.state)
+      const envelope: CommitResult = { outcome: outcomeForBlocked(reason), reason, effects: [], needs: blocked?.params?.needs as string[] | undefined }
+      return writeLedger(prisma, req, targetRef, argsHash, envelope, pre.state.phase, pre.state.phase)
+    }
   }
 
   // (4) confirm token — stale/missing → (re-)issue against a fresh state
@@ -302,9 +317,11 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
     if (!OPERATOR_TOOLS.has(req.tool) && !lockedPre.actions.available.includes(req.tool)) {
       const blocked = lockedPre.actions.blocked.find((b) => b.action === req.tool)
       const reason = blocked?.reason ?? 'not_exposed'
-      if (reason === 'quote_expired') await persistQuoteExpiry(tx, lockedPre.state)
-      const envelope: CommitResult = { outcome: outcomeForBlocked(reason), reason, effects: [] }
-      return writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, lockedPre.state.phase)
+      if (!verificationResendEscape(req, reason, lockedPre.state)) {
+        if (reason === 'quote_expired') await persistQuoteExpiry(tx, lockedPre.state)
+        const envelope: CommitResult = { outcome: outcomeForBlocked(reason), reason, effects: [] }
+        return writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, lockedPre.state.phase)
+      }
     }
     const effectiveArgs = { ...validatedArgs, ...(requiresConfirmation ? CONFIRM_ARG_INJECTION[req.tool] ?? {} : {}) }
     // C1.5: the ledger row id is minted BEFORE the handler runs so answer
@@ -363,7 +380,7 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
       ? handlerResult.referred
         ? { outcome: 'referred', reason: handlerResult.referred.reason as ReasonCode, effects, phaseDelta, data: { ...handlerResult.data, _message: handlerResult.message } }
         : { outcome: 'applied', effects, phaseDelta, data: { ...handlerResult.data, _uiAction: handlerResult.uiAction, _confirmation: handlerResult.confirmation, _message: handlerResult.message } }
-      : { outcome: spokenReason ? outcomeForBlocked(spokenReason) : 'rejected', reason: spokenReason ?? 'handler_rejected', effects: [], needs: handlerNeeds, data: { error: handlerResult.error } }
+      : { outcome: spokenReason ? outcomeForBlocked(spokenReason) : 'rejected', reason: spokenReason ?? 'handler_rejected', effects: [], needs: handlerNeeds, data: { ...handlerResult.data, error: handlerResult.error } }
     return writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, post.state.phase, handlerResult.success ? commitId : undefined)
   })
 }

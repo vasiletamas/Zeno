@@ -1124,12 +1124,14 @@ registerTool('start_channel_verification', {
   description:
     'Send the customer a 6-digit verification code (plus a one-click link) to the email address or phone number THEY provided. ' +
     'Verifying a channel raises the identity tier (needed before accepting a quote). ' +
-    'Never reveals whether the address belongs to an existing account. Re-calling resends a fresh code.',
+    'Never reveals whether the address belongs to an existing account. ' +
+    'While a code is already pending, do NOT call this again for the same address (it would invalidate the code the customer is reading) — pass resend: true ONLY when the customer explicitly asks for a new code.',
   parameters: {
     type: 'object',
     properties: {
       channel: { type: 'string', enum: ['email', 'sms'], description: 'Which channel to verify.' },
       target: { type: 'string', description: 'The email address or Romanian phone number the customer gave, exactly as provided.' },
+      resend: { type: 'boolean', description: 'Set true ONLY when the customer explicitly asked for a new code while one is already pending.' },
     },
     required: ['channel', 'target'],
     additionalProperties: false,

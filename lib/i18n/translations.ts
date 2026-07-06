@@ -71,6 +71,7 @@ export const translations: Record<Language, TranslationTable> = {
       no_due_installment: 'Nu există nicio rată scadentă de plătit — planul de plată este achitat la zi.',
       schedule_already_captured: 'Prima rată a fost deja încasată — frecvența de plată nu mai poate fi schimbată pentru acest plan.',
       outside_free_look: 'Perioada de renunțare (free-look) s-a încheiat — anularea nu mai este posibilă pe acest canal; un coleg poate prelua cererea.',
+      verification_already_pending: 'Un cod de verificare este deja pe drum — folosește codul primit sau cere unul nou.',
     },
     // Hero section
     hero_headline: 'Dacă mâine primești un diagnostic grav, ai fi pregătit?',
@@ -228,6 +229,7 @@ export const translations: Record<Language, TranslationTable> = {
       no_due_installment: 'There is no due installment to pay — the payment plan is fully up to date.',
       schedule_already_captured: 'The first installment was already captured — the payment frequency can no longer be changed on this plan.',
       outside_free_look: 'The free-look window has ended — cancellation is no longer possible on this channel; a colleague can take over the request.',
+      verification_already_pending: 'A verification code is already on its way — use the code you received or ask for a new one.',
     },
     // Hero section
     hero_headline:
