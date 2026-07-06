@@ -71,6 +71,10 @@ export function formatDerivedBriefing(state: DerivedStateV3, actions: ExposedAct
     lines.push('Blocked actions:')
     for (const b of actions.blocked) lines.push(`- ${b.action} (${b.reason}${b.params ? ' ' + JSON.stringify(b.params) : ''})`)
     lines.push('If the customer asks for a blocked action, explain WHY using the reason above. NEVER work around a blocked action or invent an alternative path.')
+    // Task 1.3 (D8): the loop-breaker's explain-and-escalate instruction.
+    if (actions.blocked.some((b) => b.reason === 'repeated_failure')) {
+      lines.push('A tool above is blocked after repeated failures on our side: do NOT attempt it again this conversation. Apologize, say plainly that something went wrong at our end, and offer to retry later or hand off to a human colleague (escalate_to_human).')
+    }
   }
   return lines.join('\n')
 }

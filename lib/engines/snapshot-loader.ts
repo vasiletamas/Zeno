@@ -212,6 +212,18 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     latestOutcomeSeen.add(row.tool)
     if (row.outcome === 'requires_confirmation') pendingConfirmationTools.push(row.tool)
   }
+  // Task 1.3 (D8) loop-breaker: the SAME (tool, argsHash) failing >= 3 times
+  // in this conversation blocks the tool with repeated_failure — the model
+  // must explain-and-escalate, never hammer. requires_confirmation is NOT a
+  // failure (the customer's card tap resolves it, confirmation_stalled
+  // diagnoses that class).
+  const repeatedFailureRows = await db.commitLedger.groupBy({
+    by: ['tool', 'argsHash'],
+    where: { conversationId, outcome: { in: ['rejected', 'unavailable'] } },
+    _count: { _all: true },
+    having: { argsHash: { _count: { gte: 3 } } },
+  })
+  const repeatedFailureTools = [...new Set(repeatedFailureRows.map((r) => r.tool))]
   return {
     conversationId, customerId: conversation.customerId,
     product: prod ? { id: prod.id, code: prod.code, insuranceType: prod.insuranceType, eligibilityRules, suitabilityRules } : null,
@@ -252,6 +264,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     openItems: [], // M2 (Block B) wires openItems
     circuit: { openTools: getOpenCircuitTools() }, // M10 degraded-mode input (A2.7)
     degraded: [], // backend circuits land with their blocks (payment provider in D3)
+    repeatedFailureTools,
     answers: appAnswers, // C2.6: ACTIVE application answers (code → value) feed the eligibility answer-facts
   }
 }
