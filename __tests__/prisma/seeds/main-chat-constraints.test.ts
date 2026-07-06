@@ -87,4 +87,9 @@ describe('main-chat agent constraints', () => {
     // customer-facing prose stays clean: apologize + plain words, no internals
     expect(mainChat?.systemPrompt).toMatch(/something went wrong on our side/i)
   })
+  it('forbids re-collecting known customer fields (the batch re-send loop, 2026-07-06 battery)', () => {
+    const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
+    expect(mainChat?.systemPrompt).toMatch(/CUSTOMER FIELD DISCIPLINE/)
+    expect(mainChat?.systemPrompt).toMatch(/NEVER re-collect a field/i)
+  })
 })
