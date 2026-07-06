@@ -96,9 +96,14 @@ function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedC
   // must MATCH the CNP above (1960229410015 → born 1996-02-29).
   if (/data na[șs]terii|zi de na[șs]tere|aaaa-ll-zz/.test(m)) return '1996-02-29'
   if (/num[ăa]r(ul)? de telefon|telefonul t[ăa]u/.test(m)) return '0712345678'
-  // BD medical screening — a blind "da" here claims a cancer/transplant
-  // history and kills the addon; this persona is healthy.
-  if (/cancer|cardiovascular|neurolog|transplant|cronic|spitaliz/.test(m)) return 'nu'
+  // The acceptance ask — MUST outrank the greedy keyword rules below: a
+  // quote presentation enumerates coverages ("spitalizare", "venit",
+  // "familia"), and a stray keyword answer at the close kills the sale.
+  if (/ofert[ăa]/.test(m) && /accep[țt]|finaliz|continu[ăa]m|e[șs]ti de acord/.test(m)) return 'da, vreau sa accept oferta'
+  // BD medical screening — only on an actual HISTORY question (a blind "nu"
+  // on any message mentioning "spitalizare" bounced quote presentations);
+  // a "da" would claim a cancer/transplant history and kill the addon.
+  if (/(ai avut|ai fost|suferi de|confirmi c[ăa]|istoric)/.test(m) && /cancer|cardiovascular|neurolog|transplant|cronic|spitaliz/.test(m)) return 'nu'
   // Post-quote addon upsell — a blind "da" triggers the (engine-legal)
   // cancel-and-rebuild detour; this persona keeps the quoted variant.
   if (/tratament(ul)? în str[ăa]in[ăa]tate/.test(m) && /includ|adaug|schimb/.test(m)) return 'nu, raman pe varianta actuala'
@@ -342,8 +347,11 @@ async function dntTypedFlowDbChecks(customerId: string, conversationId: string):
     const code = a.question.code
     if (!code) continue
     const expected = DNT_CARD_ANSWERS[code]
-    if (expected !== undefined && a.value !== expected) {
-      failures.push(`fact divergence at ${code}: typed path stored "${a.value}", card path stores "${expected}"`)
+    // Task 5.4: the CNP is an AES envelope at rest on BOTH paths — compare
+    // the decrypted fact, not the ciphertext (random IV per write).
+    const stored = code === 'DNT_CNP' ? (await import('@/lib/security/encryption')).decryptEnvelopeTolerant(a.value) : a.value
+    if (expected !== undefined && stored !== expected) {
+      failures.push(`fact divergence at ${code}: typed path stored "${stored}", card path stores "${expected}"`)
     }
   }
   return failures
