@@ -1492,6 +1492,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       phases: JSON.parse(JSON.stringify(state.phases)),
       inputTokens: state.totalInputTokens || null,
       outputTokens: state.totalOutputTokens || null,
+      // A1: null (not 0) when no LLM call ran, so pre-A1 and no-call rows
+      // read the same to the aggregators.
+      cacheReadTokens: state.llmCalls > 0 ? state.totalCacheReadTokens : null,
+      cacheWriteTokens: state.llmCalls > 0 ? state.totalCacheWriteTokens : null,
       cost: getTurnCost(state.traceId),
       latencyMs,
       provider: state.provider,

@@ -1115,6 +1115,10 @@ model TurnTrace {
   anomalies      Json?
   inputTokens    Int?
   outputTokens   Int?
+  // A1 cache telemetry: prompt tokens served from / written to the provider
+  // prompt cache, summed across the turn's LLM rounds. Null on pre-A1 rows.
+  cacheReadTokens  Int?
+  cacheWriteTokens Int?
   cost           Float?
   latencyMs      Int?
   provider       String?
@@ -1231,6 +1235,11 @@ model ConversationScore {
   anomalyCount         Int
   mode                 String
   skillPackSlugs       String[]
+  // A1 cache aggregates from TurnTrace rows; null when the conversation
+  // predates the telemetry (no trace carries token counts).
+  totalPromptTokens    Int?
+  totalCachedTokens    Int?
+  avgCacheHitRate      Float?
   scoredAt             DateTime @default(now())
   createdAt            DateTime @default(now())
 
