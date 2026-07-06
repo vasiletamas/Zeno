@@ -69,6 +69,63 @@ Conversations for browsing (admin → conversations): happy `cmr92ez24…`, refu
 - **Happy-path (conv `cmr96b8su…`): DNT 11/11 with one immediately-recovered rejection → sign_dnt confirmed via card in 1s → application → coverage → BD-medical answer confirmed via card → QUOTE ISSUED (12:07:54) → identity fields + channel verification all applied.** Remaining gap: the accept_quote → disclosures → payment → policy segment was never attempted (sim answer policy has no patterns for disclosure acks / accept ask; possible real defects behind it remain unmeasured). That segment is the next simulation target.
 - P0 fixes landed this session beyond the original seven: pending-confirmation in derived state + briefing (P0-5), confirm-card coverage incl. BD medical (P0-6), CNP checksum rejection at the DNT (P0-4, with the personas fixture re-modeled), `confirmation_stalled` + `dnt_answer_fabricated` diagnostics checks (ratchet).
 
+## FINAL SCOREBOARD — post-quote validation complete (2026-07-06 evening)
+
+- **happy-path: PASS end-to-end for the first time** (conv `cmr9eli9n…`):
+  DNT 11/11 → sign card → application → addon cascade → 6 BD answers (no
+  per-answer cards) → **ONE batch medical signature** → quote 390 RON/an
+  (addon priced in) → disclosures acked → identity collected via DECOMPOSED
+  needs (`declared:dateOfBirth`, `declared:phone`) → channel verified →
+  **accept_quote confirmed via card (advance_phase)** →
+  ensure_payment_session → settlement → **installment PAID + Policy
+  PENDING_SUBMISSION + MedicalDeclarationSignature row**. All
+  fullFunnelDbChecks green. The run survived a 2.5h LLM-provider outage
+  (circuit opened and recovered) — the only checker error is that turn's
+  duration.
+- **dnt-refusal: PASS. quote-decline: PASS.** (1/1 each, post-change rerun.)
+- **Test suite: 1234/1234 green** (998 unit + 236 integration; was 1177 at
+  session start). Happy-path fixture re-recorded through POLICY.
+- Sim iteration count: 7 live runs, each stall root-caused from
+  CommitLedger/TurnDebug evidence — full trail in
+  `2026-07-06-cmr99s5cb0001ms0e9er0j0ii.md`.
+
+## Addendum 2 — post-quote validation session (2026-07-06 evening)
+
+**Ratified spec deviation (product owner): T6.D3 batch medical signature.**
+Per-answer `CONFIRM_ALWAYS` cards made the medical questionnaire seven
+confirmations long (user-reported UX defect). `CONFIRM_ALWAYS` now means
+(a) member of the batch medical declaration signed ONCE via the new
+`sign_medical_declarations` commit (sign_dnt precedent — one card summarizing
+all declarations) and (b) confirm-on-modify with cascade preview.
+Implementation (all test-first; engineVersion 1.34.0): consequence-planner
+rule change, `MedicalDeclarationSignature` model (hash-bound to active
+revisions — a later modify unsigns by recomputation, nothing cleared),
+`medical_declarations_unsigned` gate on generate_quote, conditional-confirm
+handler + registry + GUI card + action adapter, agent-prompt completion rule.
+New suites: `__tests__/lib/engines/medical-declarations.test.ts`,
+`__tests__/integration/sign-medical-declarations.test.ts`.
+
+**New findings from post-quote sim runs** (evidence in
+`docs/debug-reports/2026-07-06-cmr99s5cb0001ms0e9er0j0ii.md`):
+- **D-NEW-1 (P1):** `set_application` idempotent replay makes the advertised
+  cancel_quote → re-apply recovery a dead end in the same conversation.
+- **D-NEW-2 (P2):** `collect_customer_field` accepted `"da"` as the customer
+  name (minLength-only validation).
+- **D-NEW-3 (P0-1 evidence):** agent fabricated a plausible cuid as a tool
+  argument (`set_candidate_product`), unrecovered → cascaded into quote
+  cancellation. Fabrication reaches TOOL ARGS, not just prose.
+- **D-NEW-4 (fixed, ratchet):** 4 read tools registered without
+  `sideEffects: false` ran in the writing partition and spammed
+  `missing_consequences`; registry invariant test added.
+- **D-NEW-5 (fixed, ratchet):** `blocked_action_attempted` judged same-turn
+  commits against the stale turn_start snapshot; rolling baseline added.
+- **D-NEW-6 (FIXED same session):** `escalate_to_human` applied 45× fresh in
+  one conversation. The handler now absorbs repeats while an OPEN/IN_PROGRESS
+  ESCALATION work item exists for the conversation (`already_escalated`
+  reason code; resolved items permit legitimate re-escalation; the exposure
+  floor is deliberately untouched — always-reachable human is a safety
+  invariant). Tests: `__tests__/integration/escalate-to-human.test.ts`.
+
 ## Addendum — post-fix validation observations (run `cmr940u78…`)
 
 - **Anti-fabrication rule verified live:** faced with 28 consecutive unusable replies ("da" to the family-size question), the agent refused to invent a value every single time and re-asked with exact options — previously it fabricated "2" after five attempts. (This correctly exposed a sim-script gap: the scripted customer had no family-size answer pattern; both answer policies now fixed.)
