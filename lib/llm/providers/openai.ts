@@ -311,11 +311,12 @@ export class OpenAIProvider implements LLMProviderInterface {
       if (chunk.usage) {
         usage = this.extractUsage(chunk.usage)
       }
-
-      if (chunk.choices[0]?.finish_reason) {
-        yield { type: 'done', usage }
-      }
     }
+
+    // P1-9: the usage rides a FINAL chunk AFTER finish_reason (choices
+    // empty) — yielding done at finish_reason recorded 0 tokens on every
+    // streamed turn; done now waits for the stream to end.
+    yield { type: 'done', usage }
   }
 
   // ==============================================
@@ -380,21 +381,21 @@ export class OpenAIProvider implements LLMProviderInterface {
       if (chunk.usage) {
         usage = this.extractUsage(chunk.usage)
       }
-
-      // Stream finished — emit accumulated tool calls then done
-      if (chunk.choices[0]?.finish_reason) {
-        if (toolCallAccum.size > 0) {
-          const toolCalls: ToolCall[] = Array.from(toolCallAccum.values()).map(tc => ({
-            id: tc.id,
-            name: tc.name,
-            arguments: safeParse(tc.args),
-          }))
-          yield { type: 'tool_calls', toolCalls }
-        }
-
-        yield { type: 'done', usage }
-      }
     }
+
+    // P1-9: same trailing-usage-chunk rule as emitStreamChunks — tool calls
+    // and done are emitted at stream END so the usage chunk (which arrives
+    // AFTER finish_reason) is never lost.
+    if (toolCallAccum.size > 0) {
+      const toolCalls: ToolCall[] = Array.from(toolCallAccum.values()).map(tc => ({
+        id: tc.id,
+        name: tc.name,
+        arguments: safeParse(tc.args),
+      }))
+      yield { type: 'tool_calls', toolCalls }
+    }
+
+    yield { type: 'done', usage }
   }
 }
 

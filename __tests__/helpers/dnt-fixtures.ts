@@ -18,7 +18,9 @@ function answerFor(q: { type: string; options: unknown; code?: string | null }):
 }
 
 function makeCtx(customerId: string, conversationId: string): ToolContext {
-  return { customerId, conversationId, language: 'ro', db: prisma } as unknown as ToolContext
+  // actor 'gui': fixture answers are the CUSTOMER's scripted input — the
+  // P0-1 write-guard only polices agent-actor writes.
+  return { customerId, conversationId, language: 'ro', db: prisma, actor: 'gui' } as unknown as ToolContext
 }
 
 /**

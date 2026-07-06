@@ -6,7 +6,7 @@ import type { ToolContext } from '@/lib/tools/types'
 beforeEach(async () => { await resetDb() })
 
 const ctx = (customerId: string, conversationId: string) =>
-  ({ customerId, conversationId, language: 'ro', db: prisma } as unknown as ToolContext)
+  ({ customerId, conversationId, language: 'ro', db: prisma, actor: 'gui' } as unknown as ToolContext)
 const open = (customerId: string, conversationId: string) =>
   executeCommit({ tool: 'open_dnt_session', args: {}, actor: 'agent', customerId, conversationId, toolContext: ctx(customerId, conversationId) })
 

@@ -32,6 +32,24 @@ describe('envelope/legality diagnostic checks (v2)', () => {
     })
     expect(runDiagnostics(e).some((x) => x.checkId === 'blocked_action_attempted')).toBe(false)
   })
+  it('blocked_action_attempted: NOT flagged when an earlier same-turn commit unblocked the tool (run cmr99s5cb turn 52)', () => {
+    // write_question_answer completes the questionnaire mid-turn; its
+    // post_commit snapshot no longer blocks generate_quote, so the later
+    // generate_quote commit was legal at call time — turn_start is only the
+    // baseline for the FIRST commit of the turn.
+    const e = makeExport({
+      turns: [turn(0, { legality: [
+        ...legality({ phase: 'APPLICATION', application: { id: 'a1' } }, { available: [], blocked: [{ action: 'generate_quote', reason: 'questionnaire_incomplete' }] }),
+        { ...postCommit('l1', { phase: 'APPLICATION', application: { id: 'a1' } }), actions: { available: [{ action: 'generate_quote' }], blocked: [] } },
+        { ...postCommit('l2', { phase: 'QUOTE', quote: { id: 'q1' } }), actions: { available: [], blocked: [{ action: 'generate_quote', reason: 'already_issued' }] } },
+      ] })] as never,
+      ledger: [
+        { id: 'l1', tool: 'write_question_answer', actor: 'agent', outcome: 'applied', effects: ['advance_phase'], reasonCode: null, phaseFrom: 'APPLICATION', phaseTo: 'APPLICATION', idempotencyDisposition: 'fresh', targetRef: 'a1', createdAt: 'x' },
+        { id: 'l2', tool: 'generate_quote', actor: 'agent', outcome: 'applied', effects: ['advance_phase'], reasonCode: null, phaseFrom: 'APPLICATION', phaseTo: 'QUOTE', idempotencyDisposition: 'fresh', targetRef: 'q1', createdAt: 'x' },
+      ] as never,
+    })
+    expect(runDiagnostics(e).filter((x) => x.checkId === 'blocked_action_attempted')).toEqual([])
+  })
   it('missing_consequences: a successful writing tool call with no ledger row in its conversation', () => {
     const e = makeExport({ turns: [turn(0, { toolCalls: [{ round: 0, toolCallId: 'x', name: 'sign_dnt', args: {}, partition: 'writing', result: { success: true, durationMs: 1, cached: false } }] })] as never, ledger: [] })
     expect(runDiagnostics(e).find((x) => x.checkId === 'missing_consequences')).toMatchObject({ severity: 'error', evidence: { tool: 'sign_dnt' } })

@@ -8,6 +8,10 @@ vi.mock('@/lib/db', () => ({
     agentKnowledge: { findMany: vi.fn() },
     question: { findMany: vi.fn() },
     answer: { findMany: vi.fn() },
+    // P0-7: loadQuestionnaireContext resolves the active-application pointer;
+    // null pointer -> no questionnaire surface (what these tests expect)
+    conversation: { findUnique: vi.fn().mockResolvedValue(null) },
+    application: { findUnique: vi.fn().mockResolvedValue(null) },
   },
 }))
 

@@ -33,6 +33,38 @@ describe('escalate_to_human (gateway commit)', () => {
     expect(conv.status).toBe('ACTIVE') // no funnel semantics on conversation status (#11)
   })
 
+  it('a repeat escalation with a DIFFERENT reason is absorbed while one is OPEN (run cmr9ayiad: 45 fresh escalations, 2026-07-06)', async () => {
+    const { customer, conversation, ctx } = await seedConversation()
+    const first = await executeCommit({
+      tool: 'escalate_to_human', actor: 'agent', conversationId: conversation.id, customerId: customer.id,
+      args: { reason: 'customer wants the addon variant', priority: 'medium' }, toolContext: ctx,
+    })
+    expect(first.outcome).toBe('applied')
+    // different args -> ledger idempotency cannot catch it; the handler must
+    const second = await executeCommit({
+      tool: 'escalate_to_human', actor: 'agent', conversationId: conversation.id, customerId: customer.id,
+      args: { reason: 'still stuck, escalating again', priority: 'high' }, toolContext: ctx,
+    })
+    expect(second.outcome).toBe('rejected')
+    expect(second.reason).toBe('already_escalated')
+    expect(await prisma.workItem.count({ where: { kind: 'ESCALATION' } })).toBe(1)
+  })
+
+  it('a RESOLVED escalation does not absorb a new one (re-escalation after resolution is legitimate)', async () => {
+    const { customer, conversation, ctx } = await seedConversation()
+    await executeCommit({
+      tool: 'escalate_to_human', actor: 'agent', conversationId: conversation.id, customerId: customer.id,
+      args: { reason: 'first issue', priority: 'medium' }, toolContext: ctx,
+    })
+    await prisma.workItem.updateMany({ where: { kind: 'ESCALATION' }, data: { status: 'RESOLVED' } })
+    const second = await executeCommit({
+      tool: 'escalate_to_human', actor: 'agent', conversationId: conversation.id, customerId: customer.id,
+      args: { reason: 'a brand new issue', priority: 'medium' }, toolContext: ctx,
+    })
+    expect(second.outcome).toBe('applied')
+    expect(await prisma.workItem.count({ where: { kind: 'ESCALATION' } })).toBe(2)
+  })
+
   it('replays idempotently — same args return original outcome, no second WorkItem (#8 order)', async () => {
     const { customer, conversation, ctx } = await seedConversation()
     const args = { reason: 'same reason', priority: 'medium' }

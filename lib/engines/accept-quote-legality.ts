@@ -10,8 +10,6 @@
  * acked at its exact version+language).
  */
 import { isExpired } from '@/lib/engines/quote-lifecycle'
-import { evaluateRow } from '@/lib/engines/identity-requirements'
-import type { IdentityTier, Provenance } from '@/lib/engines/domain-types'
 
 export type AcceptQuoteLegalityResult =
   | { ok: true }
@@ -22,7 +20,11 @@ export type AcceptQuoteLegalityResult =
 export function acceptQuoteLegality(
   s: {
     quote: { status: string; validUntil: Date; disclosuresRequired: { kind: string }[] }
-    identity: { tier: string; fields?: Record<string, { provenance: Provenance } | undefined>; verifiedChannels?: string[] }
+    /** missingFields/hasVerifiedChannel (optional): the decomposition facts —
+     * without them an unmet tier reports the bare 'verified_channel' label
+     * (run cmr9dw3s5 2026-07-06: that label was already satisfied channel-wise
+     * and the agent had nothing actionable; callers should thread them). */
+    identity: { tier: string; missingFields?: string[]; hasVerifiedChannel?: boolean }
   },
   now: Date,
 ): AcceptQuoteLegalityResult {
@@ -31,20 +33,12 @@ export function acceptQuoteLegality(
   }
   if (s.quote.status !== 'ISSUED') return { ok: false, outcome: 'rejected', reason: 'illegal_status_transition' }
   if (s.identity.tier !== 'verified_channel') {
-    // PRECISE needs (2026-07-06): a rich identity slice names the actual
-    // missing pieces via the shared evaluateRow semantics — a bare
-    // 'verified_channel' told the agent to re-verify a channel the customer
-    // had JUST verified when the real gap was an undeclared KYC field.
-    // Tier-only callers keep the coarse word.
-    const needs = s.identity.fields
-      ? evaluateRow(
-          { minTier: 'verified_channel' },
-          s.identity.tier as IdentityTier,
-          (f) => s.identity.fields![f] !== undefined && s.identity.fields![f]!.provenance !== 'conflict',
-          [], [],
-          (s.identity.verifiedChannels ?? []).length > 0,
-        )
-      : ['verified_channel']
+    const needs: string[] = []
+    for (const f of s.identity.missingFields ?? []) needs.push(`declared:${f}`)
+    if (s.identity.hasVerifiedChannel === false) needs.push('verified_channel')
+    // decomposition threaded but nothing visible → the one remaining reason
+    // is an invalid CNP; without the decomposition keep the coarse label.
+    if (needs.length === 0) needs.push(s.identity.missingFields !== undefined && s.identity.hasVerifiedChannel === true ? 'valid:cnp' : 'verified_channel')
     return { ok: false, outcome: 'requires_identity', needs }
   }
   if (s.quote.disclosuresRequired.length > 0) return { ok: false, outcome: 'requires_disclosures', needs: s.quote.disclosuresRequired.map((d) => d.kind) }

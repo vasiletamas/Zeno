@@ -395,7 +395,19 @@ export class AnthropicProvider implements LLMProviderInterface {
   private async *emitStreamChunks(
     stream: AsyncIterable<Anthropic.RawMessageStreamEvent>,
   ): AsyncIterable<StreamChunk> {
+    // P1-9: message_start carries input_tokens, message_delta the cumulative
+    // output_tokens — previously neither was read and every streamed turn
+    // recorded 0 tokens.
+    let inputTokens = 0
+    let outputTokens = 0
     for await (const event of stream) {
+      if (event.type === 'message_start') {
+        inputTokens = event.message.usage.input_tokens ?? 0
+        outputTokens = event.message.usage.output_tokens ?? 0
+      }
+      if (event.type === 'message_delta' && event.usage) {
+        outputTokens = event.usage.output_tokens ?? outputTokens
+      }
       if (event.type === 'content_block_delta') {
         const delta = event.delta
         if ('text' in delta && delta.type === 'text_delta') {
@@ -404,7 +416,7 @@ export class AnthropicProvider implements LLMProviderInterface {
       }
 
       if (event.type === 'message_stop') {
-        yield { type: 'done' }
+        yield { type: 'done', usage: { promptTokens: inputTokens, completionTokens: outputTokens, totalTokens: inputTokens + outputTokens } }
       }
     }
   }
@@ -448,8 +460,18 @@ export class AnthropicProvider implements LLMProviderInterface {
   ): AsyncIterable<StreamChunk> {
     // Accumulate tool use blocks during streaming
     const toolUseAccum: Map<number, { id: string; name: string; jsonChunks: string }> = new Map()
+    // P1-9: usage from message_start (input) + message_delta (output)
+    let inputTokens = 0
+    let outputTokens = 0
 
     for await (const event of stream) {
+      if (event.type === 'message_start') {
+        inputTokens = event.message.usage.input_tokens ?? 0
+        outputTokens = event.message.usage.output_tokens ?? 0
+      }
+      if (event.type === 'message_delta' && event.usage) {
+        outputTokens = event.usage.output_tokens ?? outputTokens
+      }
       // Text content deltas
       if (event.type === 'content_block_delta') {
         const delta = event.delta
@@ -489,7 +511,7 @@ export class AnthropicProvider implements LLMProviderInterface {
           yield { type: 'tool_calls', toolCalls }
         }
 
-        yield { type: 'done' }
+        yield { type: 'done', usage: { promptTokens: inputTokens, completionTokens: outputTokens, totalTokens: inputTokens + outputTokens } }
       }
     }
   }

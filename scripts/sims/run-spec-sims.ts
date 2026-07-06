@@ -25,6 +25,7 @@ import {
   assertToolOrder, assertToolNeverCalled, toolCallsByTurn,
 } from '@/lib/testing/conversation-assertions'
 import { SPEC_SIM_SCENARIOS, type SpecSimScenario } from './spec-scenarios'
+import { pickAnswer } from './answer-policy'
 
 const ROOT = process.cwd()
 const SIMS_DIR = path.join(ROOT, 'artifacts/sims')
@@ -57,105 +58,6 @@ const ASSERTS: Record<string, (e: ConversationExport) => void> = {
       }
     }
   },
-}
-
-// ---- question-aware answer picking (verify-advance-flow lineage) -----------
-// Enum questions get the EXACT option token where known (the agent passes
-// them through); the refusal policy refuses ONLY the actual signing ask -
-// DNT questions that merely mention consent (marketing, electronic
-// communication) get valid enum answers, otherwise the transcript fills
-// with invalid-option loops the diagnostics rightly flag as stuck.
-function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedCode: string | null = null, verification: 'link' | 'typed' = 'link', email = 'ion.sim@example.com'): string {
-  // markdown emphasis breaks adjacency ("adresa de **email**") — strip it
-  const m = msg.toLowerCase().replace(/\*/g, '')
-  // Task 4.2 (D7): typed-code verification — a live challenge exists and the
-  // agent is talking about the code, so the persona reads it back. Checked
-  // FIRST: "ți-am trimis codul pe email" would otherwise match the email rule.
-  if (typedCode && /\bcod(ul|uri)?\b|cifre|verificare|verificat/.test(m)) return typedCode
-  if (policy === 'refuse-consent' && /(semnez|semnarea|semn[ăa]m|\bsign\b|gdpr|prelucrarea datelor)/.test(m)) {
-    return 'nu, nu sunt de acord cu prelucrarea datelor si nu semnez'
-  }
-  // A refusing persona STAYS refused: the agent's polite re-engagement
-  // ("Dacă te răzgândești, te pot ajuta să reiei" / "confirmi în cardul
-  // afișat") must never collect the fallback 'da' — that literally
-  // re-consents and legitimizes a second sign_dnt attempt.
-  if (policy === 'refuse-consent' && /r[ăa]zg[âa]nd|reiei|relu[ăa]|pe viitor|cardul afi[șs]at|confirmi [îi]n card/.test(m)) {
-    return 'nu, raman la decizia mea'
-  }
-  if (/yes_all/.test(m) || /consultan/.test(m)) return 'yes_all'
-  if (/marketing/.test(m)) return 'nu'
-  if (/electronic|coresponden/.test(m)) return 'da'
-  if (/fum[ăa]tor/.test(m)) return 'nu'
-  if (/c[âa]ți ani|ce v[âa]rst[ăa]|v[âa]rsta ta/.test(m)) return '35'
-  if (/\bcnp\b/.test(m)) return '1960229410015' // checksum-valid (the old 4-final variant failed collect_customer_field)
-  if (/cu cine loc|gospod[ăa]r/.test(m)) return 'singur'
-  if (/sursa|provin/.test(m)) return 'din salariu'
-  if (/2000_5000|interval/.test(m)) return 'intre 2000 si 5000'
-  if (/venit|salar/.test(m)) return '5000'
-  if (/ocupa|profesi|lucrezi/.test(m)) return 'sunt angajat cu carte de munca (employee)'
-  if (/copii|dependen/.test(m)) return '0'
-  // Seed question text is now "Câți membri are familia ta, inclusiv tu?" —
-  // must come AFTER the minors check (that text also contains "membrii").
-  if (/membri|famili/.test(m)) return '2'
-  if (/tip de protec|protec[țt]ie simpl/.test(m)) return 'simple_protection'
-  if (/educa|studii/.test(m)) return 'studii universitare (university)'
-  if (/numele( t[ăa]u)? complet|nume [șs]i prenume|cum te nume/.test(m)) return 'Ion Simulescu'
-  // KYC completion asks (the precise requires_identity needs) — the DOB
-  // must MATCH the CNP above (1960229410015 → born 1996-02-29).
-  if (/data na[șs]terii|zi de na[șs]tere|aaaa-ll-zz/.test(m)) return '1996-02-29'
-  // "numărul tău de telefon" / "în format românesc, de exemplu 07XXXXXXXX" —
-  // the old adjacency regex missed the possessive variant and the persona
-  // answered 'da' forever (2026-07-06 battery: phone never declared, close
-  // walled on requires_identity).
-  if (/telefon/.test(m) && /num[ăa]r|format|07/.test(m)) return '0712345678'
-  // Consent to SEND the verification code — must outrank BOTH the email
-  // rule ("Continuăm cu verificarea adresei de email?" is a yes/no ask, not
-  // an address ask) and the acceptance rule (the agent gates the close on
-  // "trimite codul pe email" and an acceptance-stuck persona loops there,
-  // re-collecting known fields — 2026-07-06 battery).
-  if (!typedCode && /trimite codul|trimit codul|verificarea? (identit[ăa][țt]ii )?(pe|prin) e?mail|verificarea (adresei de )?e?mail(ului)?/.test(m)) return 'da, trimite codul pe email'
-  // The email ASK must outrank the acceptance rule: KYC asks are phrased
-  // "Ca să poți accepta oferta... scrie adresa ta de email" — the acceptance
-  // match stonewalled the ask for 3 turns and the pressured model misfired
-  // set_candidate_product with random entity ids.
-  // ...but NOT on statements about the address ("adresa de email este
-  // verificată") — volunteering the address there makes the agent re-store
-  // it (a counted replay).
-  if (!/verificat/.test(m) && /adres[ăa]( ta)? de e?mail|ce e?mail|emailul t[ăa]u|care.*e?mail|scrie e?mailul/.test(m)) return email
-  // The acceptance ask — MUST outrank the greedy keyword rules below: a
-  // quote presentation enumerates coverages ("spitalizare", "venit",
-  // "familia"), and a stray keyword answer at the close kills the sale.
-  if (/ofert[ăa]/.test(m) && /accep[țt]|finaliz|continu[ăa]m|e[șs]ti de acord/.test(m)) return 'da, vreau sa accept oferta'
-  // BD medical screening — only on an actual HISTORY question (a blind "nu"
-  // on any message mentioning "spitalizare" bounced quote presentations);
-  // a "da" would claim a cancer/transplant history and kill the addon.
-  if (/(ai avut|ai fost|suferi de|confirmi c[ăa]|istoric)/.test(m) && /cancer|cardiovascular|neurolog|transplant|cronic|spitaliz/.test(m)) return 'nu'
-  // Post-quote addon upsell — a blind "da" triggers the (engine-legal)
-  // cancel-and-rebuild detour; this persona keeps the quoted variant.
-  if (/tratament(ul)? în str[ăa]in[ăa]tate/.test(m) && /includ|adaug|schimb/.test(m)) return 'nu, raman pe varianta actuala'
-  // Disclosure acknowledgement ask ("documentele precontractuale", IPID,
-  // termeni) — MUST come before the generic /document|buletin/ rule, or the
-  // persona answers "am incarcat buletinul" to the disclosure question
-  // forever and the close derails into a handoff loop.
-  if (/precontractual|documentele ofertei|\bipid\b|termeni [șs]i condi[țt]ii/.test(m)) return 'da, am citit documentele si sunt de acord'
-  // Handoff-confirmation prose ("un coleg uman te va contacta") — steer back
-  // to the close instead of re-triggering the email rule forever.
-  if (/coleg uman|te va contacta/.test(m)) return 'nu vreau sa astept un coleg, vreau sa accept oferta aici'
-  // Post-verification: the agent says the email is already verified — the
-  // next move is the close, never re-sending the address.
-  if (/deja verificat/.test(m)) return 'perfect, atunci vreau sa accept oferta'
-  // Channel choice / an sms-code ask (sms transport does not exist) — steer
-  // the verification to email.
-  if (/(prin|pe) sms/.test(m) && /\bcod/.test(m)) return `nu imi merge sms-ul, trimite codul pe email la ${email}`
-  if (/email sau sms|sms sau email/.test(m)) return 'pe email, va rog'
-  // Typed mode never claims a link click (a lie that derails the close —
-  // no link was clicked); a plain "da" pushes toward the acceptance ask.
-  // "codul"/"cele 6 cifre" must hit this rule too — a bare 'da' to a
-  // code ask confuses the model into re-asking KYC fields (2026-07-06).
-  if (/\bcod(ul|uri)?\b|cifre|verificare|verificat/.test(m)) return verification === 'typed' ? 'da' : 'am dat click pe linkul din email'
-  if (/document|buletin|carte de identitate/.test(m)) return 'am incarcat buletinul in aplicatie'
-  if (/frecven|plat[ăa] anual|trimestrial/.test(m)) return 'anual'
-  return 'da'
 }
 
 /** Task 2.2 (D1): a DNT question card captured from a show_question ui_action. */
@@ -288,10 +190,17 @@ async function worldHooks(customerId: string, conversationId: string, opts: { ty
       }
     }
   }
+  // The customer uploads the ID when the agent ASKS for it (the upload card
+  // = a request_document_upload commit — run cmr9cq7e5 asked pre-accept and
+  // deadlocked on the accepted-only condition), or once the quote is
+  // accepted (the pre-payment document requirement).
+  const uploadRequested = await prisma.commitLedger.count({
+    where: { conversationId, tool: 'request_document_upload', outcome: 'applied' },
+  })
   const accepted = await prisma.quote.count({
     where: { status: 'ACCEPTED', application: { originConversationId: conversationId } },
   })
-  if (accepted > 0) {
+  if (uploadRequested > 0 || accepted > 0) {
     const doc = await prisma.customerDocument.findFirst({ where: { customerId, kind: 'id_card' } })
     if (!doc) {
       await prisma.customerDocument.create({
@@ -319,6 +228,11 @@ async function fullFunnelDbChecks(customerId: string, conversationId: string): P
   if (policy?.status !== 'PENDING_SUBMISSION') failures.push(`policy ${policy?.status ?? 'missing'} != PENDING_SUBMISSION`)
   const acceptRow = await prisma.commitLedger.findFirst({ where: { conversationId, tool: 'accept_quote', outcome: 'applied' } })
   if (!acceptRow?.effects.includes('advance_phase')) failures.push('accept_quote ledger row missing advance_phase effect')
+  // T6.D3 deviation: the addon path collects BD answers — they must be
+  // batch-signed exactly once before the quote existed at all.
+  if (app && (await prisma.medicalDeclarationSignature.count({ where: { applicationId: app.id } })) === 0) {
+    failures.push('no MedicalDeclarationSignature row (batch sign never happened)')
+  }
   return failures
 }
 

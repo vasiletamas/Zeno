@@ -11,7 +11,7 @@ import type { UIAction } from '@/lib/chat/action-adapter'
  * token — buttons never self-confirm.
  */
 
-export const CONFIRMABLE_TOOLS = ['sign_dnt', 'accept_quote', 'write_question_answer', 'modify_answer'] as const
+export const CONFIRMABLE_TOOLS = ['sign_dnt', 'accept_quote', 'write_question_answer', 'modify_answer', 'sign_medical_declarations'] as const
 
 const COPY: Record<(typeof CONFIRMABLE_TOOLS)[number], { title: { ro: string; en: string }; body: { ro: string; en: string }; cta: { ro: string; en: string } }> = {
   sign_dnt: {
@@ -36,6 +36,13 @@ const COPY: Record<(typeof CONFIRMABLE_TOOLS)[number], { title: { ro: string; en
     title: { ro: 'Confirmă modificarea răspunsului', en: 'Confirm the answer change' },
     body: { ro: 'Modifici un răspuns sensibil din declarația ta medicală. Confirmi noua valoare? Răspunsurile dependente pot fi reevaluate.', en: 'You are changing a sensitive answer in your medical declaration. Confirm the new value? Dependent answers may be re-evaluated.' },
     cta: { ro: 'Confirm modificarea', en: 'Confirm change' },
+  },
+  // T6.D3 deviation (2026-07-06): ONE batch signature over the whole medical
+  // declaration replaces the per-answer cards above for FIRST writes.
+  sign_medical_declarations: {
+    title: { ro: 'Semnează declarația medicală', en: 'Sign the medical declaration' },
+    body: { ro: 'Confirmi printr-o singură semnătură că toate răspunsurile medicale rezumate mai sus îți aparțin și sunt corecte? Modificarea ulterioară a unui răspuns anulează semnătura și cere una nouă.', en: 'Confirm with one signature that all the medical answers summarized above are yours and correct? Changing an answer later voids the signature and requires a new one.' },
+    cta: { ro: 'Semnez declarația', en: 'Sign the declaration' },
   },
 }
 

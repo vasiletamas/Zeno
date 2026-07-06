@@ -36,3 +36,24 @@ it('the handler persists candidateAddonIds on the conversation', async () => {
   expect(updated.candidateProductId).toBe(product.id)
   expect(updated.candidateAddonIds).toEqual(['bd_treatment_abroad'])
 })
+
+it('a product CODE in the productId slot resolves too — the agent passes both live (runs cmr99s5cb, cmr9cq7e5)', async () => {
+  const product = await ensureTestProduct()
+  const customer = await prisma.customer.create({ data: { language: 'ro' } })
+  const conv = await prisma.conversation.create({ data: { customerId: customer.id } })
+  const ctx = { customerId: customer.id, conversationId: conv.id, language: 'ro', db: prisma } as unknown as ToolContext
+  const r = await setCandidateProduct({ productId: product.code }, ctx)
+  expect(r.success).toBe(true)
+  const updated = await prisma.conversation.findUniqueOrThrow({ where: { id: conv.id } })
+  expect(updated.candidateProductId).toBe(product.id)
+})
+
+it('a foreign cuid (e.g. the APPLICATION id) still fails with the available-codes hint', async () => {
+  await ensureTestProduct()
+  const customer = await prisma.customer.create({ data: { language: 'ro' } })
+  const conv = await prisma.conversation.create({ data: { customerId: customer.id } })
+  const ctx = { customerId: customer.id, conversationId: conv.id, language: 'ro', db: prisma } as unknown as ToolContext
+  const r = await setCandidateProduct({ productId: 'cmr9crinx002jt40ep3fxwq26' }, ctx)
+  expect(r.success).toBe(false)
+  expect(r.error).toContain('Available codes')
+})

@@ -26,18 +26,18 @@ Harness/test-infra fixes: sim runner now replays `confirm_required` cards as cus
 
 ### P0 — funnel-blocking / regulatory
 
-1. **Fabricated regulatory answers (CRITICAL, partially mitigated).** The model persisted DNT answers the customer never gave (family size "2" after five bare "da"; life-subtype "Protecție simplă" — the suitability-driving fact) in two conversations. Fix #7 adds the prompt rule, but a **deterministic guard** is still needed: reject/flag questionnaire writes whose value has no anchor in the customer's recent messages, plus a diagnostics check (ratchet rule) so fabrications can never pass silently. Evidence: refusal conv turns 34/40, happy conv turns 84/92.
-2. **GDPR consent timing (CRITICAL).** Personal data (CNP, income, occupation, family, education) is collected and persisted while recorded consent state is `GDPR consent: missing`; `sign_dnt` is *the sole consent-capturing commit* and sits at the END of collection. All four customers: full data sets, **zero ConsentEvent rows**. Either capture `gdpr_processing` consent at `open_dnt_session` (before CNP), or document the Art. 6(1)(b) pre-contractual basis and add retention cleanup for unsigned sessions.
-3. **CNP stored in plaintext (HIGH).** `DntAnswer.value` holds the raw 13-digit CNP; the AES-GCM envelope stores (`Customer.cnpEncrypted`, `CustomerProfileField`) are empty — violating the schema's own rule (`schema.prisma:650`). Erasure executor does not cover these rows. `lib/tools/handlers/dnt-handlers.ts:328-341`.
+1. **Fabricated regulatory answers (CRITICAL) — FIXED 2026-07-06 (late session).** Deterministic write-guard live at all four value-writing commits (`write_dnt_answer`, `write_question_answer`, `modify_answer`, `collect_customer_field`): agent-actor writes whose value has no anchor are rejected `value_not_grounded`. Grounding paths (pure module `lib/engines/anti-fabrication.ts`): customer words (digits, RO number words, dates incl. CNP-embedded yymmdd), enum option-label overlap ("din salariu" → salary_pension), confirmed proposal (CONTEXT-HIT flow), already-recorded value (idempotent re-writes). GUI/operator actors bypass — a card click is first-party input. Diagnostics net: `questionnaire_answer_fabricated` (same module — write-guard and audit cannot drift) + `state_claim_without_commit` ("am corectat…" prose in a turn that committed nothing — the recorded lie of run `cmr940u78`). Validated: happy-path sim PASSES end-to-end with the guard live (conv `cmr9n7ieo…`, zero guard hits — grounded conversations pass untouched); zero false positives replaying all three recorded scenario exports; 15 pure + 8 integration + 9 diagnostics tests. Suite: 1268/1268.
+2. **GDPR consent timing (CRITICAL) — FIXED 2026-07-06 (late session, ratified option 2).** Pre-sign DNT collection documented under GDPR Art. 6(1)(b) (steps at the data subject's request prior to a contract — the customer asked for the recommendation; the needs analysis is that step); explicit `gdpr_processing` consent for continued processing stays captured at sign_dnt (the consent-labelled card CTA, B1.5). The basis lapses with an abandoned request: `cleanupUnsignedDntSessions` (`lib/gdpr/retention-cleanup.ts`, runner `scripts/run-retention-cleanup.ts` for ops cron) deletes unsigned drafts inactive beyond 30 days (`legalReviewPending` — compliance to confirm the window). Basis documented on the `dnt_unsigned_sessions` policy row. Tests: `retention-cleanup.test.ts`.
+3. **CNP stored in plaintext (HIGH) — FIXED 2026-07-06 (late session).** `write_dnt_answer` persists `maskCnp(value)` for DNT_CNP — the AES-GCM profile envelope is the only carrier of the real identifier (also stops the full CNP leaking into dnt facts / `get_current_state` / the prompt). Erasure scrubs legacy raw rows in surviving signed sessions to the ERASED marker. UPDATE-session prefill handles the mask (as-is), raw legacy values (re-mask), and the erasure marker (re-ask). Tests: `dnt-cnp-protection.test.ts` + the sign-dnt renewal suite.
 4. **Checksum-invalid CNP silently accepted (HIGH).** `1960229410014` fails the checksum; the answer saves, the profile mirror silently skips, age/residency eligibility facts can never derive, and the customer is never asked to re-check.
 5. **Pending-confirmation is invisible to the engine (HIGH).** After `requires_confirmation`, `nextBestAction` still says `call sign_dnt` every turn — the derived state has no "awaiting customer confirmation" concept, so the model is re-pushed into the trap. Persist the pending token; block the tool with `awaiting_customer_confirmation`; add a loop-breaker (N identical reissues → vary guidance/escalate).
 6. **BD-medical confirmations are a dead end even in the GUI (HIGH).** `confirm-required-card.tsx` whitelists `CONFIRMABLE_TOOLS=['sign_dnt','accept_quote']` — `write_question_answer`/`modify_answer` confirmations render **no card**, and their cross-turn token has no carrier; the first sensitive medical question would deadlock a real application. Same class as the sign_dnt bug, one funnel stage later.
-7. **`questionnaireContext` is permanently null (HIGH).** `loadAllSections` passes a hard-coded `workflowStepCode=null` ("dead input") and the orchestrator never patches it — the APPLICATION/QUESTIONNAIRE stage has NO current-question surface (same bug as the fixed DNT one, next stage over). Current question text/options/context-hit/medical-affirmation logging are all unreachable. Render it from derived state like `dntContext` (fix #1/#2 pattern).
+7. **`questionnaireContext` is permanently null (HIGH) — FIXED 2026-07-06 (late session).** The section now derives entirely from the conversation's active application through the same engine path the tools use (canonical group codes with the addon-gated bd_medical set, `getNextQuestion`'s visible unanswered question with its EXACT code, progress, CONTEXT-HIT incl. the medical-affirmation audit log); null for terminal/frozen applications. The dead workflow-step helpers are retired. Tests: `questionnaire-context.test.ts` (integration) + the rewritten context-hit unit suite.
 
 ### P1 — resilience / observability (production-blocking for ops)
 
-8. **Fallback model is retired (HIGH).** `main-chat` fails over to `claude-sonnet-4-20250514` (retired 2026-06-15). And `lib/llm/errors.ts` doesn't classify 404/model-not-found (falls to 'unknown' → no retry, no failover). When OpenAI goes down, failover 404s and the customer turn dies. Update the seed to a current model; classify 404; validate configured model IDs at startup. (Local `.env` also still has a placeholder `ANTHROPIC_API_KEY`.)
-9. **Token/cost accounting records zero, always (CRITICAL for ops).** `openai.ts` yields the `done` chunk on `finish_reason` — but with `stream_options.include_usage` OpenAI sends usage in a LATER chunk; usage is never emitted (Anthropic streaming path emits none at all). All 200 recorded turns: `totalInputTokens: 0`. Cost monitoring, cache-hit monitoring, and the >50k-token anomaly are all dead.
+8. **Fallback model is retired (HIGH) — FIXED 2026-07-06 (late session).** main-chat fails over to `claude-sonnet-5`; `classifyError` maps 404 (retired model / dead endpoint) to `provider_down` so failover actually triggers; a seed test pins that no agent runs on or fails over to a retired model. (Local `.env` still has a placeholder `ANTHROPIC_API_KEY` — failover stays dead locally until a real key lands; ops item, not code.)
+9. **Token/cost accounting records zero, always (CRITICAL for ops) — FIXED 2026-07-06 (late session).** Both OpenAI stream emitters finish the stream before emitting `done` (the usage rides a FINAL chunk after `finish_reason`); both Anthropic emitters now read `message_start`/`message_delta` usage. **Verified live: 48/48 turns of the final happy-path run record nonzero input tokens (6k–27k).** Tests: `streaming-usage.test.ts` (synthetic streams, both providers, text + tool paths).
 10. **"LLM retry detected" anomaly is 100% false positive.** It fires on the normal second LLM round of every tool-calling turn (97/97 with tool calls, 0/3 without); real retries inside `executeWithRetries` emit **no event**. Replace the call-count heuristic with dedicated `llm:call:retry` / `llm:failover` events.
 11. **`requires_confirmation` failures are invisible to diagnostics.** A 52-failure funnel-killing deadlock produced zero warn/error findings — the failures carry no error string and `confirm_token_reissued` is info-only. Escalate repeated reissues for the same argsHash to error.
 12. **Silent turn failures / dead air.** The human user's first two messages were persisted, never answered, and produced **no TurnDebug row** (13 minutes of dead air, zero diagnostics). Persist a TurnDebug row with the error on aborted turns; show a user-visible retry affordance.
@@ -68,6 +68,63 @@ Conversations for browsing (admin → conversations): happy `cmr92ez24…`, refu
 - **Change-answer scenario: PASS** — marketing consent verifiably flips yes→no in the DB on the customer's correction request, agent's claim matches recorded state, funnel continues to signing.
 - **Happy-path (conv `cmr96b8su…`): DNT 11/11 with one immediately-recovered rejection → sign_dnt confirmed via card in 1s → application → coverage → BD-medical answer confirmed via card → QUOTE ISSUED (12:07:54) → identity fields + channel verification all applied.** Remaining gap: the accept_quote → disclosures → payment → policy segment was never attempted (sim answer policy has no patterns for disclosure acks / accept ask; possible real defects behind it remain unmeasured). That segment is the next simulation target.
 - P0 fixes landed this session beyond the original seven: pending-confirmation in derived state + briefing (P0-5), confirm-card coverage incl. BD medical (P0-6), CNP checksum rejection at the DNT (P0-4, with the personas fixture re-modeled), `confirmation_stalled` + `dnt_answer_fabricated` diagnostics checks (ratchet).
+
+## FINAL SCOREBOARD — post-quote validation complete (2026-07-06 evening)
+
+- **happy-path: PASS end-to-end for the first time** (conv `cmr9eli9n…`):
+  DNT 11/11 → sign card → application → addon cascade → 6 BD answers (no
+  per-answer cards) → **ONE batch medical signature** → quote 390 RON/an
+  (addon priced in) → disclosures acked → identity collected via DECOMPOSED
+  needs (`declared:dateOfBirth`, `declared:phone`) → channel verified →
+  **accept_quote confirmed via card (advance_phase)** →
+  ensure_payment_session → settlement → **installment PAID + Policy
+  PENDING_SUBMISSION + MedicalDeclarationSignature row**. All
+  fullFunnelDbChecks green. The run survived a 2.5h LLM-provider outage
+  (circuit opened and recovered) — the only checker error is that turn's
+  duration.
+- **dnt-refusal: PASS. quote-decline: PASS.** (1/1 each, post-change rerun.)
+- **Test suite: 1234/1234 green** (998 unit + 236 integration; was 1177 at
+  session start). Happy-path fixture re-recorded through POLICY.
+- Sim iteration count: 7 live runs, each stall root-caused from
+  CommitLedger/TurnDebug evidence — full trail in
+  `2026-07-06-cmr99s5cb0001ms0e9er0j0ii.md`.
+
+## Addendum 2 — post-quote validation session (2026-07-06 evening)
+
+**Ratified spec deviation (product owner): T6.D3 batch medical signature.**
+Per-answer `CONFIRM_ALWAYS` cards made the medical questionnaire seven
+confirmations long (user-reported UX defect). `CONFIRM_ALWAYS` now means
+(a) member of the batch medical declaration signed ONCE via the new
+`sign_medical_declarations` commit (sign_dnt precedent — one card summarizing
+all declarations) and (b) confirm-on-modify with cascade preview.
+Implementation (all test-first; engineVersion 1.34.0): consequence-planner
+rule change, `MedicalDeclarationSignature` model (hash-bound to active
+revisions — a later modify unsigns by recomputation, nothing cleared),
+`medical_declarations_unsigned` gate on generate_quote, conditional-confirm
+handler + registry + GUI card + action adapter, agent-prompt completion rule.
+New suites: `__tests__/lib/engines/medical-declarations.test.ts`,
+`__tests__/integration/sign-medical-declarations.test.ts`.
+
+**New findings from post-quote sim runs** (evidence in
+`docs/debug-reports/2026-07-06-cmr99s5cb0001ms0e9er0j0ii.md`):
+- **D-NEW-1 (P1):** `set_application` idempotent replay makes the advertised
+  cancel_quote → re-apply recovery a dead end in the same conversation.
+- **D-NEW-2 (P2):** `collect_customer_field` accepted `"da"` as the customer
+  name (minLength-only validation).
+- **D-NEW-3 (P0-1 evidence):** agent fabricated a plausible cuid as a tool
+  argument (`set_candidate_product`), unrecovered → cascaded into quote
+  cancellation. Fabrication reaches TOOL ARGS, not just prose.
+- **D-NEW-4 (fixed, ratchet):** 4 read tools registered without
+  `sideEffects: false` ran in the writing partition and spammed
+  `missing_consequences`; registry invariant test added.
+- **D-NEW-5 (fixed, ratchet):** `blocked_action_attempted` judged same-turn
+  commits against the stale turn_start snapshot; rolling baseline added.
+- **D-NEW-6 (FIXED same session):** `escalate_to_human` applied 45× fresh in
+  one conversation. The handler now absorbs repeats while an OPEN/IN_PROGRESS
+  ESCALATION work item exists for the conversation (`already_escalated`
+  reason code; resolved items permit legitimate re-escalation; the exposure
+  floor is deliberately untouched — always-reachable human is a safety
+  invariant). Tests: `__tests__/integration/escalate-to-human.test.ts`.
 
 ## Addendum — post-fix validation observations (run `cmr940u78…`)
 

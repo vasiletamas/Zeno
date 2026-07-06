@@ -18,31 +18,26 @@ describe('accept_quote legality (pure, D2.5)', () => {
     expect(acceptQuoteLegality({ ...ok, identity: { tier: 'declared' } }, new Date()))
       .toEqual({ ok: false, outcome: 'requires_identity', needs: ['verified_channel'] })
   })
-  // Precise needs (2026-07-06 battery wall): "needs: verified_channel" told
-  // the agent to re-verify a channel the customer had JUST verified — the
-  // actual gap was the undeclared phone. A rich identity slice names the
-  // missing pieces via the shared evaluateRow semantics; the tier-only slice
-  // above keeps the coarse tier word for legacy callers.
-  it('requires_identity names the ACTUAL missing KYC pieces when the slice carries fields + channels', () => {
-    const identity = {
-      tier: 'declared' as const,
-      fields: {
-        name: { provenance: 'declared' as const }, cnp: { provenance: 'declared' as const },
-        dateOfBirth: { provenance: 'declared' as const }, email: { provenance: 'verified' as const },
-      },
-      verifiedChannels: ['email' as const],
-    }
-    expect(acceptQuoteLegality({ ...ok, identity }, new Date()))
-      .toEqual({ ok: false, outcome: 'requires_identity', needs: ['declared:phone'] })
+  it('needs DECOMPOSE to the actionable gaps when identity detail is provided (run cmr9dw3s5: channel verified, dob+phone missing, agent had nothing to act on)', () => {
+    const r = acceptQuoteLegality(
+      { ...ok, identity: { tier: 'anonymous', missingFields: ['dateOfBirth', 'phone'], hasVerifiedChannel: true } },
+      new Date(),
+    )
+    expect(r).toEqual({ ok: false, outcome: 'requires_identity', needs: ['declared:dateOfBirth', 'declared:phone'] })
   })
-  it('rich slice with all fields but NO verified channel names verified_channel (and only that)', () => {
-    const fields = {
-      name: { provenance: 'declared' as const }, cnp: { provenance: 'declared' as const },
-      dateOfBirth: { provenance: 'declared' as const }, email: { provenance: 'declared' as const },
-      phone: { provenance: 'declared' as const },
-    }
-    expect(acceptQuoteLegality({ ...ok, identity: { tier: 'declared', fields, verifiedChannels: [] } }, new Date()))
-      .toEqual({ ok: false, outcome: 'requires_identity', needs: ['verified_channel'] })
+  it('decomposed needs include verified_channel only when NO channel is verified', () => {
+    const r = acceptQuoteLegality(
+      { ...ok, identity: { tier: 'anonymous', missingFields: ['phone'], hasVerifiedChannel: false } },
+      new Date(),
+    )
+    expect(r).toEqual({ ok: false, outcome: 'requires_identity', needs: ['declared:phone', 'verified_channel'] })
+  })
+  it('falls back to valid:cnp when the decomposition is complete but the tier still refuses (checksum/DOB mismatch)', () => {
+    const r = acceptQuoteLegality(
+      { ...ok, identity: { tier: 'anonymous', missingFields: [], hasVerifiedChannel: true } },
+      new Date(),
+    )
+    expect(r).toEqual({ ok: false, outcome: 'requires_identity', needs: ['valid:cnp'] })
   })
   it('quote_expired via the shared isExpired predicate', () => {
     expect(acceptQuoteLegality({ ...ok, quote: { ...ok.quote, validUntil: new Date(0) } }, new Date()))

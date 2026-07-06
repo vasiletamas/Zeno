@@ -52,7 +52,7 @@ export function evaluateIdentityRequirement(
     (f) => facts.fields[f] !== undefined && facts.fields[f]!.provenance !== 'conflict',
     requiredDocs,
     validatedDocs,
-    facts.verifiedChannels.length > 0,
+    { missingFields: missingIdentityFields(facts), hasVerifiedChannel: facts.verifiedChannels.length > 0 },
   )
   return needs.length === 0 ? { ok: true } : { ok: false, needs }
 }

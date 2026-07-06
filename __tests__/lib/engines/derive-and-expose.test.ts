@@ -62,6 +62,31 @@ describe('deriveAndExpose — exposure over the FULL snapshot (contradiction #12
     const done = deriveAndExpose(makeSnapshot({ dnt: { ...validDnt, signed: false, valid: false, latest: null, activeSessionId: 'sess-1', sessionType: 'NEW', sessionAnswered: 10, sessionTotal: 10, facts: {} } }))
     expect(done.actions.available).toContain('sign_dnt')
   })
+  // T6.D3 deviation (2026-07-06): batch medical-declaration signature
+  const consented = { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true }
+  const declaredId = { tier: 'anonymous' as const, fields: { dateOfBirth: { provenance: 'declared' as const } }, verifiedChannels: [] as ('email' | 'sms')[], pendingChallenge: null }
+  it('sign_medical_declarations exposed when all sensitive answers are in and unsigned', () => {
+    const app = { ...doneApp, medicalDeclarations: { requiredCodes: ['BD_CANCER_HISTORY'], answeredCodes: ['BD_CANCER_HISTORY'], signed: false } }
+    const r = deriveAndExpose(makeSnapshot({ application: app, dnt: validDnt, identity: declaredId, consents: consented }))
+    expect(r.actions.available).toContain('sign_medical_declarations')
+  })
+  it('generate_quote blocked medical_declarations_unsigned until the batch sign; signed unblocks it', () => {
+    const unsigned = { ...doneApp, medicalDeclarations: { requiredCodes: ['BD_CANCER_HISTORY'], answeredCodes: ['BD_CANCER_HISTORY'], signed: false } }
+    const r = deriveAndExpose(makeSnapshot({ application: unsigned, dnt: validDnt, identity: declaredId, consents: consented }))
+    expect(r.actions.available).not.toContain('generate_quote')
+    expect(r.actions.blocked).toContainEqual(expect.objectContaining({ action: 'generate_quote', reason: 'medical_declarations_unsigned' }))
+    const signed = { ...doneApp, medicalDeclarations: { requiredCodes: ['BD_CANCER_HISTORY'], answeredCodes: ['BD_CANCER_HISTORY'], signed: true } }
+    const r2 = deriveAndExpose(makeSnapshot({ application: signed, dnt: validDnt, identity: declaredId, consents: consented }))
+    expect(r2.actions.available).toContain('generate_quote')
+    expect(r2.actions.available).not.toContain('sign_medical_declarations')
+    expect(r2.actions.blocked).toContainEqual(expect.objectContaining({ action: 'sign_medical_declarations', reason: 'already_applied' }))
+  })
+  it('no sensitive questions in the visible set: gate and tool both absent (legacy snapshots unchanged)', () => {
+    const r = deriveAndExpose(makeSnapshot({ application: doneApp, dnt: validDnt, identity: declaredId, consents: consented }))
+    expect(r.actions.available).toContain('generate_quote')
+    expect(r.actions.available).not.toContain('sign_medical_declarations')
+    expect(r.actions.blocked).not.toContainEqual(expect.objectContaining({ action: 'sign_medical_declarations' }))
+  })
   it('a circuit-open tool moves to blocked temporarily_unavailable (M10)', () => {
     const r = deriveAndExpose(makeSnapshot({ circuit: { openTools: ['list_products'] } }))
     expect(r.actions.available).not.toContain('list_products')

@@ -844,6 +844,24 @@ model Application {
   @@index([customerId, status])
 }
 
+// T6.D3 deviation (2026-07-06): the customer's ONE batch affirmation of the
+// sensitive (CONFIRM_ALWAYS) medical answers — sign_dnt precedent. Currency
+// is recomputed, never cleared: answersHash is the stable hash of the active
+// sensitive (questionCode, revisionId) pairs at sign time; a later answer
+// revision changes the recomputed hash and the questionnaire counts as
+// unsigned again. Append-only history (latest row by signedAt decides).
+model MedicalDeclarationSignature {
+  id             String   @id @default(cuid())
+  applicationId  String
+  customerId     String
+  answersHash    String
+  actor          String
+  sourceCommitId String?
+  signedAt       DateTime @default(now())
+
+  @@index([applicationId, signedAt])
+}
+
 // C3.4 (M7): the documented-warning audit row — the customer's explicit
 // acknowledgement of a suitability mismatch, bound to the ruleset version
 // it was shown for (a stale ack never satisfies the gate) and the ledger

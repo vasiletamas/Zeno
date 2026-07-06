@@ -14,6 +14,7 @@ import { deriveConsents, type ConsentEventLike } from '@/lib/customer/consent'
 import { getIdentityFacts, getAge } from '@/lib/customer/profile-service'
 import { deriveIdentityTier } from '@/lib/engines/identity-rules'
 import { maskCnp, decryptEnvelopeTolerant } from '@/lib/security/encryption'
+import { loadMedicalDeclarationState } from '@/lib/engines/medical-declaration-state'
 import type { DomainSnapshot } from './domain-types'
 
 // Widened for the A2 gateway: the interactive-transaction handle lacks
@@ -76,6 +77,9 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     // D1 (T7.D1): a Quote row in ANY state freezes its application — the
     // recovery path is always cancel_quote + a new application.
     const quoteCount = await db.quote.count({ where: { applicationId: application.id } })
+    // T6.D3 deviation (2026-07-06): the batch-signature facts come from the
+    // ONE shared loader the sign handler also uses — never recomputed here.
+    const medical = await loadMedicalDeclarationState(db, application)
     appState = {
       id: application.id, status: application.status,
       tier: tier?.code ?? null, level: level?.code ?? null, addon: application.includesAddon,
@@ -83,6 +87,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
       missingCodes: visibleCodes.filter((c) => activeAnswers[c] === undefined),
       frozen: application.frozenAt !== null || quoteCount > 0,
       createdAt: application.createdAt.toISOString(), // E4.2: open-item age
+      medicalDeclarations: { requiredCodes: medical.requiredCodes, answeredCodes: medical.answeredCodes, signed: medical.signed },
     }
   }
   // DNT facts. Legacy conversation-stamp semantics survive until B2.6; the

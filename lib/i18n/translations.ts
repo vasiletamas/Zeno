@@ -73,6 +73,10 @@ export const translations: Record<Language, TranslationTable> = {
       outside_free_look: 'Perioada de renunțare (free-look) s-a încheiat — anularea nu mai este posibilă pe acest canal; un coleg poate prelua cererea.',
       verification_already_pending: 'Un cod de verificare este deja pe drum — folosește codul primit sau cere unul nou.',
       repeated_failure: 'Ceva n-a mers la noi de mai multe ori la rând — un coleg poate prelua cererea.',
+      medical_declarations_unsigned: 'Declarația medicală trebuie semnată (un singur card de confirmare) înainte de generarea ofertei.',
+      medical_declarations_incomplete: 'Mai sunt întrebări medicale fără răspuns — declarația se semnează după ce toate au fost completate.',
+      already_escalated: 'Un coleg a fost deja anunțat pentru această conversație — va prelua discuția cu întregul context.',
+      value_not_grounded: 'Răspunsul trebuie să vină de la tine — te rugăm să răspunzi la întrebare sau să confirmi valoarea propusă.',
     },
     // Hero section
     hero_headline: 'Dacă mâine primești un diagnostic grav, ai fi pregătit?',
@@ -232,6 +236,10 @@ export const translations: Record<Language, TranslationTable> = {
       outside_free_look: 'The free-look window has ended — cancellation is no longer possible on this channel; a colleague can take over the request.',
       verification_already_pending: 'A verification code is already on its way — use the code you received or ask for a new one.',
       repeated_failure: 'Something went wrong on our side several times in a row — a colleague can take over the request.',
+      medical_declarations_unsigned: 'The medical declaration must be signed (one confirmation card) before the quote can be generated.',
+      medical_declarations_incomplete: 'Some medical questions are still unanswered — the declaration is signed once they are all complete.',
+      already_escalated: 'A colleague has already been notified for this conversation — they will take over with full context.',
+      value_not_grounded: 'The answer has to come from you — please answer the question or confirm the proposed value.',
     },
     // Hero section
     hero_headline:

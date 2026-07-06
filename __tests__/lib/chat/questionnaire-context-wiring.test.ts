@@ -9,7 +9,7 @@ vi.mock('@/lib/db', () => ({
   prisma: {
     conversation: { findUnique: vi.fn() },
     questionGroup: { findMany: vi.fn() },
-    question: { findMany: vi.fn() },
+    question: { findMany: vi.fn(), findUnique: vi.fn() },
     answer: { findMany: vi.fn() },
     dntAnswer: { findMany: vi.fn() },
     dntSession: { findFirst: vi.fn() },
@@ -65,9 +65,12 @@ describe('loadQuestionnaireContextForState — the orchestrator patch path', () 
     vi.mocked(prisma.questionGroup.findMany).mockResolvedValue([APP_GROUP] as never)
     vi.mocked(prisma.question.findMany).mockResolvedValue([APP_QUESTION] as never)
     vi.mocked(prisma.answer.findMany).mockResolvedValue([])
-    vi.mocked(prisma.application.findUnique).mockResolvedValue({ tier: null, level: null, includesAddon: false } as never)
+    // P0-7 merge: the loader derives everything from the ACTIVE application
+    // row — status/frozenAt gate the surface, productId keys the groups.
+    vi.mocked(prisma.application.findUnique).mockResolvedValue({ id: 'app-1', productId: 'p1', tier: null, level: null, includesAddon: false, status: 'OPEN', frozenAt: null } as never)
     vi.mocked(prisma.questionDependency.findMany).mockResolvedValue([])
     vi.mocked(prisma.customerInsight.findUnique).mockResolvedValue(null)
+    vi.mocked(prisma.question.findUnique).mockResolvedValue({ insightKey: 'selectedTier' } as never)
   })
 
   it('APPLICATION/QUESTIONNAIRE turn includes questionnaireContext with current question', async () => {
@@ -94,18 +97,11 @@ describe('loadQuestionnaireContextForState — the orchestrator patch path', () 
     expect(section).toContain('INSTRUCTIONS — DO NOT RE-ASK')
   })
 
-  it('APPLICATION/DNT walks the ACTIVE DNT session', async () => {
-    vi.mocked(prisma.dntSession.findFirst).mockResolvedValue({ id: 'sess-1' } as never)
-    vi.mocked(prisma.dntAnswer.findMany).mockResolvedValue([])
-    vi.mocked(prisma.questionGroup.findMany).mockResolvedValue([{ id: 'g0', code: 'dnt_general', orderIndex: 1 }] as never)
-    vi.mocked(prisma.question.findMany).mockResolvedValue([
-      { ...APP_QUESTION, id: 'qd1', code: 'DNT_FAMILY_SIZE', groupId: 'g0', insightKey: 'familySize', text: { en: 'Family size?', ro: 'Câți membri are familia ta?' } },
-    ] as never)
+  it('APPLICATION/DNT yields NO questionnaire surface — dntContext owns the DNT stage (P0-7 merge)', async () => {
     const section = await loadQuestionnaireContextForState(
       { phase: 'APPLICATION', subphase: 'DNT' }, 'conv-1', 'cust-1', 'ro',
     )
-    expect(section).toContain('DNT_FAMILY_SIZE')
-    expect(section).toMatch(/current question/i)
+    expect(section).toBeNull()
   })
 
   it('DISCOVERY loads nothing and touches no questionnaire tables', async () => {

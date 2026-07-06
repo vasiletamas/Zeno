@@ -7,7 +7,7 @@ import type { ToolContext } from '@/lib/tools/types'
 beforeEach(async () => { await resetFunnelTables() })
 
 const ctx = (customerId: string, conversationId: string) =>
-  ({ customerId, conversationId, language: 'ro', db: prisma } as unknown as ToolContext)
+  ({ customerId, conversationId, language: 'ro', db: prisma, actor: 'gui' } as unknown as ToolContext)
 
 // 2026-07-06 user-found defect: the post-write next-question walk read through
 // the GLOBAL client, which cannot see the answer row written inside the

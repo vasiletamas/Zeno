@@ -16,10 +16,10 @@ import { getToolDefinition } from '@/lib/tools/registry'
 import { estimateTokens } from '@/lib/chat/token-budget'
 import { LRUCache } from '@/lib/cache/lru-cache'
 import { findContextHit, type ContextHit } from '@/lib/insights/context-hits'
+import { resolveGroupCodes } from '@/lib/engines/question-groups'
+import { getNextQuestion, calculateProgress } from '@/lib/engines/questionnaire-engine'
 import { logInfo } from '@/lib/errors/logger'
 import { calculateAge } from './age'
-import { getNextQuestion, type AnswerScope } from '@/lib/engines/questionnaire-engine'
-import { resolveGroupCodes, type QuestionPhase } from '@/lib/engines/question-groups'
 import { workflowStepCodeFor } from './phase-sections-map'
 import { getPublishedProductContent, collectPublishedContentIds, registerPublishFlushHook } from '@/lib/products/product-content'
 import { derivePricingExamples, type PricingExampleGrid } from '@/lib/engines/pricing-examples'
@@ -454,7 +454,8 @@ export function flushCoachingBriefingCache(): void {
 /**
  * Task 1.2 (D2): the questionnaire surface keyed on the ENGINE's derived
  * (phase, subphase) — the orchestrator patches this after the gate, same
- * pattern as dntContext. Everything else is loadQuestionnaireContext.
+ * pattern as dntContext. The DNT stage's surface is dntContext's job; this
+ * wrapper only wakes the APPLICATION questionnaire surface.
  */
 export async function loadQuestionnaireContextForState(
   state: Pick<DerivedStateV3, 'phase' | 'subphase'>,
@@ -462,76 +463,66 @@ export async function loadQuestionnaireContextForState(
   customerId: string,
   language: 'en' | 'ro',
 ): Promise<string | null> {
-  return loadQuestionnaireContext(conversationId, customerId, workflowStepCodeFor(state.phase, state.subphase), language)
+  if (workflowStepCodeFor(state.phase, state.subphase) !== 'application_fill') return null
+  return loadQuestionnaireContext(conversationId, customerId, language)
 }
 
 /**
- * Load questionnaire context section.
- * Determines active questionnaire from workflowStepCode and finds current question.
+ * Load questionnaire context section (P0-7 rebuild, 2026-07-06).
  *
- * The walk is the CANONICAL getNextQuestion (C1.7/C1.8) — the same group
- * ordering, visibility graph and progress the pinned get_next_question read
- * uses — never a duplicate group-hardcoded walk that can disagree with the
- * engine's missingCodes (bd_medical, branch-hidden questions).
+ * Previously keyed on a workflowStepCode that every caller passed as null
+ * ("dead input") — the APPLICATION/QUESTIONNAIRE stage had NO current-
+ * question surface (the same bug the DNT stage had before dntContext). Now
+ * derived entirely from the conversation's active application through the
+ * SAME engine path the tools use: canonical group codes (bd_medical rides
+ * only while the addon is selected, mirroring appGroupCodesFor), the
+ * engine's next visible unanswered question, and its progress counts —
+ * one visible-set computation, never a parallel one (C1.7).
  */
 export async function loadQuestionnaireContext(
   conversationId: string,
   customerId: string,
-  workflowStepCode: string | null,
   language: 'en' | 'ro',
 ): Promise<string | null> {
-  if (!workflowStepCode) return null
-
-  const questionnaireType = resolveQuestionnaireType(workflowStepCode)
   const conv = await prisma.conversation.findUnique({
     where: { id: conversationId },
     select: { activeApplicationId: true, productId: true, candidateProductId: true },
   })
-  if (!conv) return null
-  const productId = conv.productId ?? conv.candidateProductId ?? null
+  if (!conv?.activeApplicationId) return null
+  const application = await prisma.application.findUnique({ where: { id: conv.activeApplicationId } })
+  // no surface for terminal or frozen applications — post-quote the
+  // questionnaire is engine-illegal to mutate (D1/T7.D1)
+  if (!application || application.status === 'CANCELLED' || application.frozenAt !== null) return null
 
-  let scope: AnswerScope | null = null
-  let phase: QuestionPhase
-  if (workflowStepCode === 'dnt_questionnaire') {
-    phase = 'dnt'
-    const session = await prisma.dntSession.findFirst({
-      where: { customerId, status: 'ACTIVE' },
-      select: { id: true },
-      orderBy: { startedAt: 'desc' },
-    })
-    scope = session ? { kind: 'dntSession', sessionId: session.id } : null
-  } else {
-    phase = 'application'
-    scope = conv.activeApplicationId ? { kind: 'application', applicationId: conv.activeApplicationId } : null
-  }
-  if (!scope) return null
-
-  const groupCodes = await resolveGroupCodes(productId, phase)
+  const groupCodes = ((await resolveGroupCodes(application.productId, 'application')) ?? [])
+    .filter((c) => application.includesAddon || c !== 'bd_medical')
   if (groupCodes.length === 0) return null
 
+  const scope = { kind: 'application' as const, applicationId: application.id }
   const next = await getNextQuestion(groupCodes, scope)
 
   const parts: string[] = []
-  parts.push(`[ACTIVE QUESTIONNAIRE - ${questionnaireType}]`)
+  parts.push('[ACTIVE QUESTIONNAIRE - APPLICATION]')
 
   if (!next) {
+    const progress = await calculateProgress(groupCodes, scope)
+    if (progress.total === 0) return null
+    parts.push(`Progress: ${progress.answered}/${progress.total}`)
     parts.push('')
-    parts.push('All questions answered. Questionnaire complete.')
+    parts.push('All questions answered — the questionnaire is complete. If sensitive medical answers were collected, sign_medical_declarations (one card) comes next; otherwise generate_quote.')
     return parts.join('\n')
   }
 
-  const currentQuestion = next.question
   parts.push(`Progress: ${next.progress.answered}/${next.progress.total}`)
-
-  const questionText = (currentQuestion.text as LocalizedText)[language]
+  const currentQuestion = next.question
+  const questionText = (currentQuestion.text as unknown as LocalizedText)[language]
   parts.push('')
-  parts.push(`Current question (${currentQuestion.groupCode}):`)
+  parts.push(`Current question (${currentQuestion.groupCode}${currentQuestion.code ? `, code ${currentQuestion.code}` : ''}):`)
   parts.push(questionText)
-  if (currentQuestion.code) {
-    const saveTool = phase === 'dnt' ? 'write_dnt_answer' : 'write_question_answer'
-    parts.push(`Question code: ${currentQuestion.code} — pass this EXACT code to ${saveTool}.`)
-  }
   parts.push(`Type: ${currentQuestion.type}`)
+  if (currentQuestion.code) {
+    parts.push(`Question code: ${currentQuestion.code} — pass this EXACT code to write_question_answer.`)
+  }
 
   if (currentQuestion.options) {
     const options = currentQuestion.options as unknown as Array<{
@@ -546,12 +537,13 @@ export async function loadQuestionnaireContext(
     }
   }
 
-  // Context hit lookup
+  // Context hit lookup — insightKey is not part of the engine's QuestionData
+  const meta = await prisma.question.findUnique({ where: { id: currentQuestion.id }, select: { insightKey: true } })
   const hit = await findContextHit(
     customerId,
     {
       id: currentQuestion.id,
-      insightKey: currentQuestion.insightKey,
+      insightKey: meta?.insightKey ?? null,
       options: currentQuestion.options,
       group: { code: currentQuestion.groupCode },
     },
@@ -609,19 +601,9 @@ function renderContextHitBlock(hit: ContextHit, groupCode: string): string {
   return lines.join('\n')
 }
 
-// resolveQuestionGroupCodes died at Task 1.2 (D2): group resolution now
-// comes from resolveGroupCodes over the QuestionGroup.phase column — the
-// same source the engine and the pinned get_next_question read use.
-
-/**
- * Resolve questionnaire type label from workflow step code.
- */
-function resolveQuestionnaireType(workflowStepCode: string): string {
-  if (workflowStepCode === 'dnt_questionnaire') return 'DNT'
-  if (workflowStepCode === 'application_fill') return 'APPLICATION'
-  if (workflowStepCode.includes('bd')) return 'BD MEDICAL'
-  return 'UNKNOWN'
-}
+// resolveQuestionGroupCodes / resolveQuestionnaireType retired with the P0-7
+// rebuild — the questionnaire surface derives from the active application,
+// not a workflow step code.
 
 /**
  * Load customer context section.
@@ -913,6 +895,7 @@ export async function loadAllSections(params: {
     catalogOverview,
     productContext,
     coachingBriefing,
+    questionnaireContext,
     customerContext,
     customerMemory,
     agentKnowledge,
@@ -920,6 +903,7 @@ export async function loadAllSections(params: {
     loadCatalogOverview(language),
     productId ? loadProductContext(productId, language) : null,
     productId ? loadCoachingBriefing(productId) : null,
+    loadQuestionnaireContext(conversationId, customerId, language), // P0-7: derived from the active application (was a dead null step-code)
     prefetchedCustomer
       ? Promise.resolve(loadCustomerContextFromData(prefetchedCustomer))
       : loadCustomerContext(customerId),
@@ -941,11 +925,10 @@ export async function loadAllSections(params: {
     domainGuidance: null, // former pack-injection slot; the pack subsystem died in A5.2
     productContext,
     catalogOverview,
-    // Rendered from the derived state after the gate resolves (A4.2) — the
-    // orchestrator patches these alongside situationalBriefing.
-    // questionnaireContext joined them at Task 1.2 (D2): its step code comes
-    // from the derived (phase, subphase), which does not exist yet here.
-    questionnaireContext: null,
+    // P0-7: eagerly derived from the active application; the orchestrator
+    // re-patches it after the gate from the derived (phase, subphase) —
+    // Task 1.2 (D2) — suppressing it outside the questionnaire stage.
+    questionnaireContext,
     dntContext: null,
     paymentContext: null,
     policyContext: null,

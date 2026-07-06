@@ -43,7 +43,11 @@ export const RETENTION_POLICIES: Record<DataClass, RetentionPolicy> = {
   customer_profile:       { whenNeverContracted: 'erase', whenContracted: 'erase',            legalBasis: 'soft profile data, no retention duty', retentionYears: 0, legalReviewPending: false },
   conversations_messages: { whenNeverContracted: 'erase', whenContracted: 'anonymize_retain', legalBasis: 'audit trail when contracted', retentionYears: null, legalReviewPending: true },
   dnt_signed:             { whenNeverContracted: 'retain_mandated', whenContracted: 'retain_mandated', legalBasis: 'IDD demands-and-needs record', retentionYears: null, legalReviewPending: true },
-  dnt_unsigned_sessions:  { whenNeverContracted: 'erase', whenContracted: 'erase', legalBasis: 'unsigned drafts', retentionYears: 0, legalReviewPending: false },
+  // P0-2: pre-sign collection rides GDPR Art. 6(1)(b) (steps at the data
+  // subject's request prior to a contract); the basis lapses with the
+  // abandoned request — cleanupUnsignedDntSessions (lib/gdpr/retention-cleanup.ts)
+  // deletes drafts inactive beyond UNSIGNED_DNT_RETENTION_DAYS.
+  dnt_unsigned_sessions:  { whenNeverContracted: 'erase', whenContracted: 'erase', legalBasis: 'unsigned drafts — Art. 6(1)(b) pre-contractual basis; deleted after the inactivity window by the retention cleanup job', retentionYears: 0, legalReviewPending: false },
   applications:           { whenNeverContracted: 'erase', whenContracted: 'anonymize_retain', legalBasis: 'pre-contractual record when contracted', retentionYears: null, legalReviewPending: true },
   quotes:                 { whenNeverContracted: 'erase', whenContracted: 'anonymize_retain', legalBasis: 'acceptance evidence when contracted', retentionYears: null, legalReviewPending: true },
   payments_schedules:     { whenNeverContracted: 'retain_mandated', whenContracted: 'retain_mandated', legalBasis: 'financial records', retentionYears: null, legalReviewPending: true },

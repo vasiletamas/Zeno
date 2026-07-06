@@ -47,6 +47,9 @@ export function classifyError(error: unknown): ErrorClass {
     if (status === 429) return 'transient'
     // Bad request — caller's fault, no point retrying
     if (status === 400) return 'validation'
+    // Not found — retired model or dead endpoint (P1-8): retrying the SAME
+    // configuration can never succeed; the alternate provider can.
+    if (status === 404) return 'provider_down'
     // Server errors — transient, retry or failover
     if (status === 500 || status === 502 || status === 503 || status === 504) return 'transient'
   }

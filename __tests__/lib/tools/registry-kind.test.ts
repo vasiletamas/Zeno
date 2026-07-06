@@ -18,13 +18,15 @@ import { getRegisteredToolNames, getToolDefinition } from '@/lib/tools/registry'
 // replaces initiate_payment, change_payment_option added (D3.3/D3.4);
 // D4: mark_submitted/activate_policy/cancel_submission (operator, D4.2) +
 // request_cancellation (free-look, D4.5)
-const COMMITS = ['set_candidate_product', 'open_dnt_session', 'write_dnt_answer', 'sign_dnt', 'set_application', 'write_question_answer', 'modify_answer', 'select_coverage', 'resume_application', 'cancel_application', 'acknowledge_suitability_warning', 'generate_quote', 'accept_quote', 'cancel_quote', 'acknowledge_disclosures', 'ensure_payment_session', 'change_payment_option', 'collect_customer_field', 'escalate_to_human', 'withdraw_consent', 'resolve_referral', 'resolve_work_item', 'mark_submitted', 'activate_policy', 'cancel_submission', 'request_cancellation', 'start_channel_verification', 'confirm_channel_verification', 'request_document_upload']
+// F5.5/T6.D3 deviation (2026-07-06): sign_medical_declarations added — the
+// batch affirmation of the CONFIRM_ALWAYS medical answers (sign_dnt precedent)
+const COMMITS = ['set_candidate_product', 'open_dnt_session', 'write_dnt_answer', 'sign_dnt', 'set_application', 'write_question_answer', 'modify_answer', 'select_coverage', 'resume_application', 'cancel_application', 'acknowledge_suitability_warning', 'sign_medical_declarations', 'generate_quote', 'accept_quote', 'cancel_quote', 'acknowledge_disclosures', 'ensure_payment_session', 'change_payment_option', 'collect_customer_field', 'escalate_to_human', 'withdraw_consent', 'resolve_referral', 'resolve_work_item', 'mark_submitted', 'activate_policy', 'cancel_submission', 'request_cancellation', 'start_channel_verification', 'confirm_channel_verification', 'request_document_upload']
 
 describe('tool kind classification', () => {
   it('every registered tool carries a kind', () => {
     for (const name of getRegisteredToolNames()) expect(['read', 'commit', 'internal']).toContain(getToolDefinition(name)?.kind)
   })
-  it('the 29 committing tools are kind=commit', () => {
+  it('the 30 committing tools are kind=commit', () => {
     for (const name of COMMITS) expect(getToolDefinition(name)?.kind, name).toBe('commit')
   })
   it('the retired mutators are gone', () => {
@@ -33,7 +35,11 @@ describe('tool kind classification', () => {
   it('no registered tool is kind=internal anymore (the two stubs died in A5.ADD-1)', () => {
     for (const name of getRegisteredToolNames()) expect(getToolDefinition(name)?.kind).not.toBe('internal')
   })
-  it('every kind=read tool declares sideEffects:false (Task 5.3 — get_next_question/get_quote_info sat in the writing partition, so missing_consequences fired error on every call)', () => {
+  it('every kind=read tool declares sideEffects: false (partition + missing_consequences integrity)', () => {
+    // partitionToolCalls keys on sideEffects===false, NOT on kind: a read
+    // without the flag executes in the writing partition and every success
+    // becomes a missing_consequences error (no ledger row can ever back it).
+    // Found live: get_next_question flagged 4x in run cmr99s5cb (2026-07-06).
     for (const name of getRegisteredToolNames()) {
       const def = getToolDefinition(name)
       if (def?.kind === 'read') expect(def.sideEffects, name).toBe(false)

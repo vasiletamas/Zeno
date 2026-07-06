@@ -17,7 +17,14 @@ describe('confirm_required GUI consumer (A3 erratum 5)', () => {
   })
   it('non-confirmable tools produce no action (defense against forged events)', () => {
     expect(buildConfirmAction('escalate_to_human', 'tok-3')).toBeNull()
-    expect(CONFIRMABLE_TOOLS).toEqual(['sign_dnt', 'accept_quote', 'write_question_answer', 'modify_answer'])
+    expect(CONFIRMABLE_TOOLS).toEqual(['sign_dnt', 'accept_quote', 'write_question_answer', 'modify_answer', 'sign_medical_declarations'])
+  })
+  it('sign_medical_declarations round-trips the token (T6.D3 deviation — ONE card for the whole medical set)', () => {
+    const action = buildConfirmAction('sign_medical_declarations', 'tok-6')
+    expect(action).not.toBeNull()
+    const tc = adaptAction(action!)
+    expect(tc?.name).toBe('sign_medical_declarations')
+    expect(tc?.arguments).toEqual({ confirmToken: 'tok-6' })
   })
   it('BD medical sensitive answers round-trip: write_question_answer confirm carries answer + code + token (P0-6, 2026-07-06)', () => {
     const action = buildConfirmAction('write_question_answer', 'tok-4', { answer: 'da', questionCode: 'BD_CANCER_HISTORY' })

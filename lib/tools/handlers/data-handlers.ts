@@ -7,6 +7,7 @@
 
 import { setDeclaredField, getProfile, type ProfileFieldName } from '@/lib/customer/profile-service'
 import { validateCnpChecksum, cnpMatchesDob } from '@/lib/engines/cnp-validation'
+import { valueNotGroundedError } from './grounding-guard'
 import type { ToolHandler } from '@/lib/tools/types'
 
 // ─────────────────────────────────────────────
@@ -159,6 +160,13 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
         return { success: false, error: `cnp_dob_mismatch: the CNP encodes a different birth date than the declared ${dob} — ask the customer which one is correct.` }
       }
     }
+
+    // P0-1 write-guard: profile facts must come from the customer's words
+    // (or a confirmed proposal) — never from the model's initiative.
+    // Re-declaring the value already on record is idempotent, not invention.
+    const existing = (await getProfile(context.customerId)).fields[field as ProfileFieldName]?.value ?? null
+    const notGrounded = await valueNotGroundedError(context, trimmedValue, undefined, existing)
+    if (notGrounded) return { success: false, error: notGrounded }
 
     // 2. Write through the SSOT service (declared provenance, mirrors handled there)
     const w = await setDeclaredField(context.customerId, field as ProfileFieldName, trimmedValue, 'collect_customer_field')

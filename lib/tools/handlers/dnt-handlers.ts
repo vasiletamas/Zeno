@@ -18,7 +18,9 @@ import { isDntValidFor, isExpiringOrExpired, decideSessionType, computeCoverage,
 import { appendConsentEvents } from '@/lib/customer/consent-service'
 import { setDeclaredField } from '@/lib/customer/profile-service'
 import { validateCnpChecksum } from '@/lib/engines/cnp-validation'
-import { encryptEnvelope, decryptEnvelopeTolerant } from '@/lib/security/encryption'
+import { maskCnp } from '@/lib/security/encryption'
+import type { GroundingOption } from '@/lib/engines/anti-fabrication'
+import { valueNotGroundedError } from './grounding-guard'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackDntCompleted } from '@/lib/analytics/events'
 import { bumpInsightOnAnswer } from './insight-bump'
@@ -227,13 +229,23 @@ export const openDntSession: ToolHandler = async (_args, context) => {
         if (!code) continue
         const target = byCode.get(code)
         if (!target) continue
-        // Task 5.4 (D11): the stored CNP is an AES envelope — decrypt for
-        // re-validation, re-encrypt at store; other answers pass verbatim.
-        const priorValue = code === 'DNT_CNP' ? decryptEnvelopeTolerant(pa.value) : pa.value
-        const v = validateAnswer({ type: target.type, options: target.options, validationRules: target.validationRules }, priorValue)
+        // P0-3: the prior session's DNT_CNP row holds the MASK, not the CNP —
+        // the mask fails validation and would leave the UPDATE session
+        // permanently incomplete. The mask prefills as-is (the canonical
+        // persisted form; the real value stays in the profile store); a raw
+        // legacy value re-masks; the GDPR erasure marker never prefills
+        // (the question is re-asked).
+        if (code === 'DNT_CNP') {
+          const masked = pa.value.includes('*') ? pa.value : validateCnpChecksum(pa.value) ? maskCnp(pa.value) : null
+          if (masked) {
+            await context.db.dntAnswer.create({ data: { sessionId: session.id, questionId: target.id, value: masked } })
+            prefilled++
+          }
+          continue
+        }
+        const v = validateAnswer({ type: target.type, options: target.options, validationRules: target.validationRules }, pa.value)
         if (!v.valid) continue
-        const storeValue = code === 'DNT_CNP' ? encryptEnvelope(v.normalizedValue) : v.normalizedValue
-        await context.db.dntAnswer.create({ data: { sessionId: session.id, questionId: target.id, value: storeValue } })
+        await context.db.dntAnswer.create({ data: { sessionId: session.id, questionId: target.id, value: v.normalizedValue } })
         prefilled++
       }
     }
@@ -368,13 +380,25 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
       return { success: false, error: 'cnp_checksum_invalid: the CNP control digit does not match — ask the customer to re-check the 13 digits.' }
     }
 
-    // Task 5.4 (D11): the CNP is encrypted at rest in the regulatory record
-    // (same AES envelope as the profile mirror); checksum ran on plaintext.
-    const storedValue = questionCode === 'DNT_CNP' ? encryptEnvelope(v.normalizedValue) : v.normalizedValue
+    // P0-1 write-guard: a regulatory answer must be anchored in the
+    // customer's words (family-size "2" was persisted after five bare "da").
+    // Re-writing the recorded value is idempotent, not invention.
+    const existingAnswer = await context.db.dntAnswer.findUnique({
+      where: { sessionId_questionId: { sessionId: session.id, questionId: question.id } },
+      select: { value: true },
+    })
+    const notGrounded = await valueNotGroundedError(context, v.normalizedValue, (question.options as GroundingOption[] | null) ?? undefined, existingAnswer?.value ?? null)
+    if (notGrounded) return { success: false, error: notGrounded }
+
+    // P0-3: the raw CNP never lands in DntAnswer — the encrypted profile
+    // store (AES-GCM envelope) is the only carrier; the regulatory record
+    // keeps the masked form, enough to evidence collection + checksum
+    // validity without holding the identifier itself.
+    const persistedValue = questionCode === 'DNT_CNP' ? maskCnp(v.normalizedValue) : v.normalizedValue
     await context.db.dntAnswer.upsert({
       where: { sessionId_questionId: { sessionId: session.id, questionId: question.id } },
-      create: { sessionId: session.id, questionId: question.id, value: storedValue },
-      update: { value: storedValue, answeredAt: new Date() },
+      create: { sessionId: session.id, questionId: question.id, value: persistedValue },
+      update: { value: persistedValue, answeredAt: new Date() },
     })
 
     // D1.4: the CNP declared in the DNT is a PROFILE fact (B0 SSOT) — it

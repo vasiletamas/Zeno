@@ -1,6 +1,6 @@
 import type { DomainSnapshot, Phase, AppSubphase } from './domain-types'
 import type { BlockedAction, DeriveAndExposeResult, DerivedStateV3, ReasonCode } from './domain-types'
-import { checkIdentityRequirement, IDENTITY_REQUIREMENTS, type IdentityRequirementsTable } from './identity-requirements'
+import { checkIdentityRequirement, identityDetailFromSnapshot, IDENTITY_REQUIREMENTS, type IdentityRequirementsTable } from './identity-requirements'
 import { consentBlocksCommit } from './consent-rules'
 import { dntExposure, type DntFact, type ProductTypeStr } from './dnt-rules'
 import { applicationExposure, canTransition, type AppStatus } from './application-rules'
@@ -9,6 +9,7 @@ import { freeLookDecision } from './policy-machine'
 import { mutationBlockedReason } from './frozen-application'
 import { evaluateEligibility, deriveEligibilityBounds } from './eligibility'
 import { evaluateSuitability, type SuitabilityResult } from './suitability'
+import { medicalDeclarationsExposure, medicalDeclarationsBlockQuote } from './medical-declarations'
 
 /**
  * Adapt the snapshot's DNT aggregate facts to the pure #12 exposure
@@ -87,7 +88,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.36.0' // 1.36.0: accept_quote requires_identity needs are PRECISE (declared:<field>/verified_channel via evaluateRow over the full identity slice), never a bare tier word; 1.35.0: repeated_failure loop-breaker (Task 1.3, D8) — same (tool, argsHash) rejected/unavailable >= 3x in a conversation blocks the tool; 1.34.0: verification endgame first-class (Task 1.1, D5) — start_channel_verification blocked verification_already_pending while a live challenge exists (gateway resend escape), confirm_channel_verification leads NEXT_BEST_PRIORITY; 1.33.0: get_open_items read exposed (E4.3, M2 — the ONE list read); 1.32.0: request_erasure/request_data_export exposed (E3, M3) — erasure always offerable and consent-halt exempt, export behind the verified_channel identity row; 1.31.0: set_application ineligible block params carry the derived age bounds (E1.6, T11.D4); 1.30.0: request_cancellation exposed via the deterministic free-look rule (D4.5, T9.D2) — outside_free_look precise block; 1.29.0: get_policy_info customer-scoped read + POLICY phase derives from the customer-scoped policy (D4.4, T9.D5/D6); 1.28.0: change_payment_option exposed pre-capture only (D3.4, T8.D5); 1.27.0: ensure_payment_session replaces the legacy initiate tool (D3.3, T8.D4); 1.26.0: get_payment_status read exposed on schedule existence (D3.2); 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application; 1.23.0: acknowledge_disclosures exposed on the live issued quote (D2.3, T7.D2); 1.24.0: accept_quote legality through the pure acceptQuoteLegality predicate (D2.5, T7.D6) — expiry → transition → verified_channel identity → disclosure acks; 1.25.0: the payment commit rides the schedule (D2.8) — due PENDING installment exposes, settled answers no_due_installment, no Policy prerequisite
+export const engineVersion = '1.37.0' // 1.37.0: MERGE of the sales-excellence line (verification endgame first-class + resend guard; repeated_failure loop-breaker — same (tool, argsHash) rejected/unavailable >= 3x blocks the tool; confirm_channel_verification leads NEXT_BEST_PRIORITY) and the batch-medical line (sign_medical_declarations exposed + generate_quote medical_declarations_unsigned gate, T6.D3 deviation; requires_identity needs DECOMPOSE into actionable gaps declared:<field>/verified_channel, valid:cnp fallback); 1.33.0: get_open_items read exposed (E4.3, M2 — the ONE list read); 1.32.0: request_erasure/request_data_export exposed (E3, M3) — erasure always offerable and consent-halt exempt, export behind the verified_channel identity row; 1.31.0: set_application ineligible block params carry the derived age bounds (E1.6, T11.D4); 1.30.0: request_cancellation exposed via the deterministic free-look rule (D4.5, T9.D2) — outside_free_look precise block; 1.29.0: get_policy_info customer-scoped read + POLICY phase derives from the customer-scoped policy (D4.4, T9.D5/D6); 1.28.0: change_payment_option exposed pre-capture only (D3.4, T8.D5); 1.27.0: ensure_payment_session replaces the legacy initiate tool (D3.3, T8.D4); 1.26.0: get_payment_status read exposed on schedule existence (D3.2); 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application; 1.23.0: acknowledge_disclosures exposed on the live issued quote (D2.3, T7.D2); 1.24.0: accept_quote legality through the pure acceptQuoteLegality predicate (D2.5, T7.D6) — expiry → transition → verified_channel identity → disclosure acks; 1.25.0: the payment commit rides the schedule (D2.8) — due PENDING installment exposes, settled answers no_due_installment, no Policy prerequisite
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -225,8 +226,20 @@ export const ACTION_RULES: ActionRule[] = [
   { action: 'acknowledge_suitability_warning', kind: 'commit',
     exposedWhen: (s, d) => s.application !== null && suitabilityAckNeeded(s, d),
     blockedReason: (s, d) => (s.application !== null && d.suitability !== null && !suitabilityAckNeeded(s, d) ? { reason: 'no_suitability_warning_pending' } : null) },
+  // T6.D3 deviation (2026-07-06): the batch affirmation of the sensitive
+  // (CONFIRM_ALWAYS) medical answers — exposed exactly between the last
+  // sensitive answer and generate_quote; already_applied once the current
+  // revision set is signed.
+  { action: 'sign_medical_declarations', kind: 'commit',
+    exposedWhen: (s, d) => d.phase === 'APPLICATION' && !s.application?.frozen && medicalDeclarationsExposure(s.application?.medicalDeclarations).exposed,
+    blockedReason: (s) => {
+      if (!s.application) return null
+      const b = medicalDeclarationsExposure(s.application.medicalDeclarations).blockedReason
+      if (!b) return null
+      return { reason: b === 'already_signed' ? 'already_applied' : b }
+    } },
   { action: 'generate_quote', kind: 'commit',
-    exposedWhen: (s, d) => d.phase === 'APPLICATION' && !s.application?.frozen && appExposureFromSnapshot(s).available.includes('generate_quote') && s.consents.gdprProcessing && !suitabilityAckNeeded(s, d) && !suitabilityHardBlocked(s, d),
+    exposedWhen: (s, d) => d.phase === 'APPLICATION' && !s.application?.frozen && appExposureFromSnapshot(s).available.includes('generate_quote') && !medicalDeclarationsBlockQuote(s.application?.medicalDeclarations) && s.consents.gdprProcessing && !suitabilityAckNeeded(s, d) && !suitabilityHardBlocked(s, d),
     blockedReason: (s, d) => {
       // D1 (T7.D1): a Quote row in ANY state froze the application — the
       // one-app-one-quote invariant; recovery is cancel_quote + re-apply.
@@ -240,6 +253,10 @@ export const ACTION_RULES: ActionRule[] = [
       if (suitabilityAckNeeded(s, d)) return { reason: 'suitability_warning_unacknowledged', params: { mismatches: d.suitability!.mismatches.map((m) => m.reason), ruleSetVersion: s.product!.suitabilityRules!.version } }
       const b = appExposureFromSnapshot(s).blocked.find((x) => x.action === 'generate_quote')
       if (b) return { reason: b.reason as ReasonCode, params: b.params }
+      // T6.D3 deviation: the batch medical signature gates quoting — after
+      // questionnaire completeness (you sign what you finished answering),
+      // before the consent reason.
+      if (medicalDeclarationsBlockQuote(s.application?.medicalDeclarations)) return { reason: 'medical_declarations_unsigned' }
       if (appExposureFromSnapshot(s).available.includes('generate_quote') && !s.consents.gdprProcessing) return { reason: 'requires_consent', params: { kind: 'gdpr_processing' } }
       return null
     } },
@@ -249,13 +266,11 @@ export const ACTION_RULES: ActionRule[] = [
   // (erratum 1 / contradiction #6).
   { action: 'accept_quote', kind: 'commit',
     exposedWhen: (s, d) => d.phase === 'QUOTE' && s.quote !== null
-      && acceptQuoteLegality({ quote: { status: s.quote.status, validUntil: new Date(s.quote.validUntil), disclosuresRequired: s.quote.disclosuresRequired ?? [] }, identity: s.identity }, new Date()).ok,
+      && acceptQuoteLegality({ quote: { status: s.quote.status, validUntil: new Date(s.quote.validUntil), disclosuresRequired: s.quote.disclosuresRequired ?? [] }, identity: { tier: s.identity.tier, ...identityDetailFromSnapshot(s.identity) } }, new Date()).ok,
     blockedReason: (s, d) => {
       if (d.phase === 'PAYMENT' || d.phase === 'POLICY') return { reason: 'quote_already_accepted' }
       if (s.quote === null) return s.application !== null ? { reason: 'no_issued_quote' } : null
-      // the FULL identity slice makes the requires_identity needs PRECISE
-      // (declared:<field> / verified_channel), never a bare tier word
-      const legality = acceptQuoteLegality({ quote: { status: s.quote.status, validUntil: new Date(s.quote.validUntil), disclosuresRequired: s.quote.disclosuresRequired ?? [] }, identity: s.identity }, new Date())
+      const legality = acceptQuoteLegality({ quote: { status: s.quote.status, validUntil: new Date(s.quote.validUntil), disclosuresRequired: s.quote.disclosuresRequired ?? [] }, identity: { tier: s.identity.tier, ...identityDetailFromSnapshot(s.identity) } }, new Date())
       if (legality.ok) return null
       if (legality.outcome === 'rejected') return { reason: legality.reason, params: { quoteId: s.quote.id } }
       // requires_identity / requires_disclosures — the reason IS the outcome
@@ -313,7 +328,7 @@ export const ACTION_RULES: ActionRule[] = [
 // while a live challenge is pending (10-min TTL), and during that window the
 // one correct move is confirming the digits the customer supplies; anything
 // else (set_candidate_product in the recorded conversation) derails the close.
-const NEXT_BEST_PRIORITY = ['confirm_channel_verification', 'ensure_payment_session', 'accept_quote', 'generate_quote', 'select_coverage', 'write_question_answer', 'sign_dnt', 'write_dnt_answer', 'open_dnt_session', 'set_application', 'set_candidate_product', 'list_products']
+const NEXT_BEST_PRIORITY = ['confirm_channel_verification', 'ensure_payment_session', 'accept_quote', 'generate_quote', 'sign_medical_declarations', 'select_coverage', 'write_question_answer', 'sign_dnt', 'write_dnt_answer', 'open_dnt_session', 'set_application', 'set_candidate_product', 'list_products']
 
 export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequirements?: IdentityRequirementsTable }): DeriveAndExposeResult {
   const d: Derived = { ...derivePhase(s), eligibility: deriveEligibility(s), suitability: deriveSuitability(s) }
