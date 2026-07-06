@@ -18,6 +18,20 @@ describe('envelope/legality diagnostic checks (v2)', () => {
     })
     expect(runDiagnostics(e).find((x) => x.checkId === 'blocked_action_attempted')).toMatchObject({ severity: 'error', evidence: { tool: 'accept_quote', reason: 'requires_disclosures' } })
   })
+  it('blocked_action_attempted: NOT flagged when an earlier same-turn commit legitimately unblocked the tool (batched select_coverage → generate_quote)', () => {
+    const e = makeExport({
+      turns: [turn(0, { legality: [
+        ...legality({ phase: 'APPLICATION' }, { available: ['select_coverage'], blocked: [{ action: 'generate_quote', reason: 'selection_incomplete' }] }),
+        postCommit('l1', { phase: 'APPLICATION' }),
+        postCommit('l2', { phase: 'QUOTE', quote: { id: 'q1' } }),
+      ] })] as never,
+      ledger: [
+        { id: 'l1', tool: 'select_coverage', actor: 'agent', outcome: 'applied', effects: [], reasonCode: null, phaseFrom: 'APPLICATION', phaseTo: 'APPLICATION', idempotencyDisposition: 'fresh', targetRef: 'app-1', createdAt: 'x' },
+        { id: 'l2', tool: 'generate_quote', actor: 'agent', outcome: 'applied', effects: [], reasonCode: null, phaseFrom: 'APPLICATION', phaseTo: 'QUOTE', idempotencyDisposition: 'fresh', targetRef: 'app-1', createdAt: 'x' },
+      ] as never,
+    })
+    expect(runDiagnostics(e).some((x) => x.checkId === 'blocked_action_attempted')).toBe(false)
+  })
   it('missing_consequences: a successful writing tool call with no ledger row in its conversation', () => {
     const e = makeExport({ turns: [turn(0, { toolCalls: [{ round: 0, toolCallId: 'x', name: 'sign_dnt', args: {}, partition: 'writing', result: { success: true, durationMs: 1, cached: false } }] })] as never, ledger: [] })
     expect(runDiagnostics(e).find((x) => x.checkId === 'missing_consequences')).toMatchObject({ severity: 'error', evidence: { tool: 'sign_dnt' } })

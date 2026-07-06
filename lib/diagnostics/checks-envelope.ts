@@ -18,11 +18,16 @@ export const blockedActionAttempted: DiagnosticCheck = {
       const turnStart = (t.legality ?? []).find((l) => l.point === 'turn_start')
       if (!turnStart) continue
       const blocked = new Map(turnStart.actions.blocked.map((b) => [b.action, b.reason]))
-      for (const l of (t.legality ?? []).filter((x) => x.point === 'post_commit')) {
-        const row = l.commitLedgerId ? rowsById.get(l.commitLedgerId) : undefined
-        if (row && row.outcome === 'applied' && blocked.has(row.tool)) {
-          out.push({ checkId: 'blocked_action_attempted', severity: 'error', turn: t.messageIndex, evidence: { tool: row.tool, reason: blocked.get(row.tool) } })
-        }
+      // Only the turn's FIRST commit is judged against turn_start: earlier
+      // same-turn applied commits legitimately move the state (batched
+      // select_coverage → generate_quote), so turn_start blocked-ness is
+      // stale for every later call — the gateway re-derives legality inside
+      // its transaction and is the authoritative wall there.
+      const postCommits = (t.legality ?? []).filter((x) => x.point === 'post_commit')
+      const first = postCommits[0]
+      const row = first?.commitLedgerId ? rowsById.get(first.commitLedgerId) : undefined
+      if (row && row.outcome === 'applied' && blocked.has(row.tool)) {
+        out.push({ checkId: 'blocked_action_attempted', severity: 'error', turn: t.messageIndex, evidence: { tool: row.tool, reason: blocked.get(row.tool) } })
       }
     }
     return out
