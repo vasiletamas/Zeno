@@ -174,6 +174,32 @@ export function adaptAction(action: UIAction): ToolCall | null {
         },
       }
 
+    // ── C1.5 sensitive-answer confirm round-trips (P0-6, 2026-07-06) ──
+    // The BD medical confirm card posts the SAME commit with the token; the
+    // material args (answer/newValue + questionCode) ride along so the token
+    // binds to the identical args hash.
+    case 'write_question_answer':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'write_question_answer',
+        arguments: {
+          answer: String(action.payload.answer ?? ''),
+          ...(action.payload.questionCode ? { questionCode: String(action.payload.questionCode) } : {}),
+          ...(action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {}),
+        },
+      }
+
+    case 'modify_answer':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'modify_answer',
+        arguments: {
+          questionCode: String(action.payload.questionCode ?? ''),
+          newValue: String(action.payload.newValue ?? ''),
+          ...(action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {}),
+        },
+      }
+
     // legacy GUI action name; the tool is set_application since B4.3
     case 'start_application':
     case 'set_application':

@@ -94,9 +94,12 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   const dntValid = latestDnt !== null && latestDnt.status === 'ACTIVE' && latestDnt.validUntil.getTime() > Date.now() && (!prod || latestDnt.productTypesCovered.includes(prod.insuranceType))
   const activeDntSession = await db.dntSession.findFirst({ where: { customerId: conversation.customerId, status: 'ACTIVE' } })
   let sessionCounts = { total: 0, answered: 0 }
+  let sessionPendingCode: string | null = null
   if (activeDntSession) {
     const sessionCodes = (await resolveGroupCodes(activeDntSession.productId, 'dnt', db)) ?? []
-    const sessionQuestions = sessionCodes.length > 0 ? await db.question.findMany({ where: { group: { code: { in: sessionCodes } } }, select: { id: true, code: true } }) : []
+    // Walk order mirrors the handler's sessionNextQuestion (group orderIndex,
+    // then question orderIndex) so pendingCode = the code write_dnt_answer expects.
+    const sessionQuestions = sessionCodes.length > 0 ? await db.question.findMany({ where: { group: { code: { in: sessionCodes } } }, select: { id: true, code: true }, orderBy: [{ group: { orderIndex: 'asc' } }, { orderIndex: 'asc' }] }) : []
     const sessionAnswerRows = sessionQuestions.length > 0 ? await db.dntAnswer.findMany({ where: { sessionId: activeDntSession.id }, select: { questionId: true, value: true } }) : []
     const answersById = new Map(sessionAnswerRows.map((a) => [a.questionId, a.value]))
     const sessionAnswers: Record<string, string> = {}
@@ -112,10 +115,12 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     )
     let total = 0
     let answered = 0
+    let pendingAssigned = false
     for (const q of sessionQuestions) {
       if (q.code && !dntVisible.has(q.code)) continue
       total++
       if (answersById.has(q.id)) answered++
+      else if (!pendingAssigned) { sessionPendingCode = q.code; pendingAssigned = true }
     }
     sessionCounts = { total, answered }
   }
@@ -191,6 +196,22 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   const suitabilityAcks = application && application.status !== 'CANCELLED'
     ? await db.suitabilityWarningAck.findMany({ where: { customerId: conversation.customerId, applicationId: application.id }, select: { ruleSetVersion: true } })
     : []
+  // P0-5 (2026-07-06): a tool whose LATEST ledger row is requires_confirmation
+  // has a confirm card awaiting the customer's tap — the briefing must
+  // countermand re-calling it (the token itself never enters the prompt).
+  const recentCommits = await db.commitLedger.findMany({
+    where: { conversationId },
+    orderBy: { createdAt: 'desc' },
+    select: { tool: true, outcome: true },
+    take: 50,
+  })
+  const latestOutcomeSeen = new Set<string>()
+  const pendingConfirmationTools: string[] = []
+  for (const row of recentCommits) {
+    if (latestOutcomeSeen.has(row.tool)) continue
+    latestOutcomeSeen.add(row.tool)
+    if (row.outcome === 'requires_confirmation') pendingConfirmationTools.push(row.tool)
+  }
   return {
     conversationId, customerId: conversation.customerId,
     product: prod ? { id: prod.id, code: prod.code, insuranceType: prod.insuranceType, eligibilityRules, suitabilityRules } : null,
@@ -212,10 +233,12 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
       sessionType: activeDntSession?.type ?? null,
       sessionAnswered: sessionCounts.answered,
       sessionTotal: sessionCounts.total,
+      pendingCode: sessionPendingCode,
       facts: dntFacts,
     },
     application: appState,
     resumableApplication: resumable ? { id: resumable.id, status: resumable.status as 'OPEN' | 'PAUSED' | 'REFERRED' } : null,
+    pendingConfirmationTools,
     // T7.D5: expiry via the ONE pure predicate — never an inline comparison
     quote: issued ? { id: issued.id, status: issued.status, premiumAnnual: issued.premiumAnnual, validUntil: issued.validUntil.toISOString(), expired: isExpired({ status: issued.status as QuoteStatusV3, validUntil: issued.validUntil }, new Date()), disclosuresRequired: quoteDisclosuresRequired, createdAt: issued.createdAt.toISOString() } : null,
     acceptedQuote: accepted ? { id: accepted.id, acceptedAt: accepted.updatedAt.toISOString() } : null,

@@ -11,7 +11,7 @@ import type { UIAction } from '@/lib/chat/action-adapter'
  * token — buttons never self-confirm.
  */
 
-export const CONFIRMABLE_TOOLS = ['sign_dnt', 'accept_quote'] as const
+export const CONFIRMABLE_TOOLS = ['sign_dnt', 'accept_quote', 'write_question_answer', 'modify_answer'] as const
 
 const COPY: Record<(typeof CONFIRMABLE_TOOLS)[number], { title: { ro: string; en: string }; body: { ro: string; en: string }; cta: { ro: string; en: string } }> = {
   sign_dnt: {
@@ -23,6 +23,19 @@ const COPY: Record<(typeof CONFIRMABLE_TOOLS)[number], { title: { ro: string; en
     title: { ro: 'Confirmă acceptarea ofertei', en: 'Confirm quote acceptance' },
     body: { ro: 'Accepți această ofertă? După acceptare urmează plata primei rate — polița se emite la prima plată reușită.', en: 'Accept this quote? The first installment payment follows — the policy is issued at the first successful payment.' },
     cta: { ro: 'Accept oferta', en: 'Accept quote' },
+  },
+  // C1.5 sensitive (BD medical) answers: the consequence plan demands the
+  // customer's explicit confirmation — before P0-6 these rendered NO card and
+  // the application deadlocked at the first medical question (2026-07-06).
+  write_question_answer: {
+    title: { ro: 'Confirmă răspunsul declarat', en: 'Confirm your declared answer' },
+    body: { ro: 'Acesta este un răspuns sensibil din declarația ta medicală. Confirmi că răspunsul afișat este corect și îți aparține?', en: 'This is a sensitive answer in your medical declaration. Do you confirm the displayed answer is correct and yours?' },
+    cta: { ro: 'Confirm răspunsul', en: 'Confirm answer' },
+  },
+  modify_answer: {
+    title: { ro: 'Confirmă modificarea răspunsului', en: 'Confirm the answer change' },
+    body: { ro: 'Modifici un răspuns sensibil din declarația ta medicală. Confirmi noua valoare? Răspunsurile dependente pot fi reevaluate.', en: 'You are changing a sensitive answer in your medical declaration. Confirm the new value? Dependent answers may be re-evaluated.' },
+    cta: { ro: 'Confirm modificarea', en: 'Confirm change' },
   },
 }
 

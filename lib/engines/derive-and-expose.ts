@@ -347,6 +347,7 @@ export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequiremen
     eligibility: d.eligibility, suitability: d.suitability, openItems: s.openItems,
     flagsForReview,
     nextBestAction: next ? `call ${next}` : 'continue the conversation (no funnel commit is currently available)',
+    pendingConfirmationTools: s.pendingConfirmationTools ?? [],
   }
   return { state, actions: { available, blocked } }
 }

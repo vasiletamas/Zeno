@@ -28,11 +28,19 @@ export function formatDerivedBriefing(state: DerivedStateV3, actions: ExposedAct
   const lines: string[] = []
   lines.push(`Phase: ${state.phase}${state.subphase ? '/' + state.subphase : ''}`)
   lines.push(`Next best action: ${state.nextBestAction}`)
+  // P0-5: a confirm card is on screen — override any push toward the tool.
+  for (const tool of state.pendingConfirmationTools ?? []) {
+    lines.push(`AWAITING CUSTOMER CONFIRMATION: ${tool} — a confirmation card is displayed in the chat; do NOT call ${tool} again yourself, invite the customer to tap Confirm on the card (their tap completes it).`)
+  }
   if (state.product) lines.push(`Product: ${state.product.code}`)
   if (state.selection.tier) lines.push(`Selection: tier ${state.selection.tier}${state.selection.level ? ', level ' + state.selection.level : ''}${state.selection.addon ? ', add-on included' : ''}`)
   if (state.application && state.application.missingCodes.length > 0) lines.push(`Remaining questions: ${state.application.missingCodes.slice(0, 5).join(', ')}${state.application.missingCodes.length > 5 ? ', …' : ''}`)
   // Sub-stage facts (A4.4): one load-bearing number per stage.
   if (state.phase === 'APPLICATION' && state.subphase === 'DNT') lines.push(`DNT remaining: ${state.dnt.totalCount - state.dnt.answeredCount}`)
+  // Phase-INDEPENDENT: DNT sessions legally run in DISCOVERY too (pre-application),
+  // and tool results are not replayed across turns — this line is the model's only
+  // durable source for the exact code (2026-07-06 debug report).
+  if (state.dnt.sessionActive && state.dnt.pendingCode) lines.push(`DNT current question code: ${state.dnt.pendingCode} — pass this EXACT code to write_dnt_answer for the current answer. To correct an already-answered DNT question, call write_dnt_answer with THAT question's own code instead (answers are write-or-change; get_dnt_questions lists all codes) — never write the correction into the current question.`)
   if (state.phase === 'QUOTE' && state.quote) lines.push(`Quote valid until: ${state.quote.validUntil.slice(0, 10)}`)
   if (state.phase === 'PAYMENT') lines.push(`Payment status: ${state.schedule.lastPaymentStatus ?? 'pending'}`)
   if (state.flagsForReview.length > 0) lines.push(`Flags for review: ${state.flagsForReview.join(', ')}`)

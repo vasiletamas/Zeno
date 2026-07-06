@@ -33,6 +33,8 @@ export interface DomainSnapshot {
     sessionType: string | null
     sessionAnswered: number
     sessionTotal: number
+    /** First visible unanswered question code of the ACTIVE session, in the handler's walk order (group orderIndex, question orderIndex). Null when no session or complete. Optional — undefined ≡ null — keeps pre-existing test literals compiling. */
+    pendingCode?: string | null
     /** C3.3: the SIGNED Dnt's answers (questionCode → value) — the suitability facts. Empty until a Dnt exists. */
     facts: Record<string, string>
   }
@@ -43,6 +45,13 @@ export interface DomainSnapshot {
    * so resume_application can be exposed in a fresh conversation.
    */
   resumableApplication: { id: string; status: 'OPEN' | 'PAUSED' | 'REFERRED' } | null
+  /**
+   * Tools whose LATEST ledger row in this conversation is requires_confirmation
+   * (a confirm card is displayed, awaiting the customer's tap). The briefing
+   * uses it to countermand re-calling the tool (2026-07-06 sign_dnt loop).
+   * Optional — undefined ≡ [] — keeps pre-existing test literals compiling.
+   */
+  pendingConfirmationTools?: string[]
   quote: { id: string; status: string; premiumAnnual: number; validUntil: string; expired: boolean; disclosuresRequired?: { kind: string; version: number; language: string }[]; createdAt?: string } | null // issued, unaccepted; disclosuresRequired (D2.5, T7.D2) = current disclosure docs lacking an exact-identity ack — the loader always sets it; undefined ≡ [] keeps pre-D2 test literals compiling; createdAt (E4.2) feeds open-item age
   acceptedQuote: { id: string; acceptedAt: string | null } | null
   schedule: { exists: boolean; settled: boolean; nextDueAt: string | null; lastPaymentStatus: string | null; capturedCount?: number; id?: string | null } // D2.5 live; capturedCount (D3.4) = PAID installments — gates change_payment_option pre-capture only; id (E4.2) = open-item refId
@@ -98,6 +107,8 @@ export interface DerivedStateV3 {
    */
   flagsForReview: string[]
   nextBestAction: string // MUST only name actions present in ExposedActions.available
+  /** Mirrors DomainSnapshot.pendingConfirmationTools — see that doc comment. */
+  pendingConfirmationTools?: string[]
 }
 
 export interface BlockedAction { action: string; reason: ReasonCode; params?: Record<string, unknown> }

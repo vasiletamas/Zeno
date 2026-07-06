@@ -40,6 +40,29 @@ it('signing creates the customer-scoped Dnt (365d, coverage computed), marks ses
   expect(await prisma.dnt.count({ where: { customerId: c.id, status: 'ACTIVE' } })).toBe(1)
 })
 
+it('requires_confirmation envelope instructs the model about the customer confirm card (2026-07-06 sign_dnt 80-turn loop)', async () => {
+  const c = await createCustomer(); const p = await prisma.product.findFirstOrThrow()
+  const conv = await prisma.conversation.create({ data: { customerId: c.id, candidateProductId: p.id } })
+  await executeCommit({ tool: 'open_dnt_session', args: {}, actor: 'agent', customerId: c.id, conversationId: conv.id, toolContext: ctx(c.id, conv.id) })
+  await answerAllDntQuestions(c.id, conv.id)
+  const first = await executeCommit({ tool: 'sign_dnt', args: { consent: { gdpr: true, aiDisclosure: true } }, actor: 'agent', customerId: c.id, conversationId: conv.id, toolContext: ctx(c.id, conv.id) })
+  expect(first.outcome).toBe('requires_confirmation')
+  const instruction = (first.data as { _instruction?: string })?._instruction ?? ''
+  expect(instruction).toContain('Do NOT')
+  expect(instruction.toLowerCase()).toContain('card')
+
+  // P0-5: the pending confirmation is a derived-state fact the NEXT turn can see
+  const { loadDomainSnapshot } = await import('@/lib/engines/snapshot-loader')
+  let snap = await loadDomainSnapshot(conv.id)
+  expect(snap.pendingConfirmationTools).toContain('sign_dnt')
+
+  // completing the two-step clears it
+  const done = await executeCommit({ tool: 'sign_dnt', args: { consent: { gdpr: true, aiDisclosure: true }, confirmToken: first.confirmToken }, actor: 'gui', customerId: c.id, conversationId: conv.id, toolContext: ctx(c.id, conv.id) })
+  expect(done.outcome).toBe('applied')
+  snap = await loadDomainSnapshot(conv.id)
+  expect(snap.pendingConfirmationTools ?? []).not.toContain('sign_dnt')
+})
+
 it('incomplete session → rejected(dnt_session_incomplete); refused consent → requires_consent, session intact', async () => {
   const c = await createCustomer(); const p = await prisma.product.findFirstOrThrow()
   const conv = await prisma.conversation.create({ data: { customerId: c.id, candidateProductId: p.id } })

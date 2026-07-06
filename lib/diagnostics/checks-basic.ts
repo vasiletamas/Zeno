@@ -65,6 +65,54 @@ export const duplicateTurnDebug: DiagnosticCheck = {
   },
 }
 
+export const confirmationStalled: DiagnosticCheck = {
+  // Ratchet addition (2026-07-06 triage): the 52-reissue sign_dnt deadlock
+  // produced ZERO warn/error findings — requires_confirmation outcomes carry
+  // no error string (tool_call_failed skips them by design) and the
+  // confirm_token_reissued anomaly is info-only. A trailing run of
+  // requires_confirmation for one tool with no subsequent apply IS the
+  // stuck-at-confirmation class: warn at 2, error at >= 3.
+  id: 'confirmation_stalled', description: 'Repeated requires_confirmation for the same tool with no subsequent apply — the confirm card is not being completed',
+  run: (e) => {
+    const trailing = new Map<string, number>()
+    for (const l of e.ledger as { tool: string; outcome: string }[]) {
+      if (l.outcome === 'requires_confirmation') trailing.set(l.tool, (trailing.get(l.tool) ?? 0) + 1)
+      else if (l.outcome === 'applied') trailing.delete(l.tool)
+    }
+    return [...trailing]
+      .filter(([, n]) => n >= 2)
+      .map(([tool, n]): Finding => ({ checkId: 'confirmation_stalled', severity: n >= 3 ? 'error' : 'warn', turn: null, evidence: { tool, reissues: n } }))
+  },
+}
+
+export const dntAnswerFabricated: DiagnosticCheck = {
+  // Ratchet addition (2026-07-06 triage): the model persisted DNT answers the
+  // customer never gave (family size "2" after five bare "da" replies).
+  // Narrow-by-design numeric heuristic: a successful write_dnt_answer whose
+  // value is a bare number (e.g. "2", "4+") that appears in none of the last
+  // four user messages has no textual anchor in the customer's words.
+  // Known limitation: number WORDS ("doi") are not matched — widen only with
+  // evidence, never weaken (ratchet rule).
+  id: 'dnt_answer_fabricated', description: 'A numeric DNT answer was saved without the number appearing in the customer\'s recent messages',
+  run: (e) => {
+    const ordered = [...e.turns].sort((a, b) => a.messageIndex - b.messageIndex)
+    const out: Finding[] = []
+    ordered.forEach((t, i) => {
+      for (const c of t.toolCalls) {
+        if (c.name !== 'write_dnt_answer' || c.result?.success !== true) continue
+        const value = String((c.args as { value?: unknown })?.value ?? '')
+        if (!/^\d+\+?$/.test(value)) continue
+        const digits = value.replace(/\+$/, '')
+        const recentUserProse = ordered.slice(Math.max(0, i - 3), i + 1).map((x) => String((x as { userMessage?: unknown }).userMessage ?? '')).join(' ')
+        if (!recentUserProse.includes(digits)) {
+          out.push({ checkId: 'dnt_answer_fabricated', severity: 'warn', turn: t.messageIndex, evidence: { questionCode: (c.args as { questionCode?: unknown })?.questionCode ?? null, value } })
+        }
+      }
+    })
+    return out
+  },
+}
+
 export const anomaliesReported: DiagnosticCheck = {
   // 1:1 severity map (walkthrough finding): info anomalies (e.g. the
   // multi-round "LLM retry detected" heuristic, idempotent_replay) must not

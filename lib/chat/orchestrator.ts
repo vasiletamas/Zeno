@@ -1199,6 +1199,27 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           }
         }
 
+        // Gateway parity (A3.5/M4): LLM-initiated commits emit the SAME
+        // confirm_required card as GUI-initiated ones. Previously only the
+        // synthetic path did, so chat-initiated sign_dnt deadlocked — the
+        // model told the customer to confirm a card that never rendered
+        // (2026-07-06 sign_dnt 80-turn loop).
+        if (pipelineResult.toolResult.envelope?.outcome === 'requires_confirmation') {
+          const { confirmToken: _staleToken, ...materialArgs } = (tc.arguments ?? {}) as Record<string, unknown>
+          yield {
+            event: 'ui_action',
+            data: {
+              type: 'confirm_required',
+              payload: {
+                tool: tc.name,
+                confirmToken: pipelineResult.toolResult.envelope.confirmToken,
+                args: materialArgs,
+                preview: pipelineResult.toolResult.envelope.data,
+              },
+            },
+          }
+        }
+
         messages.push({
           role: 'tool',
           content: serializeToolResultForModel(pipelineResult.toolResult),

@@ -15,18 +15,21 @@ import type { ToolContext } from '@/lib/tools/types'
 
 export async function buildReadyApplication(options: { escalationFlag?: string; withoutDob?: boolean } = {}) {
   const fx = await seedMinimalProtectFixture({ tier: 'standard', level: 'level_1', addon: false })
-  // withoutDob = the personas scenario: a pattern-valid but checksum-INVALID
-  // CNP in the DNT (the mirror skips it) and no declared dob → the decision
-  // must demand identity, never price on a guessed age.
   await signDntWithFacts(fx, {
     DNT_LIFE_SUBTYPE: 'simple_protection',
-    ...(options.withoutDob ? { DNT_CNP: '1111111111111' } : {}),
   })
   if (!options.withoutDob) {
     await setDeclaredField(fx.customerId, 'dateOfBirth', '1990-01-01', 'fixture')
     // checksum-valid AND consistent with the declared DOB (identity tier
     // derivation cross-checks cnpMatchesDob — D2.5); carries the residency fact
     await setDeclaredField(fx.customerId, 'cnp', '1900101080012', 'fixture')
+  } else {
+    // withoutDob = the personas scenario: identity facts underivable at quote
+    // time → the decision must demand identity, never price on a guessed age.
+    // P0-4 (2026-07-06) retired the old mechanism (a checksum-invalid CNP
+    // tolerated into the DNT — such writes now reject), so model the state
+    // directly: drop the profile facts the DNT mirror created.
+    await prisma.customerProfileField.deleteMany({ where: { customerId: fx.customerId, field: { in: ['cnp', 'dateOfBirth'] } } })
   }
   // complete the application questionnaire directly (the commit under test
   // is generate_quote, not the answer path)

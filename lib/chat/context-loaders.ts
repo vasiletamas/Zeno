@@ -812,13 +812,19 @@ export async function loadAgentKnowledge(
 // ==============================================
 
 export function loadDntContext(state: DerivedStateV3): string | null {
-  if (state.phase !== 'APPLICATION' || state.subphase !== 'DNT') return null
+  // Keyed on the ACTIVE session, not only APPLICATION/DNT: the engine legally
+  // opens DNT sessions during DISCOVERY (pre-application), and the model needs
+  // this surface there too (2026-07-06 debug report).
+  const inDntSubphase = state.phase === 'APPLICATION' && state.subphase === 'DNT'
+  if (!inDntSubphase && !state.dnt.sessionActive) return null
   return [
+    ...(state.dnt.pendingCode ? [`Current question code: ${state.dnt.pendingCode} — pass this EXACT code to write_dnt_answer for the current answer. To correct an already-answered question use THAT question's own code (write-or-change).`] : []),
     `DNT progress: ${state.dnt.answeredCount}/${state.dnt.totalCount}`,
     `DNT signed: ${state.dnt.signed ? 'yes (valid until ' + state.dnt.validUntil + ')' : 'no'}`,
     `GDPR consent: ${state.consents.gdprProcessing ? 'granted' : 'missing'}`,
     `AI disclosure: ${state.consents.aiDisclosure ? 'acknowledged' : 'missing'}`,
     'The needs analysis (DNT) is a regulatory requirement: complete the remaining questions, then obtain explicit signature via sign_dnt. Consent is captured at signing — never claim consent that is not recorded in state.',
+    'NEVER call write_dnt_answer with a value the customer did not explicitly state: if their reply does not answer the pending question (e.g. a bare "da" to a numeric or choice question), re-ask listing the options — do NOT pick a plausible value for them. This is a regulatory record they will sign.',
     // Salvaged questionnaire-facilitation guidance (A5.1 audit):
     'If the customer interrupts with a question or concern, answer it fully FIRST, then offer to resume — never force resumption.',
     'Medical/health questions: frame them before asking (needed for the insurance assessment, treated confidentially), keep a neutral non-judgmental tone, never comment on the answers.',

@@ -14,9 +14,16 @@ import type { ZenoEvent } from '@/lib/events/types'
 
 describe('executeTool instrumentation', () => {
   const emittedEvents: ZenoEvent[] = []
+  // Swapped per test instead of re-doMock-ing the registry: two doMock
+  // registrations for one path in the same test context resolve
+  // nondeterministically (the full-suite flake of 2026-07-06).
+  let handlerImpl: (args: unknown) => Promise<unknown> = async () => ({ success: true, data: { result: 'ok' } })
+  let cacheImpl: { cacheable: boolean; cached: unknown } = { cacheable: false, cached: null }
 
   beforeEach(async () => {
     emittedEvents.length = 0
+    handlerImpl = async () => ({ success: true, data: { result: 'ok' } })
+    cacheImpl = { cacheable: false, cached: null }
     vi.resetModules()
 
     // Mock the event bus to capture emitted events
@@ -36,10 +43,7 @@ describe('executeTool instrumentation', () => {
         parameters: {},
         sideEffects: false,
       })),
-      getToolHandler: vi.fn(() => async (_args: unknown) => ({
-        success: true,
-        data: { result: 'ok' },
-      })),
+      getToolHandler: vi.fn(() => (args: unknown) => handlerImpl(args)),
     }))
 
     vi.doMock('@/lib/tools/validation', () => ({
@@ -54,8 +58,8 @@ describe('executeTool instrumentation', () => {
     }))
 
     vi.doMock('@/lib/tools/cache', () => ({
-      isToolCacheable: vi.fn(() => false),
-      getCachedResult: vi.fn(() => null),
+      isToolCacheable: vi.fn(() => cacheImpl.cacheable),
+      getCachedResult: vi.fn(() => cacheImpl.cached),
       setCachedResult: vi.fn(),
     }))
 
@@ -140,16 +144,7 @@ describe('executeTool instrumentation', () => {
   })
 
   it('emits tool:end with success=false on handler error', async () => {
-    vi.doMock('@/lib/tools/registry', () => ({
-      getToolDefinition: vi.fn(() => ({
-        name: 'fail-tool',
-        description: 'Failing tool',
-        parameters: {},
-      })),
-      getToolHandler: vi.fn(() => async () => {
-        throw new Error('kaboom')
-      }),
-    }))
+    handlerImpl = async () => { throw new Error('kaboom') }
 
     const { executeTool } = await import('@/lib/tools/executor')
 
@@ -175,11 +170,7 @@ describe('executeTool instrumentation', () => {
   })
 
   it('emits tool:start/end with cached=true on cache hit', async () => {
-    vi.doMock('@/lib/tools/cache', () => ({
-      isToolCacheable: vi.fn(() => true),
-      getCachedResult: vi.fn(() => ({ success: true, data: { cached: true } })),
-      setCachedResult: vi.fn(),
-    }))
+    cacheImpl = { cacheable: true, cached: { success: true, data: { cached: true } } }
 
     const { executeTool } = await import('@/lib/tools/executor')
 

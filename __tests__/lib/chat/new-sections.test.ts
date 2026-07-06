@@ -22,6 +22,18 @@ describe('new (phase,subphase) sections', () => {
     expect(text).toContain('Policy status: PENDING_SUBMISSION')
     expect(text).toContain('never describe the policy as active or in force')
   })
+  it('dntContext renders during DISCOVERY when a session is active (pre-application flow) and carries the pending code', () => {
+    const r = deriveAndExpose(makeSnapshot({ application: null, dnt: { signed: false, valid: false, validUntil: null, coversProductTypes: [], answeredCount: 1, totalCount: 10, sessionActive: true, latest: null, activeSessionId: 's1', sessionType: 'NEW', sessionAnswered: 1, sessionTotal: 10, facts: {}, pendingCode: 'DNT_MARKETING_CONSENT' } }))
+    expect(r.state.phase).toBe('DISCOVERY')
+    const text = loadDntContext(r.state)
+    expect(text).toContain('DNT progress: 1/10')
+    expect(text).toContain('DNT_MARKETING_CONSENT')
+  })
+  it('dntContext carries the anti-fabrication rule (2026-07-06: model invented family size "2" after five bare "da" replies)', () => {
+    const r = deriveAndExpose(makeSnapshot({ application: { id: 'a', status: 'OPEN', tier: null, level: null, addon: null, answeredCount: 0, requiredCount: 6, missingCodes: ['Q1'], frozen: false }, dnt: { signed: false, valid: false, validUntil: null, coversProductTypes: [], answeredCount: 2, totalCount: 5, sessionActive: true, latest: null, activeSessionId: 's1', sessionType: 'NEW', sessionAnswered: 2, sessionTotal: 5, facts: {}, pendingCode: 'DNT_FAMILY_SIZE' } }))
+    const text = loadDntContext(r.state)
+    expect(text).toContain('NEVER call write_dnt_answer with a value the customer did not explicitly state')
+  })
   it('renderers return null outside their phase', () => {
     const r = deriveAndExpose(makeSnapshot())
     expect(loadDntContext(r.state)).toBeNull()

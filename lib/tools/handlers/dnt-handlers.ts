@@ -325,6 +325,13 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
     const v = validateAnswer({ type: question.type, options: question.options, validationRules: question.validationRules }, value)
     if (!v.valid) return { success: false, error: v.error ?? 'Invalid answer.' }
 
+    // P0-4 (2026-07-06): reject invalid CNPs like collect_customer_field does —
+    // previously the DNT saved them silently (and silently skipped the profile
+    // mirror), leaving an unusable identifier in the regulatory record.
+    if (questionCode === 'DNT_CNP' && !validateCnpChecksum(v.normalizedValue)) {
+      return { success: false, error: 'cnp_checksum_invalid: the CNP control digit does not match — ask the customer to re-check the 13 digits.' }
+    }
+
     await context.db.dntAnswer.upsert({
       where: { sessionId_questionId: { sessionId: session.id, questionId: question.id } },
       create: { sessionId: session.id, questionId: question.id, value: v.normalizedValue },

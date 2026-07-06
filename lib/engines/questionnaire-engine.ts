@@ -124,10 +124,12 @@ export function validateAnswer(
       for (const val of values) {
         const matched = fuzzyMatchOption(val, options)
         if (!matched) {
+          // Same self-healing shape as the DROPDOWN branch: the model cannot
+          // see prior-turn tool results, so the error must carry the options.
           return {
             valid: false,
             normalizedValue: trimmedValue,
-            error: `Invalid option: "${val}"`,
+            error: `Invalid option: "${val}". Valid options: ${options.map(o => o.value).join(', ')}`,
           }
         }
         normalizedValues.push(matched.value)

@@ -180,6 +180,13 @@ describe('validateAnswer', () => {
       const result = validateAnswer(multiQuestion, 'salary_pension,invalid_option')
       expect(result.valid).toBe(false)
     })
+
+    it('invalid-option error names the valid options — the model cannot see prior-turn tool results, the error is its only in-turn source (2026-07-06 stuck-loop)', () => {
+      const result = validateAnswer(multiQuestion, 'din salariu')
+      expect(result.valid).toBe(false)
+      expect(result.error).toContain('salary_pension')
+      expect(result.error).toContain('other_sources')
+    })
   })
 
   describe('NUMBER', () => {

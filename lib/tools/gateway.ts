@@ -258,7 +258,13 @@ export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
         reason: 'requires_confirmation',
         effects: [],
         confirmToken: issueConfirmToken(confirmSecret(), req.conversationId, req.tool, argsHash, fp),
-        data: { preview: { phase: pre.state.phase, quote: pre.state.quote } },
+        // _instruction is model-facing: without it the agent retries the tool
+        // forever or invents a written-consent protocol (2026-07-06 sign_dnt
+        // 80-turn loop) — the confirmation belongs to the CUSTOMER's card click.
+        data: {
+          preview: { phase: pre.state.phase, quote: pre.state.quote },
+          _instruction: 'A confirmation card is now shown to the customer in the chat UI. Do NOT call this tool again yourself — the customer completes the action by tapping Confirm on the card. Briefly invite them to confirm using the card.',
+        },
       }
       return writeLedger(prisma, req, targetRef, argsHash, envelope, pre.state.phase, pre.state.phase)
     }
@@ -315,7 +321,12 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
         reason: 'requires_confirmation',
         effects: [],
         confirmToken: issueConfirmToken(confirmSecret(), req.conversationId, req.tool, argsHash, stateFingerprint(lockedPre.state)),
-        data: { preview: handlerResult.requiresConfirmation.preview },
+        // Same model-facing instruction as the static requiresConfirmation
+        // path — the confirmation belongs to the customer's card click.
+        data: {
+          preview: handlerResult.requiresConfirmation.preview,
+          _instruction: 'A confirmation card is now shown to the customer in the chat UI. Do NOT call this tool again yourself — the customer completes the action by tapping Confirm on the card. Briefly invite them to confirm using the card.',
+        },
       }
       return writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, lockedPre.state.phase)
     }
