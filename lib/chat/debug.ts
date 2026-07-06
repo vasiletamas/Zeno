@@ -141,12 +141,18 @@ export interface DebugLegalityPayload {
 
 /**
  * Pure builder (F2.2, mirroring buildIdentityPayload): stamps the LIVE
- * engine version and redacts the snapshot; state/actions pass verbatim.
- * The engine version comes from Block A's derive-and-expose stamp — no
- * second version constant to drift (plan's version.ts skipped by design).
+ * engine version and redacts the snapshot; state/actions pass verbatim —
+ * EXCEPT identity.pendingChallenge.target (Task 1.1 added it for the
+ * gateway's resend guard): a raw email/phone must not persist in TurnDebug,
+ * and the stored value must equal what a recompute from the REDACTED
+ * snapshot yields (same '[redacted]' literal), or same-version drift fires.
  */
 export function buildLegalityPayload(input: Omit<DebugLegalityPayload, 'engineVersion'>): DebugLegalityPayload {
-  return { ...input, engineVersion, snapshot: redactSnapshot(input.snapshot) }
+  const pc = input.state.identity?.pendingChallenge
+  const state = pc?.target
+    ? { ...input.state, identity: { ...input.state.identity, pendingChallenge: { ...pc, target: '[redacted]' } } }
+    : input.state
+  return { ...input, engineVersion, state, snapshot: redactSnapshot(input.snapshot) }
 }
 
 export interface DebugIdentityMemoryEntry {
