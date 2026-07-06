@@ -9,6 +9,7 @@
  */
 import { createHash, randomInt, randomUUID } from 'crypto'
 import { prisma } from '@/lib/db'
+import { appBaseUrl } from '@/lib/app-url'
 import { getEmailProvider } from '@/lib/email'
 import { setVerifiedField } from '@/lib/customer/profile-service'
 import { claimAndMerge } from '@/lib/customer/claim-merge'
@@ -76,7 +77,7 @@ export async function issueChallenge(
 
   const customer = await db.customer.findUniqueOrThrow({ where: { id: customerId } })
   const locale = customer.language === 'en' ? 'en' : 'ro'
-  const link = `${process.env.APP_URL ?? 'http://localhost:3000'}/api/auth/verify?token=${linkToken}`
+  const link = `${appBaseUrl()}/api/auth/verify?token=${linkToken}`
   // one message, both presentations: the code for in-chat entry, the link
   // for one-click verification — same challenge either way.
   const subject = locale === 'ro' ? `Codul tău de verificare: ${code}` : `Your verification code: ${code}`

@@ -15,6 +15,7 @@ import { prisma } from '@/lib/db'
 import { getEmailProvider } from '@/lib/email'
 import type { EmailProvider } from '@/lib/email/types'
 import { issueChallenge } from '@/lib/customer/verification-service'
+import { appBaseUrl } from '@/lib/app-url'
 
 export interface OutboundNotification {
   customerId: string
@@ -50,7 +51,7 @@ export async function sendCustomerNotification(
       { send: async () => ({ messageId: 'embedded-in-notification' }) },
       RETURN_LINK_TTL_MS,
     )
-    const appUrl = process.env.APP_URL ?? 'http://localhost:3000'
+    const appUrl = appBaseUrl()
     html = html.replaceAll('{{magicLink}}', `${appUrl}/api/auth/verify?token=${linkToken}`)
   }
   await provider.send({ to: customer.email, subject: input.subject[locale], html })

@@ -12,6 +12,7 @@ import { ALL_PERSONAS, getPersona, DEFAULT_ANSWERS } from '@/lib/simulation/pers
 import { ALL_SCENARIOS } from '@/lib/simulation/scenarios'
 import { runDailyBatch } from '@/lib/self-improvement/batch-runner'
 import type { SimulationConfig, ConversationResult, RunResult } from '@/lib/simulation/types'
+import { appBaseUrl } from '@/lib/app-url'
 
 // ==============================================
 // SINGLETON GUARD
@@ -66,7 +67,7 @@ export async function runSimulation(config: SimulationConfig): Promise<RunResult
 
   running = true
   const startTime = Date.now()
-  const baseUrl = process.env.APP_URL ?? 'http://localhost:3000'
+  const baseUrl = appBaseUrl()
 
   // Create the SimulationRun record
   const run = await prisma.simulationRun.create({

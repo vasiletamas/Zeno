@@ -19,6 +19,7 @@ import { deriveIdentityTier } from '@/lib/engines/identity-rules'
 import { deriveConsents } from '@/lib/customer/consent'
 import { issueChallenge } from '@/lib/customer/verification-service'
 import { reEngagementEmail } from '@/lib/email/templates/re-engagement'
+import { appBaseUrl } from '@/lib/app-url'
 
 export interface ReEngagementReport {
   considered: number
@@ -107,7 +108,7 @@ export async function runReEngagementJob(opts: { provider?: EmailProvider; now?:
       { send: async () => ({ messageId: 'embedded-in-re-engagement-email' }) },
       RETURN_LINK_TTL_MS,
     )
-    const appUrl = process.env.APP_URL ?? 'http://localhost:3000'
+    const appUrl = appBaseUrl()
     const magicLinkUrl = `${appUrl}/api/auth/verify?token=${linkToken}`
     const locale = (customer.language === 'en' ? 'en' : 'ro') as 'ro' | 'en'
     const mail = reEngagementEmail({ trigger: c.trigger, magicLinkUrl, locale })
