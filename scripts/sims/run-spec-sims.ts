@@ -65,7 +65,7 @@ const ASSERTS: Record<string, (e: ConversationExport) => void> = {
 // DNT questions that merely mention consent (marketing, electronic
 // communication) get valid enum answers, otherwise the transcript fills
 // with invalid-option loops the diagnostics rightly flag as stuck.
-function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedCode: string | null = null, verification: 'link' | 'typed' = 'link'): string {
+function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedCode: string | null = null, verification: 'link' | 'typed' = 'link', email = 'ion.sim@example.com'): string {
   const m = msg.toLowerCase()
   // Task 4.2 (D7): typed-code verification — a live challenge exists and the
   // agent is talking about the code, so the persona reads it back. Checked
@@ -120,11 +120,11 @@ function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedC
   if (/deja verificat/.test(m)) return 'perfect, atunci vreau sa accept oferta'
   // Channel choice / an sms-code ask (sms transport does not exist) — steer
   // the verification to email.
-  if (/(prin|pe) sms/.test(m) && /\bcod/.test(m)) return 'nu imi merge sms-ul, trimite codul pe email la ion.sim@example.com'
+  if (/(prin|pe) sms/.test(m) && /\bcod/.test(m)) return `nu imi merge sms-ul, trimite codul pe email la ${email}`
   if (/email sau sms|sms sau email/.test(m)) return 'pe email, va rog'
   // Only when the agent ASKS for an address — a bare /email/ match loops on
   // any sentence mentioning the word.
-  if (/adres[ăa] (ta )?de e?mail|ce e?mail|emailul t[ăa]u|care.*e?mail/.test(m)) return 'ion.sim@example.com'
+  if (/adres[ăa] (ta )?de e?mail|ce e?mail|emailul t[ăa]u|care.*e?mail/.test(m)) return email
   // Typed mode never claims a link click (a lie that derails the close —
   // no link was clicked); a plain "da" pushes toward the acceptance ask.
   if (/\bcod\b|verificare|verificat/.test(m)) return verification === 'typed' ? 'da' : 'am dat click pe linkul din email'
@@ -367,6 +367,12 @@ async function runTrial(sc: SpecSimScenario, trial: number): Promise<{ pass: boo
     data: { customerId: customer.id, language: 'ro', channel: 'web' },
   })
   let turns = 0
+  // Each trial is an INDEPENDENT customer: a shared mailbox would claim-and-
+  // merge later trials into the first verified one, and the merged-in policy
+  // walls the funnel at POLICY phase (repeat purchase is out of scope —
+  // snapshot policy is customer-scoped by design, D4.4). The merge path
+  // itself is covered by the claim-merge integration ring.
+  const personaEmail = `ion.sim+${conv.id}@example.com`
   // Task 2.2 (D1): the latest unanswered DNT card on screen (cards mode taps it).
   let pendingDntCard: DntCard | null = null
   const send = async (msg: string, syntheticToolCall?: { id: string; name: string; arguments: Record<string, unknown> }) => {
@@ -440,7 +446,7 @@ async function runTrial(sc: SpecSimScenario, trial: number): Promise<{ pass: boo
     // agent no longer enumerates options in prose, so the card is the
     // question's one visible source).
     const typed = await typedCardAnswer()
-    await send(typed ?? pickAnswer(await lastAssistant(conv.id), sc.answerPolicy, await currentCode(), sc.verification ?? 'link'))
+    await send(typed ?? pickAnswer(await lastAssistant(conv.id), sc.answerPolicy, await currentCode(), sc.verification ?? 'link', personaEmail))
   }
   if (sc.fullFunnel) await worldHooks(customer.id, conv.id, hookOpts)
   if (sc.key === 'quote-decline' && (await goalReached(sc.key, customer.id, conv.id))) {
