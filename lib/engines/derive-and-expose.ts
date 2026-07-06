@@ -88,7 +88,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.35.0' // 1.35.0: requires_identity needs DECOMPOSE into actionable gaps (declared:<field> + verified_channel) — run cmr9dw3s5: the bare tier label left the agent polling state, then escalating; 1.34.0: sign_medical_declarations exposed + generate_quote medical_declarations_unsigned gate (T6.D3 deviation 2026-07-06 — batch signature replaces per-answer CONFIRM_ALWAYS cards); 1.33.0: get_open_items read exposed (E4.3, M2 — the ONE list read); 1.32.0: request_erasure/request_data_export exposed (E3, M3) — erasure always offerable and consent-halt exempt, export behind the verified_channel identity row; 1.31.0: set_application ineligible block params carry the derived age bounds (E1.6, T11.D4); 1.30.0: request_cancellation exposed via the deterministic free-look rule (D4.5, T9.D2) — outside_free_look precise block; 1.29.0: get_policy_info customer-scoped read + POLICY phase derives from the customer-scoped policy (D4.4, T9.D5/D6); 1.28.0: change_payment_option exposed pre-capture only (D3.4, T8.D5); 1.27.0: ensure_payment_session replaces the legacy initiate tool (D3.3, T8.D4); 1.26.0: get_payment_status read exposed on schedule existence (D3.2); 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application; 1.23.0: acknowledge_disclosures exposed on the live issued quote (D2.3, T7.D2); 1.24.0: accept_quote legality through the pure acceptQuoteLegality predicate (D2.5, T7.D6) — expiry → transition → verified_channel identity → disclosure acks; 1.25.0: the payment commit rides the schedule (D2.8) — due PENDING installment exposes, settled answers no_due_installment, no Policy prerequisite
+export const engineVersion = '1.36.0' // 1.36.0: structured funnel objective (B1, autonomy plan 2026-07-06) — goal + achievableNow + missingPreconditions derived from the priority ladder over available THEN blocked actions, so a blocked endgame (D5: accept_quote requires_identity while a challenge is pending) surfaces as a stated precondition instead of a wrong imperative hint; nextBestAction unchanged for compat consumers; 1.35.0: requires_identity needs DECOMPOSE into actionable gaps (declared:<field> + verified_channel) — run cmr9dw3s5: the bare tier label left the agent polling state, then escalating; 1.34.0: sign_medical_declarations exposed + generate_quote medical_declarations_unsigned gate (T6.D3 deviation 2026-07-06 — batch signature replaces per-answer CONFIRM_ALWAYS cards); 1.33.0: get_open_items read exposed (E4.3, M2 — the ONE list read); 1.32.0: request_erasure/request_data_export exposed (E3, M3) — erasure always offerable and consent-halt exempt, export behind the verified_channel identity row; 1.31.0: set_application ineligible block params carry the derived age bounds (E1.6, T11.D4); 1.30.0: request_cancellation exposed via the deterministic free-look rule (D4.5, T9.D2) — outside_free_look precise block; 1.29.0: get_policy_info customer-scoped read + POLICY phase derives from the customer-scoped policy (D4.4, T9.D5/D6); 1.28.0: change_payment_option exposed pre-capture only (D3.4, T8.D5); 1.27.0: ensure_payment_session replaces the legacy initiate tool (D3.3, T8.D4); 1.26.0: get_payment_status read exposed on schedule existence (D3.2); 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application; 1.23.0: acknowledge_disclosures exposed on the live issued quote (D2.3, T7.D2); 1.24.0: accept_quote legality through the pure acceptQuoteLegality predicate (D2.5, T7.D6) — expiry → transition → verified_channel identity → disclosure acks; 1.25.0: the payment commit rides the schedule (D2.8) — due PENDING installment exposes, settled answers no_due_installment, no Policy prerequisite
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -320,6 +320,46 @@ export const ACTION_RULES: ActionRule[] = [
 
 const NEXT_BEST_PRIORITY = ['ensure_payment_session', 'accept_quote', 'generate_quote', 'sign_medical_declarations', 'select_coverage', 'write_question_answer', 'sign_dnt', 'write_dnt_answer', 'open_dnt_session', 'set_application', 'set_candidate_product', 'list_products']
 
+// B1: the goal derives from the PHASE — the phase IS the funnel position —
+// never from scanning blocked actions, whose reasons mix real obstacles
+// (requires_identity) with not-reached-yet markers (no_candidate_product).
+// Within the goal, the priority-ordered action list answers "achievable via
+// what?"; when none is available, the goal's blocked entries are the honest
+// preconditions (the D5 endgame shape: accept_quote / requires_identity).
+const GOAL_ACTIONS: Record<import('./domain-types').FunnelGoal, string[]> = {
+  payment: ['ensure_payment_session'],
+  quote_acceptance: ['accept_quote'],
+  quote_generation: ['generate_quote', 'sign_medical_declarations'],
+  application_completion: ['select_coverage', 'write_question_answer'],
+  needs_analysis: ['sign_dnt', 'write_dnt_answer', 'open_dnt_session'],
+  discovery: ['set_application', 'set_candidate_product', 'list_products'],
+  post_sale: [],
+}
+
+function deriveObjective(
+  d: { phase: Phase; subphase: AppSubphase | null },
+  dntSessionActive: boolean,
+  availableSet: Set<string>,
+  blocked: BlockedAction[],
+): import('./domain-types').FunnelObjective {
+  const goal: import('./domain-types').FunnelGoal =
+    d.phase === 'POLICY' ? 'post_sale'
+    : d.phase === 'PAYMENT' ? 'payment'
+    : d.phase === 'QUOTE' ? 'quote_acceptance'
+    : d.phase === 'APPLICATION'
+      ? (d.subphase === 'DNT' ? 'needs_analysis' : d.subphase === 'QUESTIONNAIRE' ? 'application_completion' : 'quote_generation')
+      // pre-application DNT sessions legally run in DISCOVERY too (phase map note)
+      : dntSessionActive ? 'needs_analysis' : 'discovery'
+
+  const actions = GOAL_ACTIONS[goal]
+  const achievable = actions.find((a) => availableSet.has(a))
+  if (achievable) return { goal, achievableNow: achievable, missingPreconditions: [] }
+
+  const blockedByAction = new Map(blocked.map((b) => [b.action, b]))
+  const missing = actions.map((a) => blockedByAction.get(a)).filter((b): b is BlockedAction => b !== undefined)
+  return { goal, achievableNow: null, missingPreconditions: missing }
+}
+
 export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequirements?: IdentityRequirementsTable }): DeriveAndExposeResult {
   const d: Derived = { ...derivePhase(s), eligibility: deriveEligibility(s), suitability: deriveSuitability(s) }
   const identityTable = config?.identityRequirements ?? IDENTITY_REQUIREMENTS
@@ -364,6 +404,7 @@ export function deriveAndExpose(s: DomainSnapshot, config?: { identityRequiremen
     eligibility: d.eligibility, suitability: d.suitability, openItems: s.openItems,
     flagsForReview,
     nextBestAction: next ? `call ${next}` : 'continue the conversation (no funnel commit is currently available)',
+    objective: deriveObjective(d, s.dnt.sessionActive, availableSet, blocked),
     pendingConfirmationTools: s.pendingConfirmationTools ?? [],
   }
   return { state, actions: { available, blocked } }

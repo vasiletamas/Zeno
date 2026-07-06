@@ -24,10 +24,31 @@ export function getRequiredSectionsFor(phase: Phase, subphase: AppSubphase | nul
   const extras = phase === 'APPLICATION' && subphase ? BY_SUBPHASE[subphase] : BY_PHASE[phase]
   return [...new Set([...ALWAYS, ...extras])]
 }
+// B1: the objective renders as facts the model reasons over — never as a
+// command it obeys. "Next best action: call X" trained the model to follow
+// wrong engine hints (D5: re-sent the verification code because the hint said
+// set_candidate_product while accept_quote sat blocked on requires_identity).
+const GOAL_DESCRIPTIONS: Record<import('@/lib/engines/domain-types').FunnelGoal, string> = {
+  payment: 'collect the due installment',
+  quote_acceptance: 'get the issued quote accepted',
+  quote_generation: 'generate the quote',
+  application_completion: 'complete the application (remaining answers and coverage selection)',
+  needs_analysis: 'complete the needs analysis (DNT)',
+  discovery: 'understand the need and converge on a product',
+  post_sale: 'serve the customer post-sale (the sale is closed — no selling)',
+}
+
 export function formatDerivedBriefing(state: DerivedStateV3, actions: ExposedActions): string {
   const lines: string[] = []
   lines.push(`Phase: ${state.phase}${state.subphase ? '/' + state.subphase : ''}`)
-  lines.push(`Next best action: ${state.nextBestAction}`)
+  lines.push(`Open objective: ${GOAL_DESCRIPTIONS[state.objective.goal]}.`)
+  if (state.objective.achievableNow) {
+    lines.push(`Achievable now via: ${state.objective.achievableNow}.`)
+  } else if (state.objective.missingPreconditions.length > 0) {
+    for (const b of state.objective.missingPreconditions) {
+      lines.push(`Not yet achievable — ${b.action} is blocked: ${b.reason}${b.params ? ' ' + JSON.stringify(b.params) : ''}. Resolve this precondition first; never push a different funnel commit to get around it.`)
+    }
+  }
   // P0-5: a confirm card is on screen — override any push toward the tool.
   for (const tool of state.pendingConfirmationTools ?? []) {
     lines.push(`AWAITING CUSTOMER CONFIRMATION: ${tool} — a confirmation card is displayed in the chat; do NOT call ${tool} again yourself, invite the customer to tap Confirm on the card (their tap completes it).`)

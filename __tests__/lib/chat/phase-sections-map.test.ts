@@ -38,11 +38,35 @@ describe('getRequiredSectionsFor (A1 content-preserving mapping)', () => {
 })
 
 describe('formatDerivedBriefing (new vocabulary)', () => {
-  it('renders phase, subphase and the engine nextBestAction', () => {
+  // B1 (plan 2026-07-06): the briefing states the objective as facts, never
+  // as a command — "Next best action: call X" trained the model to obey
+  // wrong engine hints (D5 class).
+  it('renders phase, subphase and the funnel objective — never the imperative hint', () => {
     const r = deriveAndExpose(makeSnapshot({ application: { id: 'a', status: 'OPEN', tier: null, level: null, addon: null, answeredCount: 0, requiredCount: 6, missingCodes: ['Q1'], frozen: false } }))
     const text = formatDerivedBriefing(r.state, r.actions)
     expect(text).toContain('Phase: APPLICATION/DNT')
-    expect(text).toContain('Next best action:')
+    expect(text).toContain('Open objective:')
+    expect(text).not.toContain('Next best action:')
+  })
+  it('blocked objective renders the missing precondition with its reason (D5 class)', () => {
+    const r = deriveAndExpose(makeSnapshot({
+      application: { id: 'a', status: 'OPEN', tier: 't', level: 'l', addon: false, answeredCount: 6, requiredCount: 6, missingCodes: [], frozen: true },
+      dnt: { signed: true, valid: true, validUntil: '2027-01-01T00:00:00.000Z', coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0, facts: {} },
+      consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true },
+      quote: { id: 'q1', status: 'ISSUED', premiumAnnual: 500, validUntil: '2027-01-01T00:00:00.000Z', expired: false },
+      identity: { tier: 'anonymous', fields: {}, verifiedChannels: [], pendingChallenge: { channel: 'email' } },
+    }))
+    const text = formatDerivedBriefing(r.state, r.actions)
+    expect(text).toContain('Open objective:')
+    expect(text).toContain('accept_quote is blocked: requires_identity')
+    expect(text).toContain('Resolve this precondition first')
+  })
+  it('achievable objective names the action informatively', () => {
+    const r = deriveAndExpose(makeSnapshot({
+      dnt: { signed: false, valid: false, validUntil: null, coversProductTypes: [], answeredCount: 1, totalCount: 5, sessionActive: true, latest: null, activeSessionId: 's1', sessionType: 'NEW', sessionAnswered: 1, sessionTotal: 5, facts: {}, pendingCode: 'DNT_AGE' },
+    }))
+    const text = formatDerivedBriefing(r.state, r.actions)
+    expect(text).toContain('Achievable now via: write_dnt_answer')
   })
   it('briefing renders per-stage facts: quote validity in QUOTE, payment status in PAYMENT', () => {
     const q = deriveAndExpose(makeSnapshot({ application: { id: 'a', status: 'OPEN', tier: 't', level: 'l', addon: false, answeredCount: 6, requiredCount: 6, missingCodes: [], frozen: false }, dnt: { signed: true, valid: true, validUntil: '2027-01-01T00:00:00.000Z', coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0, facts: {} }, consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true }, quote: { id: 'q1', status: 'ISSUED', premiumAnnual: 500, validUntil: '2027-01-01T00:00:00.000Z', expired: false } }))

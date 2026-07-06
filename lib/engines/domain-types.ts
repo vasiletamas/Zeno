@@ -107,11 +107,27 @@ export interface DerivedStateV3 {
    */
   flagsForReview: string[]
   nextBestAction: string // MUST only name actions present in ExposedActions.available
+  /** B1: the structured objective the briefing renders — facts, not commands. */
+  objective: FunnelObjective
   /** Mirrors DomainSnapshot.pendingConfirmationTools — see that doc comment. */
   pendingConfirmationTools?: string[]
 }
 
 export interface BlockedAction { action: string; reason: ReasonCode; params?: Record<string, unknown> }
+
+// B1 (2026-07-06 autonomy plan): the structured funnel objective — what the
+// conversation is working toward, stated as facts. The briefing renders THIS
+// instead of the imperative "call X" hint; nextBestAction survives only for
+// compat consumers (invariant monitors, get_current_state).
+export const FUNNEL_GOALS = ['payment', 'quote_acceptance', 'quote_generation', 'application_completion', 'needs_analysis', 'discovery', 'post_sale'] as const
+export type FunnelGoal = (typeof FUNNEL_GOALS)[number]
+export interface FunnelObjective {
+  goal: FunnelGoal
+  /** The available action that advances the goal right now, if any. */
+  achievableNow: string | null
+  /** When the goal's action is blocked: the block(s) standing in the way. */
+  missingPreconditions: BlockedAction[]
+}
 export interface ExposedActions { available: string[]; blocked: BlockedAction[] }
 export interface DeriveAndExposeResult { state: DerivedStateV3; actions: ExposedActions }
 
