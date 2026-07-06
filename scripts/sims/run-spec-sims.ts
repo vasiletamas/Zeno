@@ -66,7 +66,8 @@ const ASSERTS: Record<string, (e: ConversationExport) => void> = {
 // communication) get valid enum answers, otherwise the transcript fills
 // with invalid-option loops the diagnostics rightly flag as stuck.
 function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedCode: string | null = null, verification: 'link' | 'typed' = 'link', email = 'ion.sim@example.com'): string {
-  const m = msg.toLowerCase()
+  // markdown emphasis breaks adjacency ("adresa de **email**") — strip it
+  const m = msg.toLowerCase().replace(/\*/g, '')
   // Task 4.2 (D7): typed-code verification — a live challenge exists and the
   // agent is talking about the code, so the persona reads it back. Checked
   // FIRST: "ți-am trimis codul pe email" would otherwise match the email rule.
@@ -98,7 +99,7 @@ function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedC
   if (/membri|famili/.test(m)) return '2'
   if (/tip de protec|protec[țt]ie simpl/.test(m)) return 'simple_protection'
   if (/educa|studii/.test(m)) return 'studii universitare (university)'
-  if (/numele complet|nume [șs]i prenume|cum te nume/.test(m)) return 'Ion Simulescu'
+  if (/numele( t[ăa]u)? complet|nume [șs]i prenume|cum te nume/.test(m)) return 'Ion Simulescu'
   // KYC completion asks (the precise requires_identity needs) — the DOB
   // must MATCH the CNP above (1960229410015 → born 1996-02-29).
   if (/data na[șs]terii|zi de na[șs]tere|aaaa-ll-zz/.test(m)) return '1996-02-29'
@@ -107,16 +108,17 @@ function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedC
   // answered 'da' forever (2026-07-06 battery: phone never declared, close
   // walled on requires_identity).
   if (/telefon/.test(m) && /num[ăa]r|format|07/.test(m)) return '0712345678'
+  // Consent to SEND the verification code — must outrank BOTH the email
+  // rule ("Continuăm cu verificarea adresei de email?" is a yes/no ask, not
+  // an address ask) and the acceptance rule (the agent gates the close on
+  // "trimite codul pe email" and an acceptance-stuck persona loops there,
+  // re-collecting known fields — 2026-07-06 battery).
+  if (!typedCode && /trimite codul|trimit codul|verificarea? (identit[ăa][țt]ii )?(pe|prin) e?mail|verificarea (adresei de )?e?mail(ului)?/.test(m)) return 'da, trimite codul pe email'
   // The email ASK must outrank the acceptance rule: KYC asks are phrased
   // "Ca să poți accepta oferta... scrie adresa ta de email" — the acceptance
   // match stonewalled the ask for 3 turns and the pressured model misfired
-  // set_candidate_product with random entity ids (2026-07-06 battery).
+  // set_candidate_product with random entity ids.
   if (/adres[ăa]( ta)? de e?mail|ce e?mail|emailul t[ăa]u|care.*e?mail|scrie e?mailul/.test(m)) return email
-  // Consent to SEND the verification code — same reason: the agent gates the
-  // close on "trimite codul pe email" / "mai lipsește verificarea emailului"
-  // and a persona stuck on "vreau sa accept oferta" loops there forever,
-  // re-collecting known fields.
-  if (!typedCode && /trimite codul|trimit codul|verificarea? (identit[ăa][țt]ii )?(pe|prin) e?mail|verificarea (adresei de )?e?mail(ului)?/.test(m)) return 'da, trimite codul pe email'
   // The acceptance ask — MUST outrank the greedy keyword rules below: a
   // quote presentation enumerates coverages ("spitalizare", "venit",
   // "familia"), and a stray keyword answer at the close kills the sale.
