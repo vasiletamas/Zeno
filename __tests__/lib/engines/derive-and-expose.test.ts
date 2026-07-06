@@ -31,6 +31,28 @@ describe('deriveAndExpose — exposure over the FULL snapshot (contradiction #12
     expect(r.actions.available).not.toContain('generate_quote')
     expect(r.actions.blocked).toContainEqual(expect.objectContaining({ action: 'generate_quote', reason: 'requires_identity', params: { needs: ['declared:cnp_or_dateOfBirth'] } }))
   })
+  // 2026-07-06 battery wall: the customer verified the email yet accept_quote
+  // still said needs ['verified_channel'] — the agent gave up on the close.
+  // The blocked payload must name the PRECISE missing piece (here: phone).
+  it('QUOTE: accept_quote blocked requires_identity names the actual missing KYC piece, never a bare tier word', () => {
+    const identity = {
+      tier: 'declared' as const,
+      fields: {
+        name: { provenance: 'declared' as const }, cnp: { provenance: 'declared' as const },
+        dateOfBirth: { provenance: 'declared' as const }, email: { provenance: 'verified' as const },
+      },
+      verifiedChannels: ['email'] as ('email' | 'sms')[], pendingChallenge: null,
+    }
+    const r = deriveAndExpose(makeSnapshot({
+      application: doneApp, dnt: validDnt, identity,
+      consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true },
+      quote: { id: 'q1', status: 'ISSUED', premiumAnnual: 190, validUntil: '2027-01-01T00:00:00.000Z', expired: false, disclosuresRequired: [] },
+    }))
+    expect(r.actions.available).not.toContain('accept_quote')
+    expect(r.actions.blocked).toContainEqual(expect.objectContaining({
+      action: 'accept_quote', reason: 'requires_identity', params: { needs: ['declared:phone'] },
+    }))
+  })
   it('sign_dnt blocked with dnt_session_incomplete while the ACTIVE session has pending questions (B2)', () => {
     const s = makeSnapshot({ application: { ...doneApp, status: 'OPEN', missingCodes: ['Q1'], frozen: false }, dnt: { ...validDnt, signed: false, valid: false, latest: null, activeSessionId: 'sess-1', sessionType: 'NEW', sessionAnswered: 2, sessionTotal: 10, facts: {} } })
     const r = deriveAndExpose(s)
