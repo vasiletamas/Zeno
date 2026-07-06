@@ -1132,7 +1132,7 @@ registerTool('start_channel_verification', {
   parameters: {
     type: 'object',
     properties: {
-      channel: { type: 'string', enum: ['email', 'sms'], description: 'Which channel to verify.' },
+      channel: { type: 'string', enum: ['email', 'sms'], description: 'Which channel to verify. Only "email" is deliverable today — sms is rejected until an SMS provider is configured.' },
       target: { type: 'string', description: 'The email address or Romanian phone number the customer gave, exactly as provided.' },
       resend: { type: 'boolean', description: 'Set true ONLY when the customer explicitly asked for a new code while one is already pending.' },
     },

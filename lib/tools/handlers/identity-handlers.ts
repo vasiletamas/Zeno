@@ -19,8 +19,12 @@ export const startChannelVerification: ToolHandler = async (args, context) => {
     if (channel === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target)) {
       return { success: false, error: 'invalid_args: target is not a valid email address.' }
     }
-    if (channel === 'sms' && !/^(\+?40|0)\d{9}$/.test(target.replace(/[\s-]/g, ''))) {
-      return { success: false, error: 'invalid_args: target is not a valid Romanian phone number.' }
+    if (channel === 'sms') {
+      // The SMS transport is not implemented (B3.5 placeholder) — a standing
+      // sms challenge could never be satisfied, and Task 1.1's re-send guard
+      // would then wall the funnel behind an undeliverable code. Reject with
+      // the redirect until a real SMS provider lands.
+      return { success: false, error: 'invalid_args: SMS verification is not available yet — verify the EMAIL address instead (start_channel_verification with channel "email").' }
     }
     await issueChallenge(context.customerId, channel, target, context.conversationId, context.db)
     // anti-enumeration: the payload never says whether the target belongs to

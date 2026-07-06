@@ -51,6 +51,18 @@ it('confirm verifies the channel; when the target belongs to another customer it
   expect(ch.conversationId).toBe(conv.id)
 })
 
+it('NEGATIVE: sms verification is rejected with a redirect while the transport is unimplemented (a standing sms challenge is an unfulfillable dead end)', async () => {
+  const c = await createCustomer()
+  const conv = await prisma.conversation.create({ data: { customerId: c.id } })
+  const r = await executeCommit({
+    tool: 'start_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
+    args: { channel: 'sms', target: '0712345678' }, toolContext: ctx(c.id, conv.id),
+  })
+  expect(r.outcome).toBe('rejected')
+  expect(String((r.data as { error?: string })?.error)).toMatch(/sms.*(not|nu).*(available|disponibil)|email/i)
+  expect(await prisma.verificationChallenge.count({ where: { customerId: c.id } })).toBe(0)
+})
+
 // Task 1.1 (D5): the verification endgame — wrong codes decrement a visible
 // attempt budget, and a live challenge blocks silent re-sends.
 

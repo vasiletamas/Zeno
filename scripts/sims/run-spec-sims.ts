@@ -118,6 +118,10 @@ function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedC
   // Post-verification: the agent says the email is already verified — the
   // next move is the close, never re-sending the address.
   if (/deja verificat/.test(m)) return 'perfect, atunci vreau sa accept oferta'
+  // Channel choice / an sms-code ask (sms transport does not exist) — steer
+  // the verification to email.
+  if (/(prin|pe) sms/.test(m) && /\bcod/.test(m)) return 'nu imi merge sms-ul, trimite codul pe email la ion.sim@example.com'
+  if (/email sau sms|sms sau email/.test(m)) return 'pe email, va rog'
   // Only when the agent ASKS for an address — a bare /email/ match loops on
   // any sentence mentioning the word.
   if (/adres[ăa] (ta )?de e?mail|ce e?mail|emailul t[ăa]u|care.*e?mail/.test(m)) return 'ion.sim@example.com'
