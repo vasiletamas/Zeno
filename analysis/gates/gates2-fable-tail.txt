@@ -1,0 +1,40 @@
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "addonId": null,
++   "approvedBy": null,
++   "authoredBy": "seed",
++   "content": "duplicat",
++   "createdAt": 2026-07-06T10:15:50.550Z,
++   "field": "SELL_SPECIFIC_INFO",
++   "id": "cmr92e786003y7d7dp8t698vh",
++   "locale": "ro",
++   "productId": "cmr926lq00007wf7ddgm0zocz",
++   "publishedAt": null,
++   "retiredAt": null,
++   "status": "DRAFT",
++   "updatedAt": 2026-07-06T10:15:50.550Z,
++   "version": 1,
+  }
+
+ ❯ __tests__/integration/product-content-model.test.ts:32:6
+     30|         },
+     31|       }),
+     32|     ).rejects.toThrow()
+       |      ^
+     33|   })
+     34|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  4 failed | 75 passed (79)
+      Tests  5 failed | 216 passed (221)
+   Start at  10:15:35
+   Duration  291.69s (transform 2.44s, setup 1.27s, import 49.15s, tests 229.14s, environment 7ms)
+
+INT_EXIT=1

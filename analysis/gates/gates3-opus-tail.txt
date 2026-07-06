@@ -1,0 +1,40 @@
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "addonId": null,
++   "approvedBy": null,
++   "authoredBy": "seed",
++   "content": "duplicat",
++   "createdAt": 2026-07-06T10:17:34.911Z,
++   "field": "SELL_SPECIFIC_INFO",
++   "id": "cmr92gfr30002ut7d85xjgk0o",
++   "locale": "ro",
++   "productId": "cmr927fof0000fu7d29v95y81",
++   "publishedAt": null,
++   "retiredAt": null,
++   "status": "DRAFT",
++   "updatedAt": 2026-07-06T10:17:34.911Z,
++   "version": 1,
+  }
+
+ ❯ __tests__/integration/product-content-model.test.ts:28:6
+     26|         data: { productId: product.id, field: 'SELL_SPECIFIC_INFO', lo…
+     27|       }),
+     28|     ).rejects.toThrow()   // passes ONLY because of the partial unique…
+       |      ^
+     29|   })
+     30|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  4 failed | 87 passed (91)
+      Tests  5 failed | 265 passed (270)
+   Start at  10:15:33
+   Duration  255.53s (transform 2.77s, setup 1.46s, import 57.92s, tests 182.26s, environment 7ms)
+
+INT_EXIT=1

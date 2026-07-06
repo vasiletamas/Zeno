@@ -1,0 +1,40 @@
+     66|   const tier = await prisma.pricingTier.findFirstOrThrow({ where: { co…
+       |                ^
+     67|   const level = await prisma.pricingLevel.findFirstOrThrow({ where: { …
+     68|
+ ❯ __tests__/integration/spec/commit-ring.spec.test.ts:42:59
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[84/108]⎯
+
+ FAIL  __tests__/integration/spec/commit-ring.spec.test.ts > commit-ring scenarios (F1.7, real DB) > [spec:contract/idempotent-on-double-submit] / [spec:lifecycle/one-application-one-quote] double-submit of generate_quote applies once, replays the original, yields exactly one quote
+PrismaClientKnownRequestError: 
+Invalid `prisma.pricingTier.findFirstOrThrow()` invocation in
+/tmp/claude-0/-home-user-Zeno/e93e4b60-4cc8-5022-86c6-b497c69cc145/scratchpad/worktrees/opus/__tests__/helpers/funnel-fixtures.ts:66:41
+
+  63 }
+  64 
+  65 // Bind tier/level to a seeded standard / level_1 pricing row.
+→ 66 const tier = await prisma.pricingTier.findFirstOrThrow(
+An operation failed because it depends on one or more records that were required but not found. No record was found for a query.
+ ❯ Gr.handleRequestError node_modules/@prisma/client/src/runtime/RequestHandler.ts:237:12
+ ❯ Gr.handleAndLogRequestError node_modules/@prisma/client/src/runtime/RequestHandler.ts:183:11
+ ❯ Gr.request node_modules/@prisma/client/src/runtime/RequestHandler.ts:152:11
+ ❯ a node_modules/@prisma/client/src/runtime/getPrismaClient.ts:938:23
+ ❯ buildReadyApplication __tests__/helpers/funnel-fixtures.ts:66:16
+     64|
+     65|   // Bind tier/level to a seeded standard / level_1 pricing row.
+     66|   const tier = await prisma.pricingTier.findFirstOrThrow({ where: { co…
+       |                ^
+     67|   const level = await prisma.pricingLevel.findFirstOrThrow({ where: { …
+     68|
+ ❯ __tests__/integration/spec/commit-ring.spec.test.ts:81:61
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[85/108]⎯
+
+
+ Test Files  39 failed | 52 passed (91)
+      Tests  107 failed | 160 passed | 3 skipped (270)
+   Start at  10:10:32
+   Duration  240.28s (transform 2.50s, setup 1.39s, import 56.59s, tests 166.85s, environment 8ms)
+
+INT_EXIT=1
