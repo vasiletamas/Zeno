@@ -253,8 +253,9 @@ export const openDntSession: ToolHandler = async (_args, context) => {
         progress,
       },
       message: next
-        ? `DNT session opened (${type}${type === 'UPDATE' ? `, ${prefilled} answers pre-filled` : ''}). First question code: ${next.code}. Ask it, then call write_dnt_answer with questionCode "${next.code}".`
+        ? `DNT session opened (${type}${type === 'UPDATE' ? `, ${prefilled} answers pre-filled` : ''}). First question code: ${next.code}. A question card is shown to the customer — invite them to answer on it; if they type instead, call write_dnt_answer with questionCode "${next.code}".`
         : `DNT session opened (${type}); all questions already answered — ready for sign_dnt.`,
+      uiAction: dntQuestionCard(next, progress),
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -271,6 +272,36 @@ export const openDntSession: ToolHandler = async (_args, context) => {
  * the just-written answer would be re-served. This walk reads via
  * context.db (the tx when gateway-routed).
  */
+/**
+ * Task 2.1 (D1): the DNT question CARD — same show_question uiAction the
+ * application questionnaire uses (QuestionCard + answer_question GUI action
+ * with groupType 'dnt' → gui-actor write_dnt_answer with the EXACT code).
+ * Full localized text/options ride the payload; the card, not the model,
+ * collects the answer.
+ */
+function dntQuestionCard(
+  next: { id: string; code: string | null; text: unknown; helpText: unknown; type: string; options: unknown; validationRules: unknown } | null,
+  progress: { answered: number; total: number },
+): { type: string; payload: Record<string, unknown> } | undefined {
+  if (!next) return undefined
+  return {
+    type: 'show_question',
+    payload: {
+      question: {
+        id: next.id,
+        code: next.code,
+        text: next.text as { en: string; ro: string },
+        helpText: next.helpText as { en: string; ro: string } | null,
+        type: next.type,
+        options: next.options,
+        validationRules: next.validationRules,
+      },
+      progress,
+      groupType: 'dnt',
+    },
+  }
+}
+
 async function sessionNextQuestion(
   db: Parameters<ToolHandler>[1]['db'],
   codes: string[],
@@ -369,7 +400,8 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
       },
       message: next === null
         ? 'All DNT questions answered. Ready for signature (sign_dnt).'
-        : `Answer saved. Next question code: ${next.code}. ${progress.total - progress.answered} remaining.`,
+        : `Answer saved. Next question code: ${next.code}. ${progress.total - progress.answered} remaining. A question card is shown — invite the customer to answer on it.`,
+      uiAction: dntQuestionCard(next, progress),
     }
   } catch (error) {
     return { success: false, error: String(error) }

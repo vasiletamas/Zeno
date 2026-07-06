@@ -44,6 +44,12 @@ interface QuestionCardProps {
   isLoading?: boolean
   /** The previously submitted answer, shown in answered state */
   answeredValue?: string | string[]
+  /**
+   * Task 2.1 (D1): optional client-side pre-submit hint (e.g. the DNT CNP
+   * checksum). Returns the hint text to show, or null to submit. The server
+   * re-validates regardless — this only saves the round-trip.
+   */
+  clientValidate?: (value: string) => string | null
 }
 
 /* ── Helpers ──────────────────────────────────────── */
@@ -561,15 +567,25 @@ export function QuestionCard({
   isAnswered = false,
   isLoading = false,
   answeredValue,
+  clientValidate,
 }: QuestionCardProps) {
+  const [clientHint, setClientHint] = useState<string | null>(null)
   const progressPercent =
     progress.total > 0 ? Math.round((progress.answered / progress.total) * 100) : 0
 
   const handleAnswer = useCallback(
     (value: string | string[]) => {
+      if (clientValidate && typeof value === 'string') {
+        const hint = clientValidate(value)
+        if (hint) {
+          setClientHint(hint)
+          return
+        }
+      }
+      setClientHint(null)
       onAnswer(value)
     },
-    [onAnswer]
+    [onAnswer, clientValidate]
   )
 
   const handleStringAnswer = useCallback(
@@ -700,6 +716,13 @@ export function QuestionCard({
 
       {/* Input area */}
       <div className="mt-4">{renderInput()}</div>
+
+      {/* Client-side pre-submit hint (server re-validates regardless) */}
+      {clientHint && (
+        <p className="text-[13px] text-terracotta mt-2 leading-[1.5]" role="alert">
+          {clientHint}
+        </p>
+      )}
     </div>
   )
 }
