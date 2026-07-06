@@ -25,6 +25,18 @@ export function getRequiredSectionsFor(phase: Phase, subphase: AppSubphase | nul
   const extras = phase === 'APPLICATION' && subphase ? BY_SUBPHASE[subphase] : BY_PHASE[phase]
   return [...new Set([...ALWAYS, ...extras])]
 }
+
+/**
+ * Task 1.2 (D2): the derived (phase, subphase) IS the questionnaire step —
+ * the workflowStepCode input died with the workflow machine, so the
+ * orchestrator maps the engine state to the loader's step vocabulary here.
+ */
+export function workflowStepCodeFor(phase: Phase, subphase: AppSubphase | null): 'application_fill' | 'dnt_questionnaire' | null {
+  if (phase !== 'APPLICATION') return null
+  if (subphase === 'QUESTIONNAIRE') return 'application_fill'
+  if (subphase === 'DNT') return 'dnt_questionnaire'
+  return null
+}
 export function formatDerivedBriefing(state: DerivedStateV3, actions: ExposedActions): string {
   const lines: string[] = []
   lines.push(`Phase: ${state.phase}${state.subphase ? '/' + state.subphase : ''}`)

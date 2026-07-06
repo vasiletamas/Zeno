@@ -30,7 +30,7 @@ import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { deriveAndExpose, engineVersion } from '@/lib/engines/derive-and-expose'
 import type { DeriveAndExposeResult } from '@/lib/engines/domain-types'
 import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
-import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, loadDntContext, loadPaymentContext, loadPolicyContext, getLastInjectedProductContentVersions, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
+import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, loadDntContext, loadPaymentContext, loadPolicyContext, loadQuestionnaireContextForState, getLastInjectedProductContentVersions, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
 import { buildTurnTools, DEGRADED_FLOOR } from './turn-tools'
 import { shouldRefreshExposure, formatRoundRefreshMessage } from './round-refresh'
 import { evaluateTurnInvariants, recommendedActionsFromBriefing } from '@/lib/monitors/turn-invariants'
@@ -574,6 +574,27 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   sections.dntContext = exposure ? loadDntContext(exposure.state) : null
   sections.paymentContext = exposure ? loadPaymentContext(exposure.state) : null
   sections.policyContext = exposure ? loadPolicyContext(exposure.state) : null
+
+  // Task 1.2 (D2): questionnaireContext keys on the derived (phase, subphase)
+  // — loadAllSections cannot know the step (it runs parallel to the gate), so
+  // the orchestrator patches it here; a loader failure degrades to no section,
+  // never a dead turn.
+  if (exposure) {
+    try {
+      sections.questionnaireContext = await loadQuestionnaireContextForState(
+        exposure.state, state.conversationId, state.customerId, state.language,
+      )
+    } catch (err) {
+      logWarn({
+        layer: 'orchestrator',
+        category: 'db_error',
+        message: 'questionnaireContext load failed; continuing without the section',
+        context: { conversationId: state.conversationId },
+        error: err,
+      })
+      sections.questionnaireContext = null
+    }
+  }
 
   // Pack subsystem deleted (A5.2, M12): gating is owned by the legality
   // engine, prompt content by the sections map.

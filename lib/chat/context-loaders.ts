@@ -18,6 +18,9 @@ import { LRUCache } from '@/lib/cache/lru-cache'
 import { findContextHit, type ContextHit } from '@/lib/insights/context-hits'
 import { logInfo } from '@/lib/errors/logger'
 import { calculateAge } from './age'
+import { getNextQuestion, type AnswerScope } from '@/lib/engines/questionnaire-engine'
+import { resolveGroupCodes, type QuestionPhase } from '@/lib/engines/question-groups'
+import { workflowStepCodeFor } from './phase-sections-map'
 import { getPublishedProductContent, collectPublishedContentIds, registerPublishFlushHook } from '@/lib/products/product-content'
 import { derivePricingExamples, type PricingExampleGrid } from '@/lib/engines/pricing-examples'
 import type { PromptSections } from './prompt-builder'
@@ -449,8 +452,27 @@ export function flushCoachingBriefingCache(): void {
 }
 
 /**
+ * Task 1.2 (D2): the questionnaire surface keyed on the ENGINE's derived
+ * (phase, subphase) — the orchestrator patches this after the gate, same
+ * pattern as dntContext. Everything else is loadQuestionnaireContext.
+ */
+export async function loadQuestionnaireContextForState(
+  state: Pick<DerivedStateV3, 'phase' | 'subphase'>,
+  conversationId: string,
+  customerId: string,
+  language: 'en' | 'ro',
+): Promise<string | null> {
+  return loadQuestionnaireContext(conversationId, customerId, workflowStepCodeFor(state.phase, state.subphase), language)
+}
+
+/**
  * Load questionnaire context section.
  * Determines active questionnaire from workflowStepCode and finds current question.
+ *
+ * The walk is the CANONICAL getNextQuestion (C1.7/C1.8) — the same group
+ * ordering, visibility graph and progress the pinned get_next_question read
+ * uses — never a duplicate group-hardcoded walk that can disagree with the
+ * engine's missingCodes (bd_medical, branch-hidden questions).
  */
 export async function loadQuestionnaireContext(
   conversationId: string,
@@ -460,54 +482,55 @@ export async function loadQuestionnaireContext(
 ): Promise<string | null> {
   if (!workflowStepCode) return null
 
-  const groupCodes = resolveQuestionGroupCodes(workflowStepCode)
-  if (groupCodes.length === 0) return null
-
   const questionnaireType = resolveQuestionnaireType(workflowStepCode)
-
-  const questions = await prisma.question.findMany({
-    where: { group: { code: { in: groupCodes } } },
-    include: { group: true },
-    orderBy: [
-      { group: { orderIndex: 'asc' } },
-      { orderIndex: 'asc' },
-    ],
-  })
-
-  if (questions.length === 0) return null
-
-  // B4: answers are application-scoped — read through the conversation's
-  // active-application pointer (no application → nothing answered).
-  const questionIds = questions.map((q) => q.id)
   const conv = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { activeApplicationId: true },
+    select: { activeApplicationId: true, productId: true, candidateProductId: true },
   })
-  const answers = conv?.activeApplicationId
-    ? await prisma.answer.findMany({
-        where: { applicationId: conv.activeApplicationId, questionId: { in: questionIds }, status: 'ACTIVE' },
-      })
-    : []
+  if (!conv) return null
+  const productId = conv.productId ?? conv.candidateProductId ?? null
 
-  const answeredIds = new Set(answers.map((a) => a.questionId))
-  const currentQuestion = questions.find((q) => !answeredIds.has(q.id))
-  const answeredCount = answeredIds.size
-  const totalCount = questions.length
+  let scope: AnswerScope | null = null
+  let phase: QuestionPhase
+  if (workflowStepCode === 'dnt_questionnaire') {
+    phase = 'dnt'
+    const session = await prisma.dntSession.findFirst({
+      where: { customerId, status: 'ACTIVE' },
+      select: { id: true },
+      orderBy: { startedAt: 'desc' },
+    })
+    scope = session ? { kind: 'dntSession', sessionId: session.id } : null
+  } else {
+    phase = 'application'
+    scope = conv.activeApplicationId ? { kind: 'application', applicationId: conv.activeApplicationId } : null
+  }
+  if (!scope) return null
+
+  const groupCodes = await resolveGroupCodes(productId, phase)
+  if (groupCodes.length === 0) return null
+
+  const next = await getNextQuestion(groupCodes, scope)
 
   const parts: string[] = []
   parts.push(`[ACTIVE QUESTIONNAIRE - ${questionnaireType}]`)
-  parts.push(`Progress: ${answeredCount}/${totalCount}`)
 
-  if (!currentQuestion) {
+  if (!next) {
     parts.push('')
     parts.push('All questions answered. Questionnaire complete.')
     return parts.join('\n')
   }
 
-  const questionText = (currentQuestion.text as unknown as LocalizedText)[language]
+  const currentQuestion = next.question
+  parts.push(`Progress: ${next.progress.answered}/${next.progress.total}`)
+
+  const questionText = (currentQuestion.text as LocalizedText)[language]
   parts.push('')
-  parts.push(`Current question (${currentQuestion.group.code}):`)
+  parts.push(`Current question (${currentQuestion.groupCode}):`)
   parts.push(questionText)
+  if (currentQuestion.code) {
+    const saveTool = phase === 'dnt' ? 'write_dnt_answer' : 'write_question_answer'
+    parts.push(`Question code: ${currentQuestion.code} — pass this EXACT code to ${saveTool}.`)
+  }
   parts.push(`Type: ${currentQuestion.type}`)
 
   if (currentQuestion.options) {
@@ -530,16 +553,16 @@ export async function loadQuestionnaireContext(
       id: currentQuestion.id,
       insightKey: currentQuestion.insightKey,
       options: currentQuestion.options,
-      group: { code: currentQuestion.group.code },
+      group: { code: currentQuestion.groupCode },
     },
     conversationId,
   )
 
   if (hit) {
     parts.push('')
-    parts.push(renderContextHitBlock(hit, currentQuestion.group.code))
+    parts.push(renderContextHitBlock(hit, currentQuestion.groupCode))
 
-    if (currentQuestion.group.code === 'bd_medical' && hit.category === 'RISK_FACTOR') {
+    if (currentQuestion.groupCode === 'bd_medical' && hit.category === 'RISK_FACTOR') {
       logInfo({
         layer: 'compliance',
         category: 'context_hit_medical',
@@ -586,31 +609,9 @@ function renderContextHitBlock(hit: ContextHit, groupCode: string): string {
   return lines.join('\n')
 }
 
-/**
- * Resolve question group codes from workflow step code.
- */
-function resolveQuestionGroupCodes(workflowStepCode: string): string[] {
-  if (workflowStepCode === 'dnt_questionnaire') {
-    return [
-      'dnt_consent',
-      'dnt_general',
-      'dnt_life_type',
-      'dnt_life_financial',
-      'dnt_life_investment',
-      'dnt_sustainability',
-    ]
-  }
-
-  if (workflowStepCode === 'application_fill') {
-    return ['application']
-  }
-
-  if (workflowStepCode.includes('bd')) {
-    return ['bd_medical']
-  }
-
-  return []
-}
+// resolveQuestionGroupCodes died at Task 1.2 (D2): group resolution now
+// comes from resolveGroupCodes over the QuestionGroup.phase column — the
+// same source the engine and the pinned get_next_question read use.
 
 /**
  * Resolve questionnaire type label from workflow step code.
@@ -897,7 +898,6 @@ export async function loadAllSections(params: {
     catalogOverview,
     productContext,
     coachingBriefing,
-    questionnaireContext,
     customerContext,
     customerMemory,
     agentKnowledge,
@@ -905,7 +905,6 @@ export async function loadAllSections(params: {
     loadCatalogOverview(language),
     productId ? loadProductContext(productId, language) : null,
     productId ? loadCoachingBriefing(productId) : null,
-    loadQuestionnaireContext(conversationId, customerId, null, language), // dead input — C1 re-keys the questionnaire surface
     prefetchedCustomer
       ? Promise.resolve(loadCustomerContextFromData(prefetchedCustomer))
       : loadCustomerContext(customerId),
@@ -925,11 +924,13 @@ export async function loadAllSections(params: {
     customerContext,
     coachingBriefing,
     domainGuidance: null, // former pack-injection slot; the pack subsystem died in A5.2
-    questionnaireContext,
     productContext,
     catalogOverview,
     // Rendered from the derived state after the gate resolves (A4.2) — the
     // orchestrator patches these alongside situationalBriefing.
+    // questionnaireContext joined them at Task 1.2 (D2): its step code comes
+    // from the derived (phase, subphase), which does not exist yet here.
+    questionnaireContext: null,
     dntContext: null,
     paymentContext: null,
     policyContext: null,
