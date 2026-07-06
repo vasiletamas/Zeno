@@ -26,13 +26,54 @@ describe('identity-requirements mechanism (contradiction #1)', () => {
     for (const k of Object.keys(IDENTITY_REQUIREMENTS)) expect(commits.has(k), k).toBe(true)
   })
   it('checkIdentityRequirement reports the missing needs payload', () => {
+    const allDeclared = Object.fromEntries(['name', 'cnp', 'dateOfBirth', 'email', 'phone'].map((f) => [f, { provenance: 'declared' as const }]))
     const r = checkIdentityRequirement(
-      { accept_quote: { minTier: 'verified_channel', anyDeclaredOf: ['cnp'] } },
+      { accept_quote: { minTier: 'verified_channel' } },
       'accept_quote',
-      { tier: 'declared', fields: {}, verifiedChannels: [], pendingChallenge: null },
+      { tier: 'declared', fields: allDeclared, verifiedChannels: [], pendingChallenge: null },
     )
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.needs).toEqual(['verified_channel', 'declared:cnp'])
+    if (!r.ok) expect(r.needs).toEqual(['verified_channel'])
+  })
+  // The recorded conversation's endgame killer (D5): the customer verified
+  // the email, but dateOfBirth+phone were never collected — the needs still
+  // said 'verified_channel', so the agent looped on re-verifying and
+  // hallucinated what was missing. The needs must name the ACTUAL gaps.
+  it('names the missing KYC fields when the channel is already verified (never a tier word the agent already satisfied)', () => {
+    const r = checkIdentityRequirement(
+      IDENTITY_REQUIREMENTS,
+      'accept_quote',
+      {
+        tier: 'anonymous',
+        fields: { name: { provenance: 'declared' }, cnp: { provenance: 'declared' }, email: { provenance: 'verified' } },
+        verifiedChannels: ['email'],
+        pendingChallenge: null,
+      },
+    )
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.needs).toEqual(['declared:dateOfBirth', 'declared:phone'])
+      expect(r.needs).not.toContain('verified_channel')
+    }
+  })
+  it('asks for BOTH the fields and the channel when neither is satisfied', () => {
+    const r = checkIdentityRequirement(
+      IDENTITY_REQUIREMENTS,
+      'accept_quote',
+      { tier: 'anonymous', fields: { name: { provenance: 'declared' } }, verifiedChannels: [], pendingChallenge: null },
+    )
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.needs).toEqual(['declared:cnp', 'declared:dateOfBirth', 'declared:email', 'declared:phone', 'verified_channel'])
+  })
+  it('falls back to valid:cnp when fields+channel are complete but the tier still refuses (checksum/DOB mismatch)', () => {
+    const allDeclared = Object.fromEntries(['name', 'cnp', 'dateOfBirth', 'email', 'phone'].map((f) => [f, { provenance: 'declared' as const }]))
+    const r = checkIdentityRequirement(
+      IDENTITY_REQUIREMENTS,
+      'accept_quote',
+      { tier: 'anonymous', fields: allDeclared, verifiedChannels: ['email'], pendingChallenge: null },
+    )
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.needs).toEqual(['valid:cnp'])
   })
   it('product-document requirements resolve against validated documents', () => {
     const row = { initiate_payment: { minTier: 'anonymous' as const, productDocuments: true } }

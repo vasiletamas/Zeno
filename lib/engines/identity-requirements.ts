@@ -40,21 +40,39 @@ export const IDENTITY_REQUIREMENTS: IdentityRequirementsTable = {
 
 const TIER_ORDER: Record<IdentityTier, number> = { anonymous: 0, declared: 1, verified_channel: 2 }
 
+/** The KYC field set the verified_channel tier demands (B3.2). */
+export const KYC_FIELDS = ['name', 'cnp', 'dateOfBirth', 'email', 'phone'] as const
+export type KycField = (typeof KYC_FIELDS)[number]
+
 /**
  * Core row evaluation shared by the pure facts path (identity-rules) and
  * the snapshot path below — one semantics, two presentations, so the OTP,
  * link, and engine legs cannot drift apart.
+ *
+ * PRECISE needs (2026-07-06, the recorded "name missing" hallucination):
+ * a verified_channel gap names the ACTUAL missing pieces — the undeclared
+ * KYC fields and/or the unverified channel — never a bare tier word the
+ * agent may already have satisfied half of. When fields and channel are
+ * complete but the tier still refuses, the one remaining reason is an
+ * invalid CNP (checksum / DOB mismatch): valid:cnp.
  */
 export function evaluateRow(
   req: IdentityRequirement,
   tier: IdentityTier,
-  hasDeclared: (field: 'cnp' | 'dateOfBirth') => boolean,
+  hasDeclared: (field: KycField) => boolean,
   requiredDocs: string[] = [],
   validatedDocs: string[] = [],
+  hasVerifiedChannel = false,
 ): string[] {
   const needs: string[] = []
   if (TIER_ORDER[tier] < TIER_ORDER[req.minTier]) {
-    needs.push(req.minTier === 'verified_channel' ? 'verified_channel' : 'declared')
+    if (req.minTier === 'verified_channel') {
+      needs.push(...KYC_FIELDS.filter((f) => !hasDeclared(f)).map((f) => `declared:${f}`))
+      if (!hasVerifiedChannel) needs.push('verified_channel')
+      if (needs.length === 0) needs.push('valid:cnp')
+    } else {
+      needs.push('declared')
+    }
   }
   if (req.anyDeclaredOf && !req.anyDeclaredOf.some(hasDeclared)) {
     needs.push(`declared:${req.anyDeclaredOf.join('_or_')}`)
@@ -62,7 +80,7 @@ export function evaluateRow(
   if (req.productDocuments) {
     for (const kind of requiredDocs) if (!validatedDocs.includes(kind)) needs.push(`document:${kind}`)
   }
-  return needs
+  return [...new Set(needs)]
 }
 
 /** Snapshot-side check consumed by deriveAndExpose (tier already derived by the loader). */
@@ -81,6 +99,7 @@ export function checkIdentityRequirement(
     (f) => identity.fields[f] !== undefined && identity.fields[f]!.provenance !== 'conflict',
     requiredDocs,
     validatedDocs,
+    identity.verifiedChannels.length > 0,
   )
   return needs.length === 0 ? { ok: true } : { ok: false, needs }
 }

@@ -7,7 +7,7 @@
  */
 
 import { validateCnpChecksum, cnpMatchesDob } from '@/lib/engines/cnp-validation'
-import { IDENTITY_REQUIREMENTS, evaluateRow } from '@/lib/engines/identity-requirements'
+import { IDENTITY_REQUIREMENTS, evaluateRow, KYC_FIELDS } from '@/lib/engines/identity-requirements'
 import type { IdentityTier } from '@/lib/engines/domain-types'
 
 export { IDENTITY_REQUIREMENTS }
@@ -17,7 +17,7 @@ export interface IdentityFacts {
   verifiedChannels: ('email' | 'sms')[]
 }
 
-const KYC: (keyof IdentityFacts['fields'])[] = ['name', 'cnp', 'dateOfBirth', 'email', 'phone']
+const KYC: (keyof IdentityFacts['fields'])[] = [...KYC_FIELDS]
 
 export function deriveIdentityTier(f: IdentityFacts): IdentityTier {
   const all = KYC.every((k) => f.fields[k] && f.fields[k]!.provenance !== 'conflict')
@@ -52,6 +52,7 @@ export function evaluateIdentityRequirement(
     (f) => facts.fields[f] !== undefined && facts.fields[f]!.provenance !== 'conflict',
     requiredDocs,
     validatedDocs,
+    facts.verifiedChannels.length > 0,
   )
   return needs.length === 0 ? { ok: true } : { ok: false, needs }
 }
