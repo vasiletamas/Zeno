@@ -106,6 +106,23 @@ export async function analyzeScores(): Promise<AnalysisResult> {
     }
   }
 
+  // Task 5.5 (D12): surface quality regressions — the loop is no longer
+  // blind to re-asks, unexplained errors, rejected insights, or dead
+  // verification funnels.
+  const q = sorted.reduce(
+    (acc, s) => ({
+      reasked: acc.reasked + (s.reaskedKnownFactCount ?? 0),
+      errors: acc.errors + (s.unexplainedToolErrorCount ?? 0),
+      rejected: acc.rejected + (s.insightRejectedCount ?? 0),
+      verified: acc.verified + (s.verificationCompleted ? 1 : 0),
+    }),
+    { reasked: 0, errors: 0, rejected: 0, verified: 0 },
+  )
+  if (q.reasked > 0) patterns.push(`${q.reasked} known-fact re-ask(s) across ${sorted.length} conversation(s) — stored facts are not being consulted.`)
+  if (q.errors > 0) patterns.push(`${q.errors} unexplained tool error(s) (failed and never recovered) across ${sorted.length} conversation(s).`)
+  if (q.rejected > 0) patterns.push(`${q.rejected} insight emission(s) rejected by the typed gate — extractor quality regression.`)
+  if (q.verified < sorted.length) patterns.push(`Channel verification completed in only ${q.verified}/${sorted.length} scored conversation(s).`)
+
   // A/B test results died with the pack A/B machinery (A5.2).
 
   return {
