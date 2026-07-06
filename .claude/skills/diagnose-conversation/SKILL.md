@@ -21,6 +21,13 @@ evidence; the transcript is only a pointer into it.
    `--dir=artifacts/sims`.) If the checker reports nothing but the report
    claims misbehavior, suspect a checker gap — see step 5.
 
+   > **messageIndex migration note (2026-07-06, D9 fix):** TurnDebug rows
+   > written BEFORE this date carry `messageIndex` shifted **+2** relative
+   > to the message array (the counter was persisted after the user and
+   > assistant saves). Rows written after carry the index of the USER
+   > message that started the turn — `messages[turn.messageIndex]` is that
+   > user message. When diagnosing pre-fix conversations, subtract 2.
+
 2. **Pull the raw evidence for every flagged turn.** Query the DB and read
    recorded state FIRST (verify-from-source):
    - the TurnDebug payload (`prisma.turnDebug.findMany({ where: { conversationId } })`) —

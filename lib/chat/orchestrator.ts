@@ -128,6 +128,13 @@ interface TurnState {
   customerId: string
   language: 'en' | 'ro'
   messageCount: number
+  /**
+   * Task 5.1 (D9): the 0-based index of the USER message that started this
+   * turn — the value TurnDebug/TurnTrace persist. messageCount keeps
+   * incrementing with each save (user, assistant), so persisting IT at
+   * turn end sat +2 off the message array and misattributed every turn.
+   */
+  userMessageIndex: number
   productId: string | null
   savedMessageId: string | null
   totalInputTokens: number
@@ -168,6 +175,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     customerId: input.customerId ?? '',
     language: input.language ?? 'ro',
     messageCount: 0,
+    userMessageIndex: 0,
     productId: null,
     savedMessageId: null,
     totalInputTokens: 0,
@@ -348,6 +356,8 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   }
 
   state.messageCount = turnCtx.conversation.messageCount
+  // messageCount BEFORE this turn's saves = the new user message's 0-based index
+  state.userMessageIndex = turnCtx.conversation.messageCount
   state.productId = turnCtx.conversation.productId
   state.conversationMode = turnCtx.conversation.mode ?? 'SALES'
   state.phases['step1_resolve'] = Date.now() - step1Start
@@ -1500,7 +1510,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   void prisma.turnTrace.create({
     data: {
       conversationId: state.conversationId,
-      messageIndex: state.messageCount,
+      messageIndex: state.userMessageIndex,
       phases: JSON.parse(JSON.stringify(state.phases)),
       inputTokens: state.totalInputTokens || null,
       outputTokens: state.totalOutputTokens || null,
@@ -1548,7 +1558,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // fire-and-forget, errors swallowed inside persistTurnDebug.
   void persistTurnDebug({
     conversationId: state.conversationId,
-    messageIndex: state.messageCount,
+    messageIndex: state.userMessageIndex,
     traceId: state.traceId,
     events: state.debugEvents,
   })
