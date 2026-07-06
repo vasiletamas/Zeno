@@ -84,6 +84,8 @@ describe('known_field_reasked', () => {
     arr[index] = { id: `m${index}`, role: 'user', content: 'x', toolCalls: null, toolResults: null, createdAt }
     return arr
   }
+  const collectCall = (value: string) =>
+    ({ round: 0, toolCallId: 'c1', name: 'collect_customer_field', args: { field: 'name', value }, partition: 'writing', result: { success: true, durationMs: 1, cached: false } })
   it('silent when the fresh apply and the replay land in the SAME turn (round-loop duplicate)', () => {
     const e = makeExport({
       turns: [turn(4, { legality: legality(noPendingState) })] as never,
@@ -95,11 +97,11 @@ describe('known_field_reasked', () => {
     e.messages = userMsgAt(4, '2026-07-06T10:00:00Z') as never
     expect(runDiagnostics(e).some((x) => x.checkId === 'known_field_reasked')).toBe(false)
   })
-  it('flags a replay in a LATER turn than the fresh apply (the customer really was re-asked)', () => {
+  it('flags a later-turn replay whose USER MESSAGE re-supplies the value (the customer really was re-asked)', () => {
     const e = makeExport({
       turns: [
         turn(4, { legality: legality(noPendingState) }),
-        turn(6, { legality: legality(noPendingState) }),
+        turn(6, { userMessage: 'Ion Simulescu', toolCalls: [collectCall('Ion Simulescu')], legality: legality(noPendingState) }),
       ] as never,
       ledger: [
         collectRow('l1', 'fresh', '2026-07-06T10:00:01Z'),
@@ -107,9 +109,25 @@ describe('known_field_reasked', () => {
       ] as never,
     })
     const msgs: unknown[] = userMsgAt(4, '2026-07-06T10:00:00Z')
-    msgs[6] = { id: 'm6', role: 'user', content: 'x', toolCalls: null, toolResults: null, createdAt: '2026-07-06T10:00:20Z' }
+    msgs[6] = { id: 'm6', role: 'user', content: 'Ion Simulescu', toolCalls: null, toolResults: null, createdAt: '2026-07-06T10:00:20Z' }
     e.messages = msgs as never
     const f = runDiagnostics(e).find((x) => x.checkId === 'known_field_reasked')
     expect(f).toMatchObject({ severity: 'warn', turn: 6, evidence: { targetRef: 'field:name' } })
+  })
+  it('silent on a later-turn replay when the user message carries no field data (verbatim macro repeat, tracked by idempotent_replay)', () => {
+    const e = makeExport({
+      turns: [
+        turn(4, { legality: legality(noPendingState) }),
+        turn(6, { userMessage: 'da', toolCalls: [collectCall('Ion Simulescu')], legality: legality(noPendingState) }),
+      ] as never,
+      ledger: [
+        collectRow('l1', 'fresh', '2026-07-06T10:00:01Z'),
+        collectRow('l2', 'replay', '2026-07-06T10:00:25Z'),
+      ] as never,
+    })
+    const msgs: unknown[] = userMsgAt(4, '2026-07-06T10:00:00Z')
+    msgs[6] = { id: 'm6', role: 'user', content: 'da', toolCalls: null, toolResults: null, createdAt: '2026-07-06T10:00:20Z' }
+    e.messages = msgs as never
+    expect(runDiagnostics(e).some((x) => x.checkId === 'known_field_reasked')).toBe(false)
   })
 })

@@ -41,16 +41,16 @@ export const challengeResentWhilePending: DiagnosticCheck = {
 
 export const knownFieldReasked: DiagnosticCheck = {
   id: 'known_field_reasked',
-  description: 'collect_customer_field replayed idempotently in a LATER turn — the agent re-asked a field it already had',
+  description: 'collect_customer_field replayed in a LATER turn whose user message re-supplies the value — the customer really was re-asked',
   run: (e) => {
-    // A replay in the SAME turn as its fresh apply is the idempotency layer
-    // absorbing a round-loop double call — the customer was never re-asked.
-    // Replay rows cannot join via post_commit legality (a replay envelope
-    // deliberately carries the ORIGINAL row's ledgerId), and TurnDebug's
-    // startedAt/endedAt are stamped at persist time (post-turn, collapsed).
-    // The reliable anchor is the turn's USER MESSAGE createdAt — same DB
-    // clock as the ledger rows; a row belongs to the last turn whose user
-    // message precedes it.
+    // A re-ask is CUSTOMER-FACING: the replay must land in a later turn than
+    // the fresh apply AND that turn's user message must carry the value (the
+    // customer had to repeat it). Same-turn duplicates and verbatim tool-call
+    // macro repeats (user says 'da', the model re-sends known fields) are the
+    // idempotency layer working — those are tracked by idempotent_replay.
+    // Turn attribution anchors on the USER MESSAGE createdAt (same DB clock
+    // as the ledger) — replay envelopes carry the ORIGINAL ledgerId and
+    // TurnDebug timestamps are persist-time, so neither joins reliably.
     const anchors = e.turns
       .map((t) => ({ idx: t.messageIndex, at: Date.parse(e.messages[t.messageIndex]?.createdAt ?? '') }))
       .filter((a) => !Number.isNaN(a.at))
@@ -65,6 +65,7 @@ export const knownFieldReasked: DiagnosticCheck = {
       }
       return hit
     }
+    const turnByIndex = new Map(e.turns.map((t) => [t.messageIndex, t]))
     const freshTurn = new Map<string, number>()
     for (const l of e.ledger) {
       if (l.tool === 'collect_customer_field' && l.idempotencyDisposition === 'fresh' && l.targetRef) {
@@ -78,7 +79,15 @@ export const knownFieldReasked: DiagnosticCheck = {
         const replayTurn = turnAt(l.createdAt)
         const firstTurn = l.targetRef ? freshTurn.get(l.targetRef) : undefined
         // unknown joins stay flagged (conservative — pre-F2 exports)
-        return replayTurn === undefined || firstTurn === undefined || replayTurn > firstTurn
+        if (replayTurn === undefined || firstTurn === undefined) return true
+        if (replayTurn <= firstTurn) return false
+        const t = turnByIndex.get(replayTurn)
+        if (!t) return true
+        const field = l.targetRef?.startsWith('field:') ? l.targetRef.slice('field:'.length) : null
+        const replayCall = t.toolCalls.find((c) => c.name === 'collect_customer_field'
+          && (c.args as { field?: string })?.field === field)
+        const v = (replayCall?.args as { value?: unknown } | undefined)?.value
+        return typeof v === 'string' && v.length > 0 && (t.userMessage ?? '').includes(v)
       })
       .map((l): Finding => ({ checkId: 'known_field_reasked', severity: 'warn', turn: turnAt(l.createdAt) ?? null, evidence: { targetRef: l.targetRef } }))
   },
