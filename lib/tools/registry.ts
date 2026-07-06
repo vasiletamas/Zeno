@@ -568,14 +568,16 @@ registerTool('set_candidate_product', {
     "Set or update the candidate product the conversation is currently focused on. " +
     "Use when the customer's intent is clear enough that you can confidently say 'we are talking about X.' " +
     "Re-call to raise/lower confidence or to change the candidate if the customer pivots. " +
-    "The candidate is a SOFT binding for the presentation phase; it does NOT start an application.",
+    "The candidate is a SOFT binding for the presentation phase; it does NOT start an application. " +
+    "Once an application is open the product is frozen — NEVER call this to push a sale forward " +
+    "(accepting an offer goes through accept_quote; identity gaps through collect_customer_field / start_channel_verification).",
   parameters: {
     type: 'object',
     properties: {
       productId: {
         type: 'string',
         description:
-          "Product ID to set as the candidate (cuid from list_products, NOT the display name or code).",
+          "Product id or code from list_products/get_product_info — NEVER an application, quote, or conversation id.",
       },
       addonIds: {
         type: 'array',

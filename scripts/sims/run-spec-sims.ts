@@ -107,11 +107,16 @@ function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedC
   // answered 'da' forever (2026-07-06 battery: phone never declared, close
   // walled on requires_identity).
   if (/telefon/.test(m) && /num[ăa]r|format|07/.test(m)) return '0712345678'
-  // Consent to SEND the verification code — must outrank the acceptance
-  // rule: the agent gates the close on "Scrie-mi exact: trimite codul pe
-  // email" and a persona stuck on "vreau sa accept oferta" loops there
-  // forever, re-collecting known fields (2026-07-06 battery).
-  if (!typedCode && /trimite codul|trimit codul|verificarea? (identit[ăa][țt]ii )?(pe|prin) email|verificarea (adresei )?de email/.test(m)) return 'da, trimite codul pe email'
+  // The email ASK must outrank the acceptance rule: KYC asks are phrased
+  // "Ca să poți accepta oferta... scrie adresa ta de email" — the acceptance
+  // match stonewalled the ask for 3 turns and the pressured model misfired
+  // set_candidate_product with random entity ids (2026-07-06 battery).
+  if (/adres[ăa]( ta)? de e?mail|ce e?mail|emailul t[ăa]u|care.*e?mail|scrie e?mailul/.test(m)) return email
+  // Consent to SEND the verification code — same reason: the agent gates the
+  // close on "trimite codul pe email" / "mai lipsește verificarea emailului"
+  // and a persona stuck on "vreau sa accept oferta" loops there forever,
+  // re-collecting known fields.
+  if (!typedCode && /trimite codul|trimit codul|verificarea? (identit[ăa][țt]ii )?(pe|prin) e?mail|verificarea (adresei de )?e?mail(ului)?/.test(m)) return 'da, trimite codul pe email'
   // The acceptance ask — MUST outrank the greedy keyword rules below: a
   // quote presentation enumerates coverages ("spitalizare", "venit",
   // "familia"), and a stray keyword answer at the close kills the sale.
@@ -138,9 +143,6 @@ function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedC
   // the verification to email.
   if (/(prin|pe) sms/.test(m) && /\bcod/.test(m)) return `nu imi merge sms-ul, trimite codul pe email la ${email}`
   if (/email sau sms|sms sau email/.test(m)) return 'pe email, va rog'
-  // Only when the agent ASKS for an address — a bare /email/ match loops on
-  // any sentence mentioning the word.
-  if (/adres[ăa] (ta )?de e?mail|ce e?mail|emailul t[ăa]u|care.*e?mail/.test(m)) return email
   // Typed mode never claims a link click (a lie that derails the close —
   // no link was clicked); a plain "da" pushes toward the acceptance ask.
   if (/\bcod\b|verificare|verificat/.test(m)) return verification === 'typed' ? 'da' : 'am dat click pe linkul din email'
