@@ -62,8 +62,22 @@ export const setApplication: ToolHandler = async (args, context) => {
       where: { id: context.conversationId },
       select: { productId: true, candidateProductId: true },
     })
-    const productId: string | null =
-      (args.productId as string | undefined) ?? context.product?.id ?? conv?.productId ?? conv?.candidateProductId ?? null
+    // An explicit arg is RESOLVED (id or code) before it reaches the FK
+    // insert: a raw code/junk id would poison the whole gateway tx with an
+    // FK violation and the rejection envelope is lost (2026-07-06 battery).
+    let productId: string | null
+    const argRef = args.productId as string | undefined
+    if (argRef) {
+      const { resolveProductRef, listAvailableProductRefs } = await import('@/lib/tools/resolve-product')
+      const ref = await resolveProductRef({ productId: argRef })
+      if (!ref) {
+        const available = await listAvailableProductRefs()
+        return { success: false, error: `invalid_args: product not found: "${argRef}". Available codes: ${available.map((p) => p.code).join(', ') || '(none)'}.` }
+      }
+      productId = ref.id
+    } else {
+      productId = context.product?.id ?? conv?.productId ?? conv?.candidateProductId ?? null
+    }
     if (!productId) {
       return { success: false, error: 'no_candidate_product: choose the product first (set_candidate_product).' }
     }
