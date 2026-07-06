@@ -22,14 +22,74 @@ type Repointer = { table: string; run: (tx: Tx, dup: string, canon: string) => P
 
 export const REPOINTERS: Repointer[] = [
   { table: 'Conversation', run: async (tx, d, c) => (await tx.conversation.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
-  { table: 'Application', run: async (tx, d, c) => (await tx.application.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
+  {
+    table: 'Application',
+    // partial unique: one OPEN/PAUSED/REFERRED application per (customer,
+    // product). The duplicate's live application is the conversation's
+    // activeApplicationId — the canonical's stale open sibling is superseded,
+    // not the in-flight one.
+    run: async (tx, d, c) => {
+      const dupOpen = await tx.application.findMany({
+        where: { customerId: d, status: { in: ['OPEN', 'PAUSED', 'REFERRED'] } }, select: { productId: true },
+      })
+      if (dupOpen.length) {
+        await tx.application.updateMany({
+          where: { customerId: c, status: { in: ['OPEN', 'PAUSED', 'REFERRED'] }, productId: { in: dupOpen.map(a => a.productId) } },
+          data: { status: 'CANCELLED' },
+        })
+      }
+      return (await tx.application.updateMany({ where: { customerId: d }, data: { customerId: c } })).count
+    },
+  },
   { table: 'Quote', run: async (tx, d, c) => (await tx.quote.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
   { table: 'Policy', run: async (tx, d, c) => (await tx.policy.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
   { table: 'Payment', run: async (tx, d, c) => (await tx.payment.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
-  { table: 'CustomerInsight', run: async (tx, d, c) => (await tx.customerInsight.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
+  {
+    table: 'CustomerInsight',
+    // (customerId, key) is unique — when both customers hold the same key the
+    // freshest lastConfirmedAt wins (tie → higher confidence, full tie →
+    // canonical stays) and the loser row is deleted. Returns rows MOVED to
+    // the canonical customer.
+    run: async (tx, d, c) => {
+      const [dupRows, canRows] = await Promise.all([
+        tx.customerInsight.findMany({ where: { customerId: d } }),
+        tx.customerInsight.findMany({ where: { customerId: c } }),
+      ])
+      const canByKey = new Map(canRows.map(r => [r.key, r]))
+      let moved = 0
+      for (const r of dupRows) {
+        const existing = canByKey.get(r.key)
+        const dupWins = !existing
+          || (r.lastConfirmedAt.getTime() !== existing.lastConfirmedAt.getTime()
+            ? r.lastConfirmedAt > existing.lastConfirmedAt
+            : r.confidence > existing.confidence)
+        if (dupWins) {
+          if (existing) await tx.customerInsight.delete({ where: { id: existing.id } })
+          await tx.customerInsight.update({ where: { id: r.id }, data: { customerId: c } })
+          moved++
+        } else {
+          await tx.customerInsight.delete({ where: { id: r.id } })
+        }
+      }
+      return moved
+    },
+  },
   { table: 'ConsentEvent', run: async (tx, d, c) => (await tx.consentEvent.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
   { table: 'Dnt', run: async (tx, d, c) => (await tx.dnt.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
-  { table: 'DntSession', run: async (tx, d, c) => (await tx.dntSession.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
+  {
+    table: 'DntSession',
+    // partial unique: one ACTIVE session per customer — the duplicate's live
+    // session wins; the canonical's stale ACTIVE one is cancelled.
+    run: async (tx, d, c) => {
+      if (await tx.dntSession.count({ where: { customerId: d, status: 'ACTIVE' } }) > 0) {
+        await tx.dntSession.updateMany({
+          where: { customerId: c, status: 'ACTIVE' },
+          data: { status: 'CANCELLED', finishedAt: new Date() },
+        })
+      }
+      return (await tx.dntSession.updateMany({ where: { customerId: d }, data: { customerId: c } })).count
+    },
+  },
   { table: 'VerificationChallenge', run: async (tx, d, c) => (await tx.verificationChallenge.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
   { table: 'CustomerDocument', run: async (tx, d, c) => (await tx.customerDocument.updateMany({ where: { customerId: d }, data: { customerId: c } })).count },
 ]
