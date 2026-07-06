@@ -25,14 +25,34 @@ describe('identity-requirements mechanism (contradiction #1)', () => {
     const commits = new Set(listCommitTools())
     for (const k of Object.keys(IDENTITY_REQUIREMENTS)) expect(commits.has(k), k).toBe(true)
   })
-  it('checkIdentityRequirement reports the missing needs payload', () => {
+  it('checkIdentityRequirement DECOMPOSES verified_channel needs into the actionable gaps (run cmr9dw3s5)', () => {
+    // The run-6 stall: name+cnp+email declared, channel VERIFIED — the old
+    // payload said only 'verified_channel' and the agent polled state 15
+    // turns, then escalated. The needs must name what to collect.
+    const r = checkIdentityRequirement(
+      IDENTITY_REQUIREMENTS,
+      'accept_quote',
+      {
+        tier: 'anonymous',
+        fields: { name: { provenance: 'declared' }, cnp: { provenance: 'declared' }, email: { provenance: 'declared' } },
+        verifiedChannels: ['email'],
+        pendingChallenge: null,
+      },
+    )
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.needs).toEqual(['declared:dateOfBirth', 'declared:phone'])
+  })
+  it('checkIdentityRequirement reports declared:* plus verified_channel when nothing is verified', () => {
     const r = checkIdentityRequirement(
       { accept_quote: { minTier: 'verified_channel', anyDeclaredOf: ['cnp'] } },
       'accept_quote',
       { tier: 'declared', fields: {}, verifiedChannels: [], pendingChallenge: null },
     )
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.needs).toEqual(['verified_channel', 'declared:cnp'])
+    // tier 'declared' with empty fields is a synthetic fixture: decomposition
+    // reads the FIELDS, so all five KYC gaps surface, then the channel, then
+    // the anyDeclaredOf clause.
+    if (!r.ok) expect(r.needs).toEqual(['declared:name', 'declared:cnp', 'declared:dateOfBirth', 'declared:email', 'declared:phone', 'verified_channel', 'declared:cnp'])
   })
   it('product-document requirements resolve against validated documents', () => {
     const row = { initiate_payment: { minTier: 'anonymous' as const, productDocuments: true } }

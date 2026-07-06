@@ -18,6 +18,14 @@ import type { AppStatus } from './application-rules'
 
 export interface Mutation { node: NodeKey; newValue: string | null }
 
+/**
+ * T6.D3 deviation (ratified 2026-07-06, product owner): CONFIRM_ALWAYS no
+ * longer confirms the FIRST write — per-answer cards made the medical
+ * questionnaire seven confirmations long. It now means (a) member of the
+ * batch medical declaration signed once via sign_medical_declarations
+ * (the sign_dnt precedent) and (b) confirm-on-modify with cascade preview,
+ * same as CONFIRM_ON_MODIFY.
+ */
 export type QuestionSensitivityStr = 'NONE' | 'CONFIRM_ON_MODIFY' | 'CONFIRM_ALWAYS'
 
 /**
@@ -77,14 +85,15 @@ export function computeConsequences(
   const selectionPatch: ConsequencePlan['selectionPatch'] = {}
   const eligibilityOutcomes: ConsequencePlan['eligibilityOutcomes'] = []
 
-  // 1. requires_confirmation: sensitive answer node being MODIFIED
-  // (CONFIRM_ON_MODIFY) or written at all (CONFIRM_ALWAYS) — T6.D3
+  // 1. requires_confirmation: sensitive answer node being MODIFIED — both
+  // sensitivity classes. First-write affirmation for CONFIRM_ALWAYS moved to
+  // the sign_medical_declarations batch card (T6.D3 deviation, 2026-07-06).
   let requiresConfirmation = false
   if (mutation.node.startsWith('answer:')) {
     const code = mutation.node.slice('answer:'.length)
     const sens = snapshot.answers.sensitivity[code] ?? 'NONE'
     const hadValue = before.answers[code] !== undefined
-    requiresConfirmation = sens === 'CONFIRM_ALWAYS' || (sens === 'CONFIRM_ON_MODIFY' && hadValue)
+    requiresConfirmation = (sens === 'CONFIRM_ALWAYS' || sens === 'CONFIRM_ON_MODIFY') && hadValue
   }
 
   // 2. VALIDITY edges: subject whose dependsOn node just changed → invalidate subject

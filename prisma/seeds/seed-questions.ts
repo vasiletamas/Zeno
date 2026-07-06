@@ -627,7 +627,7 @@ export async function seedQuestions(prisma: PrismaClient) {
     [
       {
         code: 'BD_CANCER_HISTORY',
-        sensitivity: 'CONFIRM_ALWAYS', // erratum 7: T6.D3 explicit-affirmation, engine-enforced
+        sensitivity: 'CONFIRM_ALWAYS', // T6.D3 deviation 2026-07-06: batch-signed once via sign_medical_declarations + confirm-on-modify (per-answer first-write cards retired)
         text: {
           en: 'Have you ever been diagnosed with or treated for cancer, pre-cancerous conditions, or tumors?',
           ro: 'Ați fost vreodată diagnosticat(ă) sau tratat(ă) pentru cancer, stări pre-canceroase sau tumori?',
@@ -640,7 +640,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'BD_CARDIOVASCULAR',
-        sensitivity: 'CONFIRM_ALWAYS', // erratum 7: T6.D3 explicit-affirmation, engine-enforced
+        sensitivity: 'CONFIRM_ALWAYS', // T6.D3 deviation 2026-07-06: batch-signed once via sign_medical_declarations + confirm-on-modify (per-answer first-write cards retired)
         text: {
           en: 'Have you been diagnosed with or treated for cardiovascular conditions requiring surgery?',
           ro: 'Ați fost diagnosticat(ă) sau tratat(ă) pentru afecțiuni cardiovasculare care necesită intervenție chirurgicală?',
@@ -653,7 +653,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'BD_NEUROLOGICAL',
-        sensitivity: 'CONFIRM_ALWAYS', // erratum 7: T6.D3 explicit-affirmation, engine-enforced
+        sensitivity: 'CONFIRM_ALWAYS', // T6.D3 deviation 2026-07-06: batch-signed once via sign_medical_declarations + confirm-on-modify (per-answer first-write cards retired)
         text: {
           en: 'Have you been diagnosed with or treated for neurological conditions requiring neurosurgery?',
           ro: 'Ați fost diagnosticat(ă) sau tratat(ă) pentru afecțiuni neurologice care necesită neurochirurgie?',
@@ -666,7 +666,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'BD_TRANSPLANT',
-        sensitivity: 'CONFIRM_ALWAYS', // erratum 7: T6.D3 explicit-affirmation, engine-enforced
+        sensitivity: 'CONFIRM_ALWAYS', // T6.D3 deviation 2026-07-06: batch-signed once via sign_medical_declarations + confirm-on-modify (per-answer first-write cards retired)
         text: {
           en: 'Have you ever required or been evaluated for organ or bone marrow transplant?',
           ro: 'Ați necesitat vreodată sau ați fost evaluat(ă) pentru transplant de organe sau măduvă osoasă?',
@@ -679,7 +679,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'BD_CHRONIC_CONDITIONS',
-        sensitivity: 'CONFIRM_ALWAYS', // erratum 7: T6.D3 explicit-affirmation, engine-enforced
+        sensitivity: 'CONFIRM_ALWAYS', // T6.D3 deviation 2026-07-06: batch-signed once via sign_medical_declarations + confirm-on-modify (per-answer first-write cards retired)
         text: {
           en: 'Do you have any chronic medical conditions currently under treatment?',
           ro: 'Aveți afecțiuni medicale cronice aflate în prezent sub tratament?',
@@ -692,7 +692,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'BD_HOSPITALIZATION_RECENT',
-        sensitivity: 'CONFIRM_ALWAYS', // erratum 7: T6.D3 explicit-affirmation, engine-enforced
+        sensitivity: 'CONFIRM_ALWAYS', // T6.D3 deviation 2026-07-06: batch-signed once via sign_medical_declarations + confirm-on-modify (per-answer first-write cards retired)
         text: {
           en: 'Have you been hospitalized in the last 12 months for any reason other than accidents?',
           ro: 'Ați fost internat(ă) în ultimele 12 luni din alte motive decât accidente?',

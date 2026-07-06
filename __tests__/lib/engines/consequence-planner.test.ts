@@ -53,8 +53,16 @@ describe('computeConsequences', () => {
     const plan = computeConsequences(PROTECT_DEPENDENCY_EDGES, s, { node: 'answer:HEALTH_DECLARATION_CONFIRM', newValue: 'false' })
     expect(plan.requiresConfirmation).toBe(true)
   })
-  it('a CONFIRM_ALWAYS answer requires confirmation even on FIRST write (erratum 7, T6.D3)', () => {
+  it('a CONFIRM_ALWAYS answer does NOT confirm on first write — affirmation moved to the batch sign (T6.D3 deviation, 2026-07-06)', () => {
+    // Per-answer cards on first write made the medical questionnaire 7 cards
+    // long; explicit affirmation now rides ONE sign_medical_declarations
+    // card at the end (sign_dnt precedent), ratified by the product owner.
     const plan = computeConsequences(PROTECT_DEPENDENCY_EDGES, snapshot(), { node: 'answer:BD_CANCER_HISTORY', newValue: 'false' })
+    expect(plan.requiresConfirmation).toBe(false)
+  })
+  it('a CONFIRM_ALWAYS answer still confirms on MODIFY (cascade preview retained)', () => {
+    const s = snapshot({ answers: { active: { BD_CANCER_HISTORY: 'false' }, sensitivity: { BD_CANCER_HISTORY: 'CONFIRM_ALWAYS' } } })
+    const plan = computeConsequences(PROTECT_DEPENDENCY_EDGES, s, { node: 'answer:BD_CANCER_HISTORY', newValue: 'true' })
     expect(plan.requiresConfirmation).toBe(true)
   })
   it('invalidation on a COMPLETED application without an issued quote → statusTransition COMPLETED→OPEN', () => {

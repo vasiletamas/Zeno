@@ -71,6 +71,9 @@ export const translations: Record<Language, TranslationTable> = {
       no_due_installment: 'Nu există nicio rată scadentă de plătit — planul de plată este achitat la zi.',
       schedule_already_captured: 'Prima rată a fost deja încasată — frecvența de plată nu mai poate fi schimbată pentru acest plan.',
       outside_free_look: 'Perioada de renunțare (free-look) s-a încheiat — anularea nu mai este posibilă pe acest canal; un coleg poate prelua cererea.',
+      medical_declarations_unsigned: 'Declarația medicală trebuie semnată (un singur card de confirmare) înainte de generarea ofertei.',
+      medical_declarations_incomplete: 'Mai sunt întrebări medicale fără răspuns — declarația se semnează după ce toate au fost completate.',
+      already_escalated: 'Un coleg a fost deja anunțat pentru această conversație — va prelua discuția cu întregul context.',
     },
     // Hero section
     hero_headline: 'Dacă mâine primești un diagnostic grav, ai fi pregătit?',
@@ -228,6 +231,9 @@ export const translations: Record<Language, TranslationTable> = {
       no_due_installment: 'There is no due installment to pay — the payment plan is fully up to date.',
       schedule_already_captured: 'The first installment was already captured — the payment frequency can no longer be changed on this plan.',
       outside_free_look: 'The free-look window has ended — cancellation is no longer possible on this channel; a colleague can take over the request.',
+      medical_declarations_unsigned: 'The medical declaration must be signed (one confirmation card) before the quote can be generated.',
+      medical_declarations_incomplete: 'Some medical questions are still unanswered — the declaration is signed once they are all complete.',
+      already_escalated: 'A colleague has already been notified for this conversation — they will take over with full context.',
     },
     // Hero section
     hero_headline:

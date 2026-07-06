@@ -25,6 +25,7 @@ import { getActiveAnswers } from '@/lib/engines/answer-store'
 import { buildBranchingMetadata } from '@/lib/engines/branching-provenance'
 import { getIdentityFacts } from '@/lib/customer/profile-service'
 import { deriveIdentityTier } from '@/lib/engines/identity-rules'
+import { loadMedicalDeclarationState } from '@/lib/engines/medical-declaration-state'
 import type { ToolHandler, ToolContext } from '@/lib/tools/types'
 import { bumpInsightOnAnswer } from './insight-bump'
 
@@ -286,7 +287,7 @@ export const writeQuestionAnswer: ToolHandler = async (args, context) => {
         success: true,
         effects: plan.effects,
         data: { answerSaved: true, isComplete: true, applicationId: application.id, readyForQuote: true, ...planData(plan) },
-        message: 'Application questionnaire complete. Choose coverage with select_coverage if not chosen, then generate the quote.',
+        message: 'Application questionnaire complete. If sensitive medical answers were collected, sign_medical_declarations must confirm them (one card) before the quote; otherwise generate the quote.',
       }
     }
 
@@ -522,6 +523,49 @@ export const resumeApplication: ToolHandler = async (args, context) => {
       message: next
         ? 'Application resumed — continuing where the customer left off.'
         : 'Application resumed. All questions already answered — ready for coverage selection / quote.',
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
+
+// ─────────────────────────────────────────────
+// sign_medical_declarations (T6.D3 deviation, 2026-07-06)
+// ─────────────────────────────────────────────
+
+/**
+ * The batch affirmation of the sensitive (CONFIRM_ALWAYS) medical answers —
+ * sign_dnt precedent, replacing per-answer confirm cards. Two-step via
+ * conditional confirmation: the unconfirmed call returns the declarations
+ * preview (localized question text + the customer's answers); the confirmed
+ * call writes the signature row binding the active revision hash. Currency
+ * is recomputed by the shared state loader — a later revision unsigns
+ * without clearing anything. Legality (incomplete / already signed) is the
+ * gateway's via deriveAndExpose — never re-decided here (contradiction #6).
+ */
+export const signMedicalDeclarations: ToolHandler = async (_args, context) => {
+  try {
+    const application = await loadActiveApplication(context)
+    if (!application) {
+      return { success: false, error: 'no_open_application: no application found.' }
+    }
+    const state = await loadMedicalDeclarationState(context.db, application)
+    if (!context.confirmed) {
+      return { success: false, requiresConfirmation: { preview: { declarations: state.declarations } } }
+    }
+    await context.db.medicalDeclarationSignature.create({
+      data: {
+        applicationId: application.id,
+        customerId: application.customerId,
+        answersHash: state.currentHash,
+        actor: String(context.actor ?? 'agent'),
+        sourceCommitId: context.commitId ?? null,
+      },
+    })
+    return {
+      success: true,
+      data: { signedDeclarations: state.declarations.map((d) => d.code), answersHash: state.currentHash },
+      message: `Medical declarations signed — ${state.declarations.length} answers affirmed in one signature. The quote can be generated now.`,
     }
   } catch (error) {
     return { success: false, error: String(error) }

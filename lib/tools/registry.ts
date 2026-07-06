@@ -21,7 +21,7 @@ import type { LocalizedContent } from './shape-product-info'
 
 // --- Handler imports ---
 import { getDntState, getDntQuestions, getDntNextQuestion, openDntSession, writeDntAnswer, signDnt } from './handlers/dnt-handlers'
-import { setApplication, getNextQuestionInfo, writeQuestionAnswer, modifyAnswer, resumeApplication, cancelApplication, getLastApplicationInfo } from './handlers/application-handlers'
+import { setApplication, getNextQuestionInfo, writeQuestionAnswer, modifyAnswer, resumeApplication, cancelApplication, getLastApplicationInfo, signMedicalDeclarations } from './handlers/application-handlers'
 import { selectCoverage } from './handlers/select-coverage-handlers'
 import { acknowledgeSuitabilityWarning } from './handlers/suitability-handlers'
 import { generateQuote, getQuoteInfo, acceptQuote, cancelQuote, acknowledgeDisclosures } from './handlers/quote-handlers'
@@ -575,7 +575,7 @@ registerTool('set_candidate_product', {
       productId: {
         type: 'string',
         description:
-          "Product ID to set as the candidate (cuid from list_products, NOT the display name or code).",
+          "The product to set as the candidate: its code (e.g. 'protect') or its id from list_products. NEVER an id you did not read from a tool result in THIS conversation.",
       },
       addonIds: {
         type: 'array',
@@ -771,13 +771,14 @@ registerTool('get_next_question', {
   customerVisible: false,
   statusMessage: null,
   allowedRoles: ALL_ROLES,
+  sideEffects: false,
   kind: 'read',
 }, getNextQuestionInfo)
 
 registerTool('write_question_answer', {
   description:
     'Save the customer\'s answer to the current application question. Pass the question\'s code (from the previous result\'s nextQuestion.code ' +
-    'or get_next_question) so the commit is addressed precisely. Sensitive questions (the BD medical set) require the customer\'s explicit confirmation — resend with confirmToken.',
+    'or get_next_question) so the commit is addressed precisely. First writes never need confirmation — the sensitive medical set is affirmed ONCE at the end via sign_medical_declarations.',
   parameters: {
     type: 'object',
     properties: {
@@ -817,6 +818,26 @@ registerTool('modify_answer', {
   sideEffect: 'save',
   kind: 'commit',
 }, modifyAnswer)
+
+registerTool('sign_medical_declarations', {
+  description:
+    'Sign the batch medical declaration — ONE confirmation card affirming ALL the sensitive medical answers together (T6.D3 deviation 2026-07-06, sign_dnt precedent). ' +
+    'Two-step: the gateway returns a confirmation request with the declarations preview; the customer confirms on the card — do NOT re-call it yourself. ' +
+    'Exposed after the last sensitive question is answered; required before generate_quote.',
+  parameters: {
+    type: 'object',
+    properties: {
+      confirmToken: { type: 'string', description: 'Confirmation token from a prior requires_confirmation envelope (the card round-trips it).' },
+    },
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: true,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'lifecycle',
+  kind: 'commit',
+}, signMedicalDeclarations)
 
 registerTool('select_coverage', {
   description:
@@ -968,6 +989,7 @@ registerTool('get_quote_info', {
   customerVisible: false,
   statusMessage: null,
   allowedRoles: ALL_ROLES,
+  sideEffects: false,
   kind: 'read',
 }, getQuoteInfo)
 
@@ -1028,6 +1050,7 @@ registerTool('get_payment_status', {
   customerVisible: false,
   statusMessage: null,
   allowedRoles: ALL_ROLES,
+  sideEffects: false,
   kind: 'read',
 }, getPaymentStatus)
 
@@ -1200,6 +1223,7 @@ registerTool('get_policy_info', {
   customerVisible: false,
   statusMessage: null,
   allowedRoles: ALL_ROLES,
+  sideEffects: false,
   kind: 'read',
 }, getPolicyInfo)
 

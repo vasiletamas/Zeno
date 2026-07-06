@@ -200,6 +200,15 @@ export function adaptAction(action: UIAction): ToolCall | null {
         },
       }
 
+    // T6.D3 deviation (2026-07-06): the batch medical-declaration signature —
+    // the confirm card posts the SAME commit with the gateway-issued token.
+    case 'sign_medical_declarations':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'sign_medical_declarations',
+        arguments: action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {},
+      }
+
     // legacy GUI action name; the tool is set_application since B4.3
     case 'start_application':
     case 'set_application':

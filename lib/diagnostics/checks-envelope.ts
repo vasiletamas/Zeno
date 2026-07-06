@@ -10,19 +10,24 @@ import { recomputeAndDiff } from '@/lib/debug/recompute-diff'
 import type { DebugTurn } from '@/lib/debug/reducer'
 
 export const blockedActionAttempted: DiagnosticCheck = {
-  id: 'blocked_action_attempted', description: "An applied ledger commit's tool was in its turn's turn_start blocked list",
+  id: 'blocked_action_attempted', description: "An applied ledger commit's tool was blocked as of the commit BEFORE it (turn_start for the first; each post_commit snapshot re-baselines its successors)",
   run: (e) => {
     const rowsById = new Map(e.ledger.map((r) => [r.id, r]))
     const out: Finding[] = []
     for (const t of e.turns) {
       const turnStart = (t.legality ?? []).find((l) => l.point === 'turn_start')
       if (!turnStart) continue
-      const blocked = new Map(turnStart.actions.blocked.map((b) => [b.action, b.reason]))
+      // Rolling baseline: a mid-turn commit legally unblocks its successors
+      // (run cmr99s5cb turn 52: write_question_answer completed the
+      // questionnaire, making the same-turn generate_quote legal) — judging
+      // every commit against turn_start reports legal commits as violations.
+      let blocked = new Map(turnStart.actions.blocked.map((b) => [b.action, b.reason]))
       for (const l of (t.legality ?? []).filter((x) => x.point === 'post_commit')) {
         const row = l.commitLedgerId ? rowsById.get(l.commitLedgerId) : undefined
         if (row && row.outcome === 'applied' && blocked.has(row.tool)) {
           out.push({ checkId: 'blocked_action_attempted', severity: 'error', turn: t.messageIndex, evidence: { tool: row.tool, reason: blocked.get(row.tool) } })
         }
+        if (l.actions) blocked = new Map(l.actions.blocked.map((b) => [b.action, b.reason]))
       }
     }
     return out

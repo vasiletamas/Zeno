@@ -18,7 +18,10 @@ export const setCandidateProduct: ToolHandler = async (args, context) => {
   }
 
   try {
-    const ref = await resolveProductRef({ productId })
+    // The agent passes codes, ids, and (live runs cmr99s5cb/cmr9cq7e5) even
+    // foreign cuids in this one slot — feed BOTH resolver paths so a code
+    // resolves via code-exact/alias while a real id resolves via id.
+    const ref = await resolveProductRef({ productId, productCode: productId })
     if (!ref) {
       const available = await listAvailableProductRefs()
       return {

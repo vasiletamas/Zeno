@@ -18,14 +18,27 @@ export type AcceptQuoteLegalityResult =
   | { ok: false; outcome: 'requires_disclosures'; needs: string[] }
 
 export function acceptQuoteLegality(
-  s: { quote: { status: string; validUntil: Date; disclosuresRequired: { kind: string }[] }; identity: { tier: string } },
+  s: {
+    quote: { status: string; validUntil: Date; disclosuresRequired: { kind: string }[] }
+    /** missingFields/hasVerifiedChannel (optional): the decomposition facts —
+     * without them an unmet tier reports the bare 'verified_channel' label
+     * (run cmr9dw3s5 2026-07-06: that label was already satisfied channel-wise
+     * and the agent had nothing actionable; callers should thread them). */
+    identity: { tier: string; missingFields?: string[]; hasVerifiedChannel?: boolean }
+  },
   now: Date,
 ): AcceptQuoteLegalityResult {
   if (s.quote.status === 'ISSUED' && isExpired({ status: 'ISSUED', validUntil: s.quote.validUntil }, now)) {
     return { ok: false, outcome: 'rejected', reason: 'quote_expired' }
   }
   if (s.quote.status !== 'ISSUED') return { ok: false, outcome: 'rejected', reason: 'illegal_status_transition' }
-  if (s.identity.tier !== 'verified_channel') return { ok: false, outcome: 'requires_identity', needs: ['verified_channel'] }
+  if (s.identity.tier !== 'verified_channel') {
+    const needs: string[] = []
+    for (const f of s.identity.missingFields ?? []) needs.push(`declared:${f}`)
+    if (s.identity.hasVerifiedChannel === false) needs.push('verified_channel')
+    if (needs.length === 0) needs.push('verified_channel')
+    return { ok: false, outcome: 'requires_identity', needs }
+  }
   if (s.quote.disclosuresRequired.length > 0) return { ok: false, outcome: 'requires_disclosures', needs: s.quote.disclosuresRequired.map((d) => d.kind) }
   return { ok: true }
 }
