@@ -229,6 +229,20 @@ export const openDntSession: ToolHandler = async (_args, context) => {
         if (!code) continue
         const target = byCode.get(code)
         if (!target) continue
+        // P0-3: the prior session's DNT_CNP row holds the MASK, not the CNP —
+        // the mask fails validation and would leave the UPDATE session
+        // permanently incomplete. The mask prefills as-is (the canonical
+        // persisted form; the real value stays in the profile store); a raw
+        // legacy value re-masks; the GDPR erasure marker never prefills
+        // (the question is re-asked).
+        if (code === 'DNT_CNP') {
+          const masked = pa.value.includes('*') ? pa.value : validateCnpChecksum(pa.value) ? maskCnp(pa.value) : null
+          if (masked) {
+            await context.db.dntAnswer.create({ data: { sessionId: session.id, questionId: target.id, value: masked } })
+            prefilled++
+          }
+          continue
+        }
         const v = validateAnswer({ type: target.type, options: target.options, validationRules: target.validationRules }, pa.value)
         if (!v.valid) continue
         await context.db.dntAnswer.create({ data: { sessionId: session.id, questionId: target.id, value: v.normalizedValue } })
