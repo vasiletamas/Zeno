@@ -25,6 +25,19 @@ describe('debug:legality event (F2.1, T14.D2)', () => {
   })
 })
 
+describe('redactSnapshot — CNP-shaped values (Task 5.4, D11)', () => {
+  it('masks 13-digit strings ANYWHERE in the snapshot (dnt facts, answers)', () => {
+    const red = redactSnapshot({
+      dnt: { facts: { DNT_CNP: '1960229410015', DNT_FAMILY_SIZE: '2' } },
+      answers: { SOME_TEXT_FIELD: 'cnp-ul meu este 1960229410015 multumesc' },
+    })
+    const s = JSON.stringify(red)
+    expect(s).not.toContain('1960229410015')
+    expect(s).toContain('1960******015')
+    expect(s).toContain('"DNT_FAMILY_SIZE":"2"')
+  })
+})
+
 describe('redactSnapshot (T14.D5)', () => {
   it('strips raw PII values from identity scope but keeps provenance states and derived facts', () => {
     const red = redactSnapshot({

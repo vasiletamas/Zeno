@@ -43,3 +43,22 @@ export function maskCnp(cnp: string): string {
   if (cnp.length !== 13) return '***'
   return cnp.slice(0, 4) + '*'.repeat(6) + cnp.slice(10)
 }
+
+/** JSON AES envelope — the DntAnswer at-rest format (Task 5.4, D11). */
+export function encryptEnvelope(plaintext: string): string {
+  return JSON.stringify(encrypt(plaintext))
+}
+
+/**
+ * Tolerant envelope decode (Task 5.4): pre-backfill plaintext rows pass
+ * through unchanged, so reads never break mid-migration.
+ */
+export function decryptEnvelopeTolerant(value: string): string {
+  if (!value.startsWith('{')) return value
+  try {
+    const e = JSON.parse(value) as { encrypted: string; iv: string; tag: string }
+    return decrypt(e.encrypted, e.iv, e.tag)
+  } catch {
+    return value
+  }
+}

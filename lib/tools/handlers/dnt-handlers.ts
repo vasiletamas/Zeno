@@ -18,6 +18,7 @@ import { isDntValidFor, isExpiringOrExpired, decideSessionType, computeCoverage,
 import { appendConsentEvents } from '@/lib/customer/consent-service'
 import { setDeclaredField } from '@/lib/customer/profile-service'
 import { validateCnpChecksum } from '@/lib/engines/cnp-validation'
+import { encryptEnvelope, decryptEnvelopeTolerant } from '@/lib/security/encryption'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackDntCompleted } from '@/lib/analytics/events'
 import { bumpInsightOnAnswer } from './insight-bump'
@@ -226,9 +227,13 @@ export const openDntSession: ToolHandler = async (_args, context) => {
         if (!code) continue
         const target = byCode.get(code)
         if (!target) continue
-        const v = validateAnswer({ type: target.type, options: target.options, validationRules: target.validationRules }, pa.value)
+        // Task 5.4 (D11): the stored CNP is an AES envelope — decrypt for
+        // re-validation, re-encrypt at store; other answers pass verbatim.
+        const priorValue = code === 'DNT_CNP' ? decryptEnvelopeTolerant(pa.value) : pa.value
+        const v = validateAnswer({ type: target.type, options: target.options, validationRules: target.validationRules }, priorValue)
         if (!v.valid) continue
-        await context.db.dntAnswer.create({ data: { sessionId: session.id, questionId: target.id, value: v.normalizedValue } })
+        const storeValue = code === 'DNT_CNP' ? encryptEnvelope(v.normalizedValue) : v.normalizedValue
+        await context.db.dntAnswer.create({ data: { sessionId: session.id, questionId: target.id, value: storeValue } })
         prefilled++
       }
     }
@@ -363,10 +368,13 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
       return { success: false, error: 'cnp_checksum_invalid: the CNP control digit does not match — ask the customer to re-check the 13 digits.' }
     }
 
+    // Task 5.4 (D11): the CNP is encrypted at rest in the regulatory record
+    // (same AES envelope as the profile mirror); checksum ran on plaintext.
+    const storedValue = questionCode === 'DNT_CNP' ? encryptEnvelope(v.normalizedValue) : v.normalizedValue
     await context.db.dntAnswer.upsert({
       where: { sessionId_questionId: { sessionId: session.id, questionId: question.id } },
-      create: { sessionId: session.id, questionId: question.id, value: v.normalizedValue },
-      update: { value: v.normalizedValue, answeredAt: new Date() },
+      create: { sessionId: session.id, questionId: question.id, value: storedValue },
+      update: { value: storedValue, answeredAt: new Date() },
     })
 
     // D1.4: the CNP declared in the DNT is a PROFILE fact (B0 SSOT) — it

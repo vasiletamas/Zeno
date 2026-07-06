@@ -13,6 +13,7 @@ import { getOpenCircuitTools } from '@/lib/tools/circuit-state'
 import { deriveConsents, type ConsentEventLike } from '@/lib/customer/consent'
 import { getIdentityFacts, getAge } from '@/lib/customer/profile-service'
 import { deriveIdentityTier } from '@/lib/engines/identity-rules'
+import { maskCnp, decryptEnvelopeTolerant } from '@/lib/security/encryption'
 import type { DomainSnapshot } from './domain-types'
 
 // Widened for the A2 gateway: the interactive-transaction handle lacks
@@ -190,7 +191,13 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
       where: { sessionId: latestDnt.sourceSessionId },
       include: { question: { select: { code: true } } },
     })
-    dntFacts = Object.fromEntries(signedAnswers.filter((a) => a.question.code).map((a) => [a.question.code as string, a.value]))
+    // Task 5.4 (D11): the CNP fact is MASKED at the source — no suitability
+    // rule reads it, and the facts flow into legality snapshots/TurnDebug;
+    // age/residency derive from the (encrypted) profile mirror instead.
+    dntFacts = Object.fromEntries(signedAnswers.filter((a) => a.question.code).map((a) => [
+      a.question.code as string,
+      a.question.code === 'DNT_CNP' ? maskCnp(decryptEnvelopeTolerant(a.value)) : a.value,
+    ]))
   }
   // C3.4: acks for the active application (documented-warning state)
   const suitabilityAcks = application && application.status !== 'CANCELLED'

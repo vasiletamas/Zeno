@@ -15,7 +15,7 @@ import type { RawCustomerInsight } from './context-loaders'
 import type { DerivedStateV3, ExposedActions } from '@/lib/engines/domain-types'
 import { calculateAge } from './age'
 import { writeDebugEvent } from './debug-persistence'
-import { redactSnapshot } from '@/lib/debug/redact'
+import { redactSnapshot, maskCnpShapes } from '@/lib/debug/redact'
 import { engineVersion } from '@/lib/engines/derive-and-expose'
 
 // ==============================================
@@ -149,9 +149,13 @@ export interface DebugLegalityPayload {
  */
 export function buildLegalityPayload(input: Omit<DebugLegalityPayload, 'engineVersion'>): DebugLegalityPayload {
   const pc = input.state.identity?.pendingChallenge
-  const state = pc?.target
+  let state = pc?.target
     ? { ...input.state, identity: { ...input.state.identity, pendingChallenge: { ...pc, target: '[redacted]' } } }
     : input.state
+  // Task 5.4 (D11): CNP-shaped values are masked in the STATE too — same
+  // rule as redactSnapshot, so a recompute from the redacted snapshot still
+  // matches the stored state (no false same-version drift).
+  state = JSON.parse(maskCnpShapes(JSON.stringify(state))) as DerivedStateV3
   return { ...input, engineVersion, state, snapshot: redactSnapshot(input.snapshot) }
 }
 
