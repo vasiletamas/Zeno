@@ -56,6 +56,18 @@ it('gui-actor card answer with a valid option value → applied, next card emitt
   expect(row?.actor).toBe('gui')
 }, 60000)
 
+// Task 2.2 hole (2026-07-06 battery): the turn that CALLS open_dnt_session
+// started pre-DNT, so the never-enumerate rule from the DNT context section
+// was not in the prompt yet and the model listed "Opțiuni:" in prose. The
+// instruction must ride the tool result the model reads before narrating.
+it('open_dnt_session and write_dnt_answer results carry the no-prose-enumeration instruction', async () => {
+  const fx = await seedMinimalProtectFixture()
+  const opened = await openSession(fx)
+  expect(String((opened.data as { _message?: string })?._message)).toMatch(/never (list|enumerate) the options/i)
+  const r = await writeAnswer(fx, 'DNT_CONSULTATION_CONSENT', 'yes_all')
+  expect(String((r.data as { _message?: string })?._message)).toMatch(/never (list|enumerate) the options/i)
+}, 60000)
+
 it('NEGATIVE: a value outside the options → rejected envelope, nothing persisted', async () => {
   const fx = await seedMinimalProtectFixture()
   await openSession(fx)

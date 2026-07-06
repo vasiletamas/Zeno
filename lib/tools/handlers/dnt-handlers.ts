@@ -258,7 +258,7 @@ export const openDntSession: ToolHandler = async (_args, context) => {
         progress,
       },
       message: next
-        ? `DNT session opened (${type}${type === 'UPDATE' ? `, ${prefilled} answers pre-filled` : ''}). First question code: ${next.code}. A question card is shown to the customer — invite them to answer on it; if they type instead, call write_dnt_answer with questionCode "${next.code}".`
+        ? `DNT session opened (${type}${type === 'UPDATE' ? `, ${prefilled} answers pre-filled` : ''}). First question code: ${next.code}. A question card is shown to the customer with all the options — NEVER list the options in prose (no "Opțiuni:" lists); invite them to answer on the card. If they type instead, call write_dnt_answer with questionCode "${next.code}".`
         : `DNT session opened (${type}); all questions already answered — ready for sign_dnt.`,
       uiAction: dntQuestionCard(next, progress),
     }
@@ -408,7 +408,7 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
       },
       message: next === null
         ? 'All DNT questions answered. Ready for signature (sign_dnt).'
-        : `Answer saved. Next question code: ${next.code}. ${progress.total - progress.answered} remaining. A question card is shown — invite the customer to answer on it.`,
+        : `Answer saved. Next question code: ${next.code}. ${progress.total - progress.answered} remaining. A question card is shown with all the options — NEVER list the options in prose (no "Opțiuni:" lists); invite the customer to answer on the card.`,
       uiAction: dntQuestionCard(next, progress),
     }
   } catch (error) {
