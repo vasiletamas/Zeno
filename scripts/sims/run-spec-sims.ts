@@ -71,7 +71,7 @@ function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedC
   // Task 4.2 (D7): typed-code verification — a live challenge exists and the
   // agent is talking about the code, so the persona reads it back. Checked
   // FIRST: "ți-am trimis codul pe email" would otherwise match the email rule.
-  if (typedCode && /\bcod(ul)?\b|verificare|verificat/.test(m)) return typedCode
+  if (typedCode && /\bcod(ul|uri)?\b|cifre|verificare|verificat/.test(m)) return typedCode
   if (policy === 'refuse-consent' && /(semnez|semnarea|semn[ăa]m|\bsign\b|gdpr|prelucrarea datelor)/.test(m)) {
     return 'nu, nu sunt de acord cu prelucrarea datelor si nu semnez'
   }
@@ -147,7 +147,9 @@ function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedC
   if (/email sau sms|sms sau email/.test(m)) return 'pe email, va rog'
   // Typed mode never claims a link click (a lie that derails the close —
   // no link was clicked); a plain "da" pushes toward the acceptance ask.
-  if (/\bcod\b|verificare|verificat/.test(m)) return verification === 'typed' ? 'da' : 'am dat click pe linkul din email'
+  // "codul"/"cele 6 cifre" must hit this rule too — a bare 'da' to a
+  // code ask confuses the model into re-asking KYC fields (2026-07-06).
+  if (/\bcod(ul|uri)?\b|cifre|verificare|verificat/.test(m)) return verification === 'typed' ? 'da' : 'am dat click pe linkul din email'
   if (/document|buletin|carte de identitate/.test(m)) return 'am incarcat buletinul in aplicatie'
   if (/frecven|plat[ăa] anual|trimestrial/.test(m)) return 'anual'
   return 'da'
