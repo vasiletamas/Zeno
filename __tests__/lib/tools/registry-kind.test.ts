@@ -33,6 +33,12 @@ describe('tool kind classification', () => {
   it('no registered tool is kind=internal anymore (the two stubs died in A5.ADD-1)', () => {
     for (const name of getRegisteredToolNames()) expect(getToolDefinition(name)?.kind).not.toBe('internal')
   })
+  it('every kind=read tool declares sideEffects:false (Task 5.3 — get_next_question/get_quote_info sat in the writing partition, so missing_consequences fired error on every call)', () => {
+    for (const name of getRegisteredToolNames()) {
+      const def = getToolDefinition(name)
+      if (def?.kind === 'read') expect(def.sideEffects, name).toBe(false)
+    }
+  })
   it('accept_quote, sign_dnt and cancel_application require confirmation (gateway-owned two-step)', () => {
     expect(getToolDefinition('accept_quote')?.requiresConfirmation).toBe(true)
     expect(getToolDefinition('sign_dnt')?.requiresConfirmation).toBe(true)

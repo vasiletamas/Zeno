@@ -37,7 +37,6 @@ export class RollingStats {
 const turnAnomalies = new Map<string, Anomaly[]>()
 const turnToolFailures = new Map<string, number>()
 const turnToolCalls = new Map<string, number>()
-const turnLlmStarts = new Map<string, Map<string, number>>()
 const turnToolHistory = new Map<string, Array<{ name: string; success: boolean }>>()
 const _rollingLatency = new Map<string, RollingStats>()
 
@@ -77,7 +76,6 @@ export function registerAnomalySubscriber(bus: EventBus): void {
     turnAnomalies.set(event.traceId, [])
     turnToolFailures.set(event.traceId, 0)
     turnToolCalls.set(event.traceId, 0)
-    turnLlmStarts.set(event.traceId, new Map())
     turnToolHistory.set(event.traceId, [])
   })
 
@@ -93,20 +91,17 @@ export function registerAnomalySubscriber(bus: EventBus): void {
     }
   })
 
-  bus.on('llm:call:start', (event) => {
-    if (event.type !== 'llm:call:start') return
-    const slugMap = turnLlmStarts.get(event.traceId)
-    if (!slugMap) return
-    const count = (slugMap.get(event.agentSlug) ?? 0) + 1
-    slugMap.set(event.agentSlug, count)
-    if (count === 2) {
-      addAnomaly(event.traceId, {
-        type: 'error_pattern',
-        severity: 'info',
-        message: `LLM retry detected for agent "${event.agentSlug}"`,
-        metadata: { agentSlug: event.agentSlug, callCount: count },
-      })
-    }
+  // Task 5.3 (P1-9): the call-count heuristic died — every tool round is a
+  // legitimate llm:call:start, so counting starts flagged healthy turns.
+  // Genuine transport retries announce themselves explicitly.
+  bus.on('llm:call:retry', (event) => {
+    if (event.type !== 'llm:call:retry') return
+    addAnomaly(event.traceId, {
+      type: 'error_pattern',
+      severity: 'info',
+      message: `LLM retry (attempt ${event.attempt}) for agent "${event.agentSlug}": ${event.reason}`,
+      metadata: { agentSlug: event.agentSlug, attempt: event.attempt, reason: event.reason },
+    })
   })
 
   bus.on('llm:call:end', (event) => {
@@ -221,7 +216,6 @@ export function registerAnomalySubscriber(bus: EventBus): void {
       turnAnomalies.delete(event.traceId)
       turnToolFailures.delete(event.traceId)
       turnToolCalls.delete(event.traceId)
-      turnLlmStarts.delete(event.traceId)
       turnToolHistory.delete(event.traceId)
     }, 1000)
   })

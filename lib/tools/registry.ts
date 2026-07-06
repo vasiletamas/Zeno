@@ -771,6 +771,7 @@ registerTool('get_next_question', {
   customerVisible: false,
   statusMessage: null,
   allowedRoles: ALL_ROLES,
+  sideEffects: false, // pure read — Task 5.3: the default-true left it in the writing partition, so missing_consequences fired on every call
   kind: 'read',
 }, getNextQuestionInfo)
 
@@ -968,6 +969,7 @@ registerTool('get_quote_info', {
   customerVisible: false,
   statusMessage: null,
   allowedRoles: ALL_ROLES,
+  sideEffects: false, // pure read — Task 5.3: the default-true left it in the writing partition, so missing_consequences fired on every call
   kind: 'read',
 }, getQuoteInfo)
 
@@ -1028,6 +1030,7 @@ registerTool('get_payment_status', {
   customerVisible: false,
   statusMessage: null,
   allowedRoles: ALL_ROLES,
+  sideEffects: false, // pure read — Task 5.3: the default-true left it in the writing partition, so missing_consequences fired on every call
   kind: 'read',
 }, getPaymentStatus)
 
@@ -1202,6 +1205,7 @@ registerTool('get_policy_info', {
   customerVisible: false,
   statusMessage: null,
   allowedRoles: ALL_ROLES,
+  sideEffects: false, // pure read — Task 5.3: the default-true left it in the writing partition, so missing_consequences fired on every call
   kind: 'read',
 }, getPolicyInfo)
 

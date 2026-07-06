@@ -103,6 +103,9 @@ export async function callWithFailover<T>(
   primary: ProviderTarget,
   fallback: ProviderTarget | null,
   fn: (provider: LLMProviderInterface, model: string) => Promise<T>,
+  // Task 5.3 (P1-9): callers observe GENUINE transport retries explicitly
+  // (the gateway emits llm:call:retry) — never inferred from call counts.
+  opts?: { onRetry?: (attempt: number, reason: string) => void },
 ): Promise<T> {
   let lastError: unknown
   const primaryName = primary.model.split('/')[0] ?? primary.model
@@ -115,6 +118,7 @@ export async function callWithFailover<T>(
         executeWithRetries(
           () => fn(primary.provider, primary.model),
           2, // maxRetries
+          opts?.onRetry,
         ),
       )
     } catch (err) {
@@ -185,6 +189,7 @@ export async function callWithFailover<T>(
 async function executeWithRetries<T>(
   fn: () => Promise<T>,
   maxRetries: number,
+  onRetry?: (attempt: number, reason: string) => void,
 ): Promise<T> {
   let lastError: unknown
 
@@ -210,6 +215,7 @@ async function executeWithRetries<T>(
       message: `Retrying after ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
       context: { attempt, delay, retryAfterMs },
     })
+    onRetry?.(attempt + 1, classifyError(lastError))
 
     await sleep(delay)
 

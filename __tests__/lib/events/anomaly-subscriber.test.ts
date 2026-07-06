@@ -80,12 +80,20 @@ describe('AnomalySubscriber', () => {
     expect(anomalies).toContainEqual(expect.objectContaining({ type: 'error_pattern', severity: 'warning' }))
   })
 
-  it('flags LLM retry (same agentSlug called 2+ times) as info', () => {
+  it('a multi-round tool-calling turn emits ZERO retry anomalies (Task 5.3: the call-count heuristic died — every tool round is a legitimate llm:call:start)', () => {
     emitTurnStart('t9')
     bus.emit({ type: 'llm:call:start', traceId: 't9', provider: 'OPENAI', model: 'gpt-5.4', agentSlug: 'main-chat' })
-    bus.emit({ type: 'llm:call:start', traceId: 't9', provider: 'ANTHROPIC', model: 'claude-4', agentSlug: 'main-chat' })
-    const anomalies = getTurnAnomalies('t9')
-    expect(anomalies).toContainEqual(expect.objectContaining({ type: 'error_pattern', severity: 'info' }))
+    bus.emit({ type: 'llm:call:start', traceId: 't9', provider: 'OPENAI', model: 'gpt-5.4', agentSlug: 'main-chat' })
+    bus.emit({ type: 'llm:call:start', traceId: 't9', provider: 'OPENAI', model: 'gpt-5.4', agentSlug: 'main-chat' })
+    expect(getTurnAnomalies('t9').filter((a) => /retry/i.test(a.message))).toHaveLength(0)
+  })
+
+  it('a GENUINE transport retry (llm:call:retry) emits exactly one info anomaly (Task 5.3, P1-9)', () => {
+    emitTurnStart('t9b')
+    bus.emit({ type: 'llm:call:retry', traceId: 't9b', agentSlug: 'main-chat', attempt: 1, reason: 'rate_limited' })
+    const retries = getTurnAnomalies('t9b').filter((a) => /retry/i.test(a.message))
+    expect(retries).toHaveLength(1)
+    expect(retries[0]).toMatchObject({ type: 'error_pattern', severity: 'info' })
   })
 
   // --- Behavioral anomalies ---

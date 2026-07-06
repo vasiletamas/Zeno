@@ -20,6 +20,9 @@ export type ZenoEvent =
   | { type: 'phase:start'; traceId: string; phase: string; timestamp: number }
   | { type: 'phase:end'; traceId: string; phase: string; durationMs: number; metadata?: Record<string, unknown> }
   | { type: 'llm:call:start'; traceId: string; provider: string; model: string; agentSlug: string }
+  // Task 5.3 (P1-9): an EXPLICIT transport retry inside one logical call —
+  // replaces the call-count heuristic (tool rounds are legitimate re-calls).
+  | { type: 'llm:call:retry'; traceId: string; agentSlug: string; attempt: number; reason: string }
   | { type: 'llm:call:end'; traceId: string; provider: string; model: string; inputTokens: number; outputTokens: number; durationMs: number }
   | { type: 'tool:start'; traceId: string; toolName: string; args: Record<string, unknown> }
   | { type: 'tool:end'; traceId: string; toolName: string; durationMs: number; success: boolean; cached: boolean }
