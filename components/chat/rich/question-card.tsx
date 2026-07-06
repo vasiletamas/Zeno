@@ -673,7 +673,9 @@ export function QuestionCard({
       <div className="mb-4">
         <p className="text-xs text-muted mb-1.5">
           {t('question_progress', language)
-            .replace('{answered}', String(progress.answered))
+            /* The card shows the NEXT unanswered question — its ordinal is
+               answered+1 ("Intrebarea 0 din 7" was off by one). */
+            .replace('{answered}', String(Math.min(progress.answered + 1, progress.total)))
             .replace('{total}', String(progress.total))}
         </p>
         <div className="h-1.5 rounded-full bg-warm-border overflow-hidden">

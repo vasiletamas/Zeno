@@ -13,8 +13,16 @@
  */
 
 import { prisma } from '@/lib/db'
+import { Prisma } from '@/lib/generated/prisma/client'
 import { computeVisibleSet } from './dependency-graph'
 import { loadDependencyGraph } from './dependency-graph-loader'
+
+// Injectable client (same convention as question-groups.ts): callers running
+// inside the commit gateway's transaction MUST pass their tx client — the
+// global client cannot see rows written in the open transaction, so the
+// post-write next-question walk re-serves the just-answered question
+// (2026-07-06 user-found stale-card defect).
+type Db = typeof prisma | Prisma.TransactionClient
 
 // ==========================================
 // TYPES
@@ -400,10 +408,10 @@ export type AnswerScope =
   | { kind: 'application'; applicationId: string }
   | { kind: 'dntSession'; sessionId: string }
 
-async function loadScopedAnswers(scope: AnswerScope, questionIds: string[]): Promise<Map<string, string>> {
+async function loadScopedAnswers(scope: AnswerScope, questionIds: string[], db: Db = prisma): Promise<Map<string, string>> {
   const rows = scope.kind === 'application'
-    ? await prisma.answer.findMany({ where: { applicationId: scope.applicationId, questionId: { in: questionIds }, status: 'ACTIVE' } })
-    : await prisma.dntAnswer.findMany({ where: { sessionId: scope.sessionId, questionId: { in: questionIds } } })
+    ? await db.answer.findMany({ where: { applicationId: scope.applicationId, questionId: { in: questionIds }, status: 'ACTIVE' } })
+    : await db.dntAnswer.findMany({ where: { sessionId: scope.sessionId, questionId: { in: questionIds } } })
   return new Map(rows.map(a => [a.questionId, a.value]))
 }
 
@@ -423,9 +431,10 @@ export async function getNextQuestion(
   // rides back as suggestedAnswer — a PROPOSAL the customer must confirm
   // via a real save commit, never a silently copied answer.
   proposals?: Map<string, string>,
+  db: Db = prisma,
 ): Promise<{ question: QuestionData; progress: { answered: number; total: number }; suggestedAnswer?: string } | null> {
   // Load all question groups matching the codes
-  const groups = await prisma.questionGroup.findMany({
+  const groups = await db.questionGroup.findMany({
     where: { code: { in: groupCodes } },
     orderBy: { orderIndex: 'asc' },
   })
@@ -436,7 +445,7 @@ export async function getNextQuestion(
   const groupCodeMap = new Map(groups.map(g => [g.id, g.code]))
 
   // Load all questions for these groups
-  const questions = await prisma.question.findMany({
+  const questions = await db.question.findMany({
     where: { groupId: { in: groupIds } },
     orderBy: [{ groupId: 'asc' }, { orderIndex: 'asc' }],
   })
@@ -454,10 +463,10 @@ export async function getNextQuestion(
 
   // Load answers in the given scope
   const questionIds = questions.map(q => q.id)
-  const answersMap = await loadScopedAnswers(scope, questionIds)
+  const answersMap = await loadScopedAnswers(scope, questionIds, db)
 
   // Visibility from the ONE dependency store (C1.8)
-  const visible = await visibleCodesForScope(questions, answersMap, scope)
+  const visible = await visibleCodesForScope(questions, answersMap, scope, db)
 
   // Find visible questions and next unanswered
   let nextQuestion: QuestionData | null = null
@@ -506,9 +515,10 @@ export async function getNextQuestion(
 export async function calculateProgress(
   groupCodes: string[],
   scope: AnswerScope,
+  db: Db = prisma,
 ): Promise<{ answered: number; total: number; percentage: number }> {
   // Load groups
-  const groups = await prisma.questionGroup.findMany({
+  const groups = await db.questionGroup.findMany({
     where: { code: { in: groupCodes } },
     orderBy: { orderIndex: 'asc' },
   })
@@ -518,7 +528,7 @@ export async function calculateProgress(
   const groupIds = groups.map(g => g.id)
 
   // Load questions
-  const questions = await prisma.question.findMany({
+  const questions = await db.question.findMany({
     where: { groupId: { in: groupIds } },
   })
 
@@ -526,10 +536,10 @@ export async function calculateProgress(
 
   // Load answers in the given scope
   const questionIds = questions.map(q => q.id)
-  const answersMap = await loadScopedAnswers(scope, questionIds)
+  const answersMap = await loadScopedAnswers(scope, questionIds, db)
 
   // Visibility from the ONE dependency store (C1.8)
-  const visible = await visibleCodesForScope(questions, answersMap, scope)
+  const visible = await visibleCodesForScope(questions, answersMap, scope, db)
 
   // Count visible and answered
   let total = 0
@@ -555,6 +565,7 @@ async function visibleCodesForScope(
   questions: { id: string; code: string | null }[],
   answersMap: Map<string, string>,
   scope: AnswerScope,
+  db: Db = prisma,
 ): Promise<Set<string>> {
   const codes: string[] = []
   const answers: Record<string, string> = {}
@@ -566,9 +577,9 @@ async function visibleCodesForScope(
   }
   let selection: { tier: string | null; level: string | null; addon: boolean | null } = { tier: null, level: null, addon: null }
   if (scope.kind === 'application') {
-    const app = await prisma.application.findUnique({ where: { id: scope.applicationId }, include: { tier: true, level: true } })
+    const app = await db.application.findUnique({ where: { id: scope.applicationId }, include: { tier: true, level: true } })
     if (app) selection = { tier: app.tier?.code ?? null, level: app.level?.code ?? null, addon: app.includesAddon }
   }
-  const graph = await loadDependencyGraph(prisma)
+  const graph = await loadDependencyGraph(db)
   return computeVisibleSet(graph, codes, { answers, selection })
 }

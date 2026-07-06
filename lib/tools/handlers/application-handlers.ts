@@ -189,7 +189,7 @@ export const writeQuestionAnswer: ToolHandler = async (args, context) => {
     const activeGroupCodes = await appGroupCodesFor(context, application.includesAddon)
     const scope = { kind: 'application' as const, applicationId: application.id }
 
-    const currentResult = await getNextQuestion(activeGroupCodes, scope)
+    const currentResult = await getNextQuestion(activeGroupCodes, scope, undefined, context.db)
     if (!currentResult) {
       return {
         success: true,
@@ -274,8 +274,11 @@ export const writeQuestionAnswer: ToolHandler = async (args, context) => {
 
     // the plan may have toggled the addon (eligibility) — recompute the
     // active group codes so the next question follows the new branch.
+    // context.db, NOT the global client: inside the gateway tx the global
+    // client cannot see the just-applied answer and would re-serve the
+    // just-answered question (2026-07-06 user-found stale-card defect).
     const postGroupCodes = await appGroupCodesFor(context, postApp.includesAddon)
-    const nextResult = await getNextQuestion(postGroupCodes, scope)
+    const nextResult = await getNextQuestion(postGroupCodes, scope, undefined, context.db)
     if (!nextResult) {
       // Completeness is DERIVED (missingCodes = []) — the status machine
       // stays OPEN; generate_quote exposure turns on from the derived state.
@@ -496,8 +499,8 @@ export const resumeApplication: ToolHandler = async (args, context) => {
     const codes = await appGroupCodesFor(context, application.includesAddon)
     const scope = { kind: 'application' as const, applicationId: application.id }
     const [next, progress, tier, level] = await Promise.all([
-      getNextQuestion(codes, scope),
-      calculateProgress(codes, scope),
+      getNextQuestion(codes, scope, undefined, context.db),
+      calculateProgress(codes, scope, context.db),
       application.tierId ? context.db.pricingTier.findUnique({ where: { id: application.tierId } }) : null,
       application.levelId ? context.db.pricingLevel.findUnique({ where: { id: application.levelId } }) : null,
     ])

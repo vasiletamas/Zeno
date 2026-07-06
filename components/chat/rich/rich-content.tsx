@@ -156,6 +156,12 @@ export function RichContent({
               payload: {
                 answer: value,
                 questionId: question.id,
+                // C1.9: the code ADDRESSES the commit — without it a click on
+                // a stale card writes to whatever question is current
+                // (2026-07-06: a "Da" on the health card was recorded against
+                // BD_CANCER_HISTORY). With it, the handler's mismatch guard
+                // rejects stale clicks precisely.
+                questionCode: question.code,
                 groupType,
               },
             })

@@ -26,6 +26,11 @@ describe('confirm_required GUI consumer (A3 erratum 5)', () => {
     expect(tc?.name).toBe('write_question_answer')
     expect(tc?.arguments).toEqual({ answer: 'da', questionCode: 'BD_CANCER_HISTORY', confirmToken: 'tok-4' })
   })
+  it('answer_question card clicks carry the questionCode so stale clicks hit the C1.9 mismatch guard (2026-07-06)', () => {
+    const tc = adaptAction({ type: 'answer_question', payload: { answer: 'da', questionId: 'q1', questionCode: 'HEALTH_DECLARATION_CONFIRM', groupType: 'application' } })
+    expect(tc?.name).toBe('write_question_answer')
+    expect(tc?.arguments).toMatchObject({ answer: 'da', questionCode: 'HEALTH_DECLARATION_CONFIRM' })
+  })
   it('modify_answer confirm carries code + newValue + token (P0-6)', () => {
     const action = buildConfirmAction('modify_answer', 'tok-5', { questionCode: 'BD_CANCER_HISTORY', newValue: 'nu' })
     expect(action).not.toBeNull()
