@@ -66,13 +66,17 @@ function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy']): strin
   if (/electronic|coresponden/.test(m)) return 'da'
   if (/fum[ăa]tor/.test(m)) return 'nu'
   if (/c[âa]ți ani|ce v[âa]rst[ăa]|v[âa]rsta ta/.test(m)) return '35'
-  if (/\bcnp\b/.test(m)) return '1960229410014'
+  if (/\bcnp\b/.test(m)) return '1960229410015' // checksum-valid (the old 4-final variant failed collect_customer_field)
   if (/cu cine loc|gospod[ăa]r/.test(m)) return 'singur'
   if (/sursa|provin/.test(m)) return 'din salariu'
   if (/2000_5000|interval/.test(m)) return 'intre 2000 si 5000'
   if (/venit|salar/.test(m)) return '5000'
   if (/ocupa|profesi|lucrezi/.test(m)) return 'sunt angajat cu carte de munca (employee)'
   if (/copii|dependen/.test(m)) return '0'
+  // Seed question text is now "Câți membri are familia ta, inclusiv tu?" —
+  // must come AFTER the minors check (that text also contains "membrii").
+  if (/membri|famili/.test(m)) return '2'
+  if (/tip de protec|protec[țt]ie simpl/.test(m)) return 'simple_protection'
   if (/educa|studii/.test(m)) return 'studii universitare (university)'
   if (/email/.test(m)) return 'ion.sim@example.com'
   if (/\bcod\b|verificare|verificat/.test(m)) return 'am dat click pe linkul din email'
@@ -81,12 +85,34 @@ function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy']): strin
   return 'da'
 }
 
-async function drain(stream: ReadableStream<Uint8Array>): Promise<void> {
+/** Drain the SSE stream, collecting confirm_required ui_actions (F5.5 gap:
+ * the GUI confirm card is a CUSTOMER click, so the sim must replay it —
+ * without this the funnel deadlocks at sign_dnt/accept_quote forever). */
+async function drain(stream: ReadableStream<Uint8Array>): Promise<{ confirms: { tool: string; confirmToken: string; args: Record<string, unknown> }[] }> {
   const reader = stream.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const confirms: { tool: string; confirmToken: string; args: Record<string, unknown> }[] = []
   for (;;) {
-    const { done } = await reader.read()
+    const { done, value } = await reader.read()
     if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let idx: number
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const raw = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      const eventLine = raw.match(/^event: (.+)$/m)?.[1]
+      const dataLine = raw.match(/^data: (.+)$/m)?.[1]
+      if (eventLine !== 'ui_action' || !dataLine) continue
+      try {
+        const data = JSON.parse(dataLine) as { type?: string; payload?: { tool?: string; confirmToken?: string; args?: Record<string, unknown> } }
+        if (data.type === 'confirm_required' && data.payload?.tool && data.payload.confirmToken) {
+          confirms.push({ tool: data.payload.tool, confirmToken: data.payload.confirmToken, args: data.payload.args ?? {} })
+        }
+      } catch { /* non-JSON data lines are not ours */ }
+    }
   }
+  return { confirms }
 }
 
 async function lastAssistant(conversationId: string): Promise<string> {
@@ -172,7 +198,19 @@ async function runTrial(sc: SpecSimScenario, trial: number): Promise<{ pass: boo
   const send = async (msg: string) => {
     turns++
     try {
-      await drain(handleChatTurn({ conversationId: conv.id, customerId: customer.id, message: msg, language: 'ro' }))
+      const { confirms } = await drain(handleChatTurn({ conversationId: conv.id, customerId: customer.id, message: msg, language: 'ro' }))
+      // Replay each confirm card as the customer's click (same commit + token
+      // the GUI round-trips via the action adapter).
+      for (const c of confirms) {
+        turns++
+        await drain(handleChatTurn({
+          conversationId: conv.id,
+          customerId: customer.id,
+          message: `[Action: confirm ${c.tool}]`,
+          language: 'ro',
+          syntheticToolCall: { id: `sim_confirm_${turns}`, name: c.tool, arguments: { ...c.args, confirmToken: c.confirmToken } },
+        }))
+      }
     } catch (e) {
       console.error(`    [${sc.key}#${trial}] turn "${msg.slice(0, 30)}" errored:`, (e as Error).message)
     }
