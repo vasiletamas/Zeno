@@ -34,6 +34,7 @@ import type {
   LLMToolDefinition,
   ToolChoice,
 } from './types'
+import { parseCacheUsage } from './types'
 import { logWarn } from '@/lib/errors/logger'
 
 // ==============================================
@@ -275,10 +276,13 @@ export class AnthropicProvider implements LLMProviderInterface {
   }
 
   private extractUsage(usage: { input_tokens: number; output_tokens: number }): TokenUsage {
+    const cache = parseCacheUsage('ANTHROPIC', usage as unknown as Record<string, unknown>)
     return {
       promptTokens: usage.input_tokens,
       completionTokens: usage.output_tokens,
       totalTokens: usage.input_tokens + usage.output_tokens,
+      cacheReadTokens: cache.cacheRead,
+      cacheWriteTokens: cache.cacheWrite,
     }
   }
 
@@ -392,10 +396,36 @@ export class AnthropicProvider implements LLMProviderInterface {
     return this.emitStreamChunks(stream)
   }
 
+  /**
+   * Accumulate usage across the stream's lifecycle events: message_start
+   * carries input_tokens + cache read/write, message_delta carries the
+   * cumulative output_tokens. The done chunk must carry the result — before
+   * A1 these generators emitted `done` with no usage, so on the Anthropic
+   * fallback every turn counted zero tokens.
+   */
+  private static streamUsageAccumulator() {
+    const raw: Record<string, unknown> = { input_tokens: 0, output_tokens: 0 }
+    return {
+      ingest(event: Anthropic.RawMessageStreamEvent): void {
+        if (event.type === 'message_start') {
+          Object.assign(raw, event.message.usage as unknown as Record<string, unknown>)
+        }
+        if (event.type === 'message_delta' && event.usage) {
+          raw.output_tokens = event.usage.output_tokens
+        }
+      },
+      toTokenUsage(extract: (u: { input_tokens: number; output_tokens: number }) => TokenUsage): TokenUsage {
+        return extract(raw as unknown as { input_tokens: number; output_tokens: number })
+      },
+    }
+  }
+
   private async *emitStreamChunks(
     stream: AsyncIterable<Anthropic.RawMessageStreamEvent>,
   ): AsyncIterable<StreamChunk> {
+    const usage = AnthropicProvider.streamUsageAccumulator()
     for await (const event of stream) {
+      usage.ingest(event)
       if (event.type === 'content_block_delta') {
         const delta = event.delta
         if ('text' in delta && delta.type === 'text_delta') {
@@ -404,7 +434,7 @@ export class AnthropicProvider implements LLMProviderInterface {
       }
 
       if (event.type === 'message_stop') {
-        yield { type: 'done' }
+        yield { type: 'done', usage: usage.toTokenUsage(this.extractUsage.bind(this)) }
       }
     }
   }
@@ -448,8 +478,10 @@ export class AnthropicProvider implements LLMProviderInterface {
   ): AsyncIterable<StreamChunk> {
     // Accumulate tool use blocks during streaming
     const toolUseAccum: Map<number, { id: string; name: string; jsonChunks: string }> = new Map()
+    const usage = AnthropicProvider.streamUsageAccumulator()
 
     for await (const event of stream) {
+      usage.ingest(event)
       // Text content deltas
       if (event.type === 'content_block_delta') {
         const delta = event.delta
@@ -489,7 +521,7 @@ export class AnthropicProvider implements LLMProviderInterface {
           yield { type: 'tool_calls', toolCalls }
         }
 
-        yield { type: 'done' }
+        yield { type: 'done', usage: usage.toTokenUsage(this.extractUsage.bind(this)) }
       }
     }
   }

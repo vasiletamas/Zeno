@@ -26,6 +26,7 @@ import type {
   ToolChoice,
   ReasoningConfig,
 } from './types'
+import { parseCacheUsage } from './types'
 import { logWarn } from '@/lib/errors/logger'
 
 // ==============================================
@@ -156,10 +157,13 @@ export class OpenAIProvider implements LLMProviderInterface {
   }
 
   private extractUsage(usage: OpenAI.CompletionUsage | undefined): TokenUsage {
+    const cache = parseCacheUsage('OPENAI', (usage ?? {}) as unknown as Record<string, unknown>)
     return {
       promptTokens: usage?.prompt_tokens ?? 0,
       completionTokens: usage?.completion_tokens ?? 0,
       totalTokens: usage?.total_tokens ?? 0,
+      cacheReadTokens: cache.cacheRead,
+      cacheWriteTokens: cache.cacheWrite,
     }
   }
 
