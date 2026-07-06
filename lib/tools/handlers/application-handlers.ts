@@ -255,6 +255,7 @@ export const writeQuestionAnswer: ToolHandler = async (args, context) => {
         answerValue: validation.normalizedValue,
         previousInsightValue: priorInsight?.value,
         previousInsightCategory: priorInsight?.category,
+        productId: context.product?.id ?? null,
       })
     }
 
