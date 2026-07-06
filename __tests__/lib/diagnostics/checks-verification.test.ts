@@ -71,4 +71,33 @@ describe('known_field_reasked', () => {
     ] })
     expect(runDiagnostics(e).some((x) => x.checkId === 'known_field_reasked')).toBe(false)
   })
+  // A SAME-TURN duplicate is the idempotency layer absorbing a double call
+  // within one round-loop — the customer was never re-asked. Only a replay
+  // in a LATER turn than the fresh apply is a real re-ask.
+  it('silent when the fresh apply and the replay land in the SAME turn (round-loop duplicate)', () => {
+    const row = (id: string, disposition: string) =>
+      ({ id, tool: 'collect_customer_field', actor: 'agent', outcome: 'applied', effects: [], reasonCode: null, phaseFrom: null, phaseTo: null, idempotencyDisposition: disposition, targetRef: 'field:name', createdAt: 'x' })
+    const post = (commitLedgerId: string) =>
+      ({ point: 'post_commit', engineVersion: 'test-x', contentVersions: [], snapshot: {}, commitLedgerId, state: { phase: 'QUOTE' }, actions: { available: [], blocked: [] } })
+    const e = makeExport({
+      turns: [turn(4, { legality: [...legality(noPendingState), post('l1'), post('l2')] })] as never,
+      ledger: [row('l1', 'fresh'), row('l2', 'replay')] as never,
+    })
+    expect(runDiagnostics(e).some((x) => x.checkId === 'known_field_reasked')).toBe(false)
+  })
+  it('flags a replay in a LATER turn than the fresh apply (the customer really was re-asked)', () => {
+    const row = (id: string, disposition: string) =>
+      ({ id, tool: 'collect_customer_field', actor: 'agent', outcome: 'applied', effects: [], reasonCode: null, phaseFrom: null, phaseTo: null, idempotencyDisposition: disposition, targetRef: 'field:name', createdAt: 'x' })
+    const post = (commitLedgerId: string) =>
+      ({ point: 'post_commit', engineVersion: 'test-x', contentVersions: [], snapshot: {}, commitLedgerId, state: { phase: 'QUOTE' }, actions: { available: [], blocked: [] } })
+    const e = makeExport({
+      turns: [
+        turn(4, { legality: [...legality(noPendingState), post('l1')] }),
+        turn(6, { legality: [...legality(noPendingState), post('l2')] }),
+      ] as never,
+      ledger: [row('l1', 'fresh'), row('l2', 'replay')] as never,
+    })
+    const f = runDiagnostics(e).find((x) => x.checkId === 'known_field_reasked')
+    expect(f).toMatchObject({ severity: 'warn', evidence: { targetRef: 'field:name' } })
+  })
 })

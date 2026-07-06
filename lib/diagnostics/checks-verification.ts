@@ -41,8 +41,32 @@ export const challengeResentWhilePending: DiagnosticCheck = {
 
 export const knownFieldReasked: DiagnosticCheck = {
   id: 'known_field_reasked',
-  description: 'collect_customer_field replayed idempotently — the agent re-collected a field it already had',
-  run: (e) => e.ledger
-    .filter((l) => l.tool === 'collect_customer_field' && l.idempotencyDisposition === 'replay')
-    .map((l): Finding => ({ checkId: 'known_field_reasked', severity: 'warn', turn: null, evidence: { targetRef: l.targetRef } })),
+  description: 'collect_customer_field replayed idempotently in a LATER turn — the agent re-asked a field it already had',
+  run: (e) => {
+    // ledger row → turn via the post_commit legality join (erratum 3). A
+    // replay in the SAME turn as its fresh apply is the idempotency layer
+    // absorbing a round-loop double call — the customer was never re-asked.
+    const turnByLedgerId = new Map<string, number>()
+    for (const t of e.turns) {
+      for (const l of t.legality ?? []) {
+        if (l.point === 'post_commit' && l.commitLedgerId) turnByLedgerId.set(l.commitLedgerId, t.messageIndex)
+      }
+    }
+    const freshTurn = new Map<string, number>()
+    for (const l of e.ledger) {
+      if (l.tool === 'collect_customer_field' && l.idempotencyDisposition === 'fresh' && l.targetRef) {
+        const turn = turnByLedgerId.get(l.id)
+        if (turn !== undefined) freshTurn.set(l.targetRef, turn)
+      }
+    }
+    return e.ledger
+      .filter((l) => l.tool === 'collect_customer_field' && l.idempotencyDisposition === 'replay')
+      .filter((l) => {
+        const replayTurn = turnByLedgerId.get(l.id)
+        const firstTurn = l.targetRef ? freshTurn.get(l.targetRef) : undefined
+        // unknown joins stay flagged (conservative — pre-F2 exports)
+        return replayTurn === undefined || firstTurn === undefined || replayTurn > firstTurn
+      })
+      .map((l): Finding => ({ checkId: 'known_field_reasked', severity: 'warn', turn: turnByLedgerId.get(l.id) ?? null, evidence: { targetRef: l.targetRef } }))
+  },
 }
