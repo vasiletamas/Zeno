@@ -136,7 +136,7 @@ export class AnthropicProvider implements LLMProviderInterface {
         if (msg._providerContent && Array.isArray(msg._providerContent)) {
           converted.push({
             role: 'assistant',
-            content: msg._providerContent as ContentBlockParam[],
+            content: this.withMessageCacheControl(msg, msg._providerContent as ContentBlockParam[]),
           })
         } else if (msg.toolCalls && msg.toolCalls.length > 0) {
           // Reconstruct content blocks from text + tool_calls
@@ -155,12 +155,26 @@ export class AnthropicProvider implements LLMProviderInterface {
             } as ToolUseBlockParam)
           }
 
-          converted.push({ role: 'assistant', content: contentBlocks })
+          converted.push({ role: 'assistant', content: this.withMessageCacheControl(msg, contentBlocks) })
+        } else if (msg.cacheHint && msg.content) {
+          // D1 history breakpoint: message-level cacheHint → cache_control on
+          // the text block, so the conversation prefix up to here reads from cache.
+          converted.push({
+            role: 'assistant',
+            content: [{ type: 'text', text: msg.content, cache_control: { type: 'ephemeral' as const } }],
+          })
         } else {
           converted.push({ role: 'assistant', content: msg.content ?? '' })
         }
       } else if (msg.role === 'user') {
-        converted.push({ role: 'user', content: msg.content ?? '' })
+        if (msg.cacheHint && msg.content) {
+          converted.push({
+            role: 'user',
+            content: [{ type: 'text', text: msg.content, cache_control: { type: 'ephemeral' as const } }],
+          })
+        } else {
+          converted.push({ role: 'user', content: msg.content ?? '' })
+        }
       }
     }
 
@@ -205,6 +219,20 @@ export class AnthropicProvider implements LLMProviderInterface {
       return [{ type: 'text', text: content }]
     }
     return content as ContentBlockParam[]
+  }
+
+  /**
+   * D1 history breakpoint: when a non-system message carries a cacheHint,
+   * stamp cache_control on its LAST content block — the cache prefix then
+   * covers everything up to and including this message.
+   */
+  private withMessageCacheControl(msg: Message, blocks: ContentBlockParam[]): ContentBlockParam[] {
+    if (!msg.cacheHint || blocks.length === 0) return blocks
+    const last = blocks[blocks.length - 1]
+    return [
+      ...blocks.slice(0, -1),
+      { ...last, cache_control: { type: 'ephemeral' as const } } as ContentBlockParam,
+    ]
   }
 
   // ==============================================

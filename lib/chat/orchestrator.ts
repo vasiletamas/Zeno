@@ -26,6 +26,7 @@ import { createSSEStream, pickStatusMessage, type SSEEvent } from './stream-hand
 import type { ToolContext, PipelineResult, ToolResult } from '@/lib/tools/types'
 import { buildPrompt, type GateSelection, type PromptSections } from './prompt-builder'
 import { accumulateTurnUsage } from './turn-usage'
+import { buildTurnMessages } from './build-turn-messages'
 import { getRequiredSectionsFor, formatDerivedBriefing } from './phase-sections-map'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { deriveAndExpose, engineVersion } from '@/lib/engines/derive-and-expose'
@@ -720,21 +721,16 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'build_messages', timestamp: Date.now() })
   const step6Start = Date.now()
 
-  const messages: Message[] = []
-  if (buildResult.stablePrefix) {
-    messages.push({ role: 'system' as const, content: buildResult.stablePrefix, cacheHint: { breakpoint: 'ephemeral' } })
-  }
-  if (buildResult.dynamicSuffix) {
-    messages.push({ role: 'system' as const, content: buildResult.dynamicSuffix })
-  }
-  if (summaryPrefix) {
-    messages.push({
-      role: 'system' as const,
-      content: `[Previous conversation summary]\n${summaryPrefix}\n[End of summary — recent messages follow]`,
-    })
-  }
-  messages.push(...windowMessages)
-  messages.push({ role: 'user' as const, content: input.message })
+  // D1 (F3): dynamic per-turn state rides the final user message, BEHIND the
+  // history, so provider prefix caching covers system + summary + history.
+  // The persisted user Message row keeps the raw customer text.
+  const messages: Message[] = buildTurnMessages({
+    stablePrefix: buildResult.stablePrefix || null,
+    dynamicSuffix: buildResult.dynamicSuffix || null,
+    summaryPrefix,
+    windowMessages,
+    userMessage: input.message,
+  })
 
   state.phases['step6_build_messages'] = Date.now() - step6Start
   eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'build_messages', durationMs: Date.now() - step6Start })
