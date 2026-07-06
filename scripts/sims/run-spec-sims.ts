@@ -95,7 +95,11 @@ function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedC
   // KYC completion asks (the precise requires_identity needs) — the DOB
   // must MATCH the CNP above (1960229410015 → born 1996-02-29).
   if (/data na[șs]terii|zi de na[șs]tere|aaaa-ll-zz/.test(m)) return '1996-02-29'
-  if (/num[ăa]r(ul)? de telefon|telefonul t[ăa]u/.test(m)) return '0712345678'
+  // "numărul tău de telefon" / "în format românesc, de exemplu 07XXXXXXXX" —
+  // the old adjacency regex missed the possessive variant and the persona
+  // answered 'da' forever (2026-07-06 battery: phone never declared, close
+  // walled on requires_identity).
+  if (/telefon/.test(m) && /num[ăa]r|format|07/.test(m)) return '0712345678'
   // The acceptance ask — MUST outrank the greedy keyword rules below: a
   // quote presentation enumerates coverages ("spitalizare", "venit",
   // "familia"), and a stray keyword answer at the close kills the sale.
