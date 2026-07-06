@@ -73,31 +73,43 @@ describe('known_field_reasked', () => {
   })
   // A SAME-TURN duplicate is the idempotency layer absorbing a double call
   // within one round-loop — the customer was never re-asked. Only a replay
-  // in a LATER turn than the fresh apply is a real re-ask.
+  // in a LATER turn than the fresh apply is a real re-ask. Attribution
+  // anchors on the turn's USER MESSAGE createdAt (same DB clock as the
+  // ledger) — replay envelopes carry the ORIGINAL ledgerId, and TurnDebug
+  // timestamps are persist-time, so neither joins reliably.
+  const collectRow = (id: string, disposition: string, createdAt: string) =>
+    ({ id, tool: 'collect_customer_field', actor: 'agent', outcome: 'applied', effects: [], reasonCode: null, phaseFrom: null, phaseTo: null, idempotencyDisposition: disposition, targetRef: 'field:name', createdAt })
+  const userMsgAt = (index: number, createdAt: string) => {
+    const arr: unknown[] = []
+    arr[index] = { id: `m${index}`, role: 'user', content: 'x', toolCalls: null, toolResults: null, createdAt }
+    return arr
+  }
   it('silent when the fresh apply and the replay land in the SAME turn (round-loop duplicate)', () => {
-    const row = (id: string, disposition: string) =>
-      ({ id, tool: 'collect_customer_field', actor: 'agent', outcome: 'applied', effects: [], reasonCode: null, phaseFrom: null, phaseTo: null, idempotencyDisposition: disposition, targetRef: 'field:name', createdAt: 'x' })
-    const post = (commitLedgerId: string) =>
-      ({ point: 'post_commit', engineVersion: 'test-x', contentVersions: [], snapshot: {}, commitLedgerId, state: { phase: 'QUOTE' }, actions: { available: [], blocked: [] } })
     const e = makeExport({
-      turns: [turn(4, { legality: [...legality(noPendingState), post('l1'), post('l2')] })] as never,
-      ledger: [row('l1', 'fresh'), row('l2', 'replay')] as never,
+      turns: [turn(4, { legality: legality(noPendingState) })] as never,
+      ledger: [
+        collectRow('l1', 'fresh', '2026-07-06T10:00:01Z'),
+        collectRow('l2', 'replay', '2026-07-06T10:00:03Z'),
+      ] as never,
     })
+    e.messages = userMsgAt(4, '2026-07-06T10:00:00Z') as never
     expect(runDiagnostics(e).some((x) => x.checkId === 'known_field_reasked')).toBe(false)
   })
   it('flags a replay in a LATER turn than the fresh apply (the customer really was re-asked)', () => {
-    const row = (id: string, disposition: string) =>
-      ({ id, tool: 'collect_customer_field', actor: 'agent', outcome: 'applied', effects: [], reasonCode: null, phaseFrom: null, phaseTo: null, idempotencyDisposition: disposition, targetRef: 'field:name', createdAt: 'x' })
-    const post = (commitLedgerId: string) =>
-      ({ point: 'post_commit', engineVersion: 'test-x', contentVersions: [], snapshot: {}, commitLedgerId, state: { phase: 'QUOTE' }, actions: { available: [], blocked: [] } })
     const e = makeExport({
       turns: [
-        turn(4, { legality: [...legality(noPendingState), post('l1')] }),
-        turn(6, { legality: [...legality(noPendingState), post('l2')] }),
+        turn(4, { legality: legality(noPendingState) }),
+        turn(6, { legality: legality(noPendingState) }),
       ] as never,
-      ledger: [row('l1', 'fresh'), row('l2', 'replay')] as never,
+      ledger: [
+        collectRow('l1', 'fresh', '2026-07-06T10:00:01Z'),
+        collectRow('l2', 'replay', '2026-07-06T10:00:25Z'),
+      ] as never,
     })
+    const msgs: unknown[] = userMsgAt(4, '2026-07-06T10:00:00Z')
+    msgs[6] = { id: 'm6', role: 'user', content: 'x', toolCalls: null, toolResults: null, createdAt: '2026-07-06T10:00:20Z' }
+    e.messages = msgs as never
     const f = runDiagnostics(e).find((x) => x.checkId === 'known_field_reasked')
-    expect(f).toMatchObject({ severity: 'warn', evidence: { targetRef: 'field:name' } })
+    expect(f).toMatchObject({ severity: 'warn', turn: 6, evidence: { targetRef: 'field:name' } })
   })
 })

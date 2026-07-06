@@ -43,30 +43,43 @@ export const knownFieldReasked: DiagnosticCheck = {
   id: 'known_field_reasked',
   description: 'collect_customer_field replayed idempotently in a LATER turn — the agent re-asked a field it already had',
   run: (e) => {
-    // ledger row → turn via the post_commit legality join (erratum 3). A
-    // replay in the SAME turn as its fresh apply is the idempotency layer
+    // A replay in the SAME turn as its fresh apply is the idempotency layer
     // absorbing a round-loop double call — the customer was never re-asked.
-    const turnByLedgerId = new Map<string, number>()
-    for (const t of e.turns) {
-      for (const l of t.legality ?? []) {
-        if (l.point === 'post_commit' && l.commitLedgerId) turnByLedgerId.set(l.commitLedgerId, t.messageIndex)
+    // Replay rows cannot join via post_commit legality (a replay envelope
+    // deliberately carries the ORIGINAL row's ledgerId), and TurnDebug's
+    // startedAt/endedAt are stamped at persist time (post-turn, collapsed).
+    // The reliable anchor is the turn's USER MESSAGE createdAt — same DB
+    // clock as the ledger rows; a row belongs to the last turn whose user
+    // message precedes it.
+    const anchors = e.turns
+      .map((t) => ({ idx: t.messageIndex, at: Date.parse(e.messages[t.messageIndex]?.createdAt ?? '') }))
+      .filter((a) => !Number.isNaN(a.at))
+      .sort((a, b) => a.at - b.at)
+    const turnAt = (createdAt: string): number | undefined => {
+      const ts = Date.parse(createdAt)
+      if (Number.isNaN(ts)) return undefined
+      let hit: number | undefined
+      for (const a of anchors) {
+        if (ts >= a.at) hit = a.idx
+        else break
       }
+      return hit
     }
     const freshTurn = new Map<string, number>()
     for (const l of e.ledger) {
       if (l.tool === 'collect_customer_field' && l.idempotencyDisposition === 'fresh' && l.targetRef) {
-        const turn = turnByLedgerId.get(l.id)
+        const turn = turnAt(l.createdAt)
         if (turn !== undefined) freshTurn.set(l.targetRef, turn)
       }
     }
     return e.ledger
       .filter((l) => l.tool === 'collect_customer_field' && l.idempotencyDisposition === 'replay')
       .filter((l) => {
-        const replayTurn = turnByLedgerId.get(l.id)
+        const replayTurn = turnAt(l.createdAt)
         const firstTurn = l.targetRef ? freshTurn.get(l.targetRef) : undefined
         // unknown joins stay flagged (conservative — pre-F2 exports)
         return replayTurn === undefined || firstTurn === undefined || replayTurn > firstTurn
       })
-      .map((l): Finding => ({ checkId: 'known_field_reasked', severity: 'warn', turn: turnByLedgerId.get(l.id) ?? null, evidence: { targetRef: l.targetRef } }))
+      .map((l): Finding => ({ checkId: 'known_field_reasked', severity: 'warn', turn: turnAt(l.createdAt) ?? null, evidence: { targetRef: l.targetRef } }))
   },
 }
