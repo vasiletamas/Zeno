@@ -16,6 +16,8 @@ import { getToolDefinition } from '@/lib/tools/registry'
 import { estimateTokens } from '@/lib/chat/token-budget'
 import { LRUCache } from '@/lib/cache/lru-cache'
 import { findContextHit, type ContextHit } from '@/lib/insights/context-hits'
+import { resolveGroupCodes } from '@/lib/engines/question-groups'
+import { getNextQuestion, calculateProgress } from '@/lib/engines/questionnaire-engine'
 import { logInfo } from '@/lib/errors/logger'
 import { calculateAge } from './age'
 import { getPublishedProductContent, collectPublishedContentIds, registerPublishFlushHook } from '@/lib/products/product-content'
@@ -449,66 +451,61 @@ export function flushCoachingBriefingCache(): void {
 }
 
 /**
- * Load questionnaire context section.
- * Determines active questionnaire from workflowStepCode and finds current question.
+ * Load questionnaire context section (P0-7 rebuild, 2026-07-06).
+ *
+ * Previously keyed on a workflowStepCode that every caller passed as null
+ * ("dead input") — the APPLICATION/QUESTIONNAIRE stage had NO current-
+ * question surface (the same bug the DNT stage had before dntContext). Now
+ * derived entirely from the conversation's active application through the
+ * SAME engine path the tools use: canonical group codes (bd_medical rides
+ * only while the addon is selected, mirroring appGroupCodesFor), the
+ * engine's next visible unanswered question, and its progress counts —
+ * one visible-set computation, never a parallel one (C1.7).
  */
 export async function loadQuestionnaireContext(
   conversationId: string,
   customerId: string,
-  workflowStepCode: string | null,
   language: 'en' | 'ro',
 ): Promise<string | null> {
-  if (!workflowStepCode) return null
-
-  const groupCodes = resolveQuestionGroupCodes(workflowStepCode)
-  if (groupCodes.length === 0) return null
-
-  const questionnaireType = resolveQuestionnaireType(workflowStepCode)
-
-  const questions = await prisma.question.findMany({
-    where: { group: { code: { in: groupCodes } } },
-    include: { group: true },
-    orderBy: [
-      { group: { orderIndex: 'asc' } },
-      { orderIndex: 'asc' },
-    ],
-  })
-
-  if (questions.length === 0) return null
-
-  // B4: answers are application-scoped — read through the conversation's
-  // active-application pointer (no application → nothing answered).
-  const questionIds = questions.map((q) => q.id)
   const conv = await prisma.conversation.findUnique({
     where: { id: conversationId },
     select: { activeApplicationId: true },
   })
-  const answers = conv?.activeApplicationId
-    ? await prisma.answer.findMany({
-        where: { applicationId: conv.activeApplicationId, questionId: { in: questionIds }, status: 'ACTIVE' },
-      })
-    : []
+  if (!conv?.activeApplicationId) return null
+  const application = await prisma.application.findUnique({ where: { id: conv.activeApplicationId } })
+  // no surface for terminal or frozen applications — post-quote the
+  // questionnaire is engine-illegal to mutate (D1/T7.D1)
+  if (!application || application.status === 'CANCELLED' || application.frozenAt !== null) return null
 
-  const answeredIds = new Set(answers.map((a) => a.questionId))
-  const currentQuestion = questions.find((q) => !answeredIds.has(q.id))
-  const answeredCount = answeredIds.size
-  const totalCount = questions.length
+  const groupCodes = ((await resolveGroupCodes(application.productId, 'application')) ?? [])
+    .filter((c) => application.includesAddon || c !== 'bd_medical')
+  if (groupCodes.length === 0) return null
+
+  const scope = { kind: 'application' as const, applicationId: application.id }
+  const next = await getNextQuestion(groupCodes, scope)
 
   const parts: string[] = []
-  parts.push(`[ACTIVE QUESTIONNAIRE - ${questionnaireType}]`)
-  parts.push(`Progress: ${answeredCount}/${totalCount}`)
+  parts.push('[ACTIVE QUESTIONNAIRE - APPLICATION]')
 
-  if (!currentQuestion) {
+  if (!next) {
+    const progress = await calculateProgress(groupCodes, scope)
+    if (progress.total === 0) return null
+    parts.push(`Progress: ${progress.answered}/${progress.total}`)
     parts.push('')
-    parts.push('All questions answered. Questionnaire complete.')
+    parts.push('All questions answered — the questionnaire is complete. If sensitive medical answers were collected, sign_medical_declarations (one card) comes next; otherwise generate_quote.')
     return parts.join('\n')
   }
 
+  parts.push(`Progress: ${next.progress.answered}/${next.progress.total}`)
+  const currentQuestion = next.question
   const questionText = (currentQuestion.text as unknown as LocalizedText)[language]
   parts.push('')
-  parts.push(`Current question (${currentQuestion.group.code}):`)
+  parts.push(`Current question (${currentQuestion.groupCode}${currentQuestion.code ? `, code ${currentQuestion.code}` : ''}):`)
   parts.push(questionText)
   parts.push(`Type: ${currentQuestion.type}`)
+  if (currentQuestion.code) {
+    parts.push(`Pass this EXACT code to write_question_answer: ${currentQuestion.code}`)
+  }
 
   if (currentQuestion.options) {
     const options = currentQuestion.options as unknown as Array<{
@@ -523,23 +520,24 @@ export async function loadQuestionnaireContext(
     }
   }
 
-  // Context hit lookup
+  // Context hit lookup — insightKey is not part of the engine's QuestionData
+  const meta = await prisma.question.findUnique({ where: { id: currentQuestion.id }, select: { insightKey: true } })
   const hit = await findContextHit(
     customerId,
     {
       id: currentQuestion.id,
-      insightKey: currentQuestion.insightKey,
+      insightKey: meta?.insightKey ?? null,
       options: currentQuestion.options,
-      group: { code: currentQuestion.group.code },
+      group: { code: currentQuestion.groupCode },
     },
     conversationId,
   )
 
   if (hit) {
     parts.push('')
-    parts.push(renderContextHitBlock(hit, currentQuestion.group.code))
+    parts.push(renderContextHitBlock(hit, currentQuestion.groupCode))
 
-    if (currentQuestion.group.code === 'bd_medical' && hit.category === 'RISK_FACTOR') {
+    if (currentQuestion.groupCode === 'bd_medical' && hit.category === 'RISK_FACTOR') {
       logInfo({
         layer: 'compliance',
         category: 'context_hit_medical',
@@ -586,41 +584,9 @@ function renderContextHitBlock(hit: ContextHit, groupCode: string): string {
   return lines.join('\n')
 }
 
-/**
- * Resolve question group codes from workflow step code.
- */
-function resolveQuestionGroupCodes(workflowStepCode: string): string[] {
-  if (workflowStepCode === 'dnt_questionnaire') {
-    return [
-      'dnt_consent',
-      'dnt_general',
-      'dnt_life_type',
-      'dnt_life_financial',
-      'dnt_life_investment',
-      'dnt_sustainability',
-    ]
-  }
-
-  if (workflowStepCode === 'application_fill') {
-    return ['application']
-  }
-
-  if (workflowStepCode.includes('bd')) {
-    return ['bd_medical']
-  }
-
-  return []
-}
-
-/**
- * Resolve questionnaire type label from workflow step code.
- */
-function resolveQuestionnaireType(workflowStepCode: string): string {
-  if (workflowStepCode === 'dnt_questionnaire') return 'DNT'
-  if (workflowStepCode === 'application_fill') return 'APPLICATION'
-  if (workflowStepCode.includes('bd')) return 'BD MEDICAL'
-  return 'UNKNOWN'
-}
+// resolveQuestionGroupCodes / resolveQuestionnaireType retired with the P0-7
+// rebuild — the questionnaire surface derives from the active application,
+// not a workflow step code.
 
 /**
  * Load customer context section.
@@ -905,7 +871,7 @@ export async function loadAllSections(params: {
     loadCatalogOverview(language),
     productId ? loadProductContext(productId, language) : null,
     productId ? loadCoachingBriefing(productId) : null,
-    loadQuestionnaireContext(conversationId, customerId, null, language), // dead input — C1 re-keys the questionnaire surface
+    loadQuestionnaireContext(conversationId, customerId, language), // P0-7: derived from the active application (was a dead null step-code)
     prefetchedCustomer
       ? Promise.resolve(loadCustomerContextFromData(prefetchedCustomer))
       : loadCustomerContext(customerId),
