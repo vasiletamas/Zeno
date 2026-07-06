@@ -727,13 +727,26 @@ export async function loadCustomerInsights(
  * formats insights by category. Marks insights older than 30 days as
  * (unverified).
  */
+/**
+ * Task 3.3 (D3): category priority for the returning-customer block —
+ * PREFERENCE ("te interesa Optim") and RISK_FACTOR are what the agent must
+ * not lose mid-funnel; the token-cap truncation drops the tail, so these
+ * render FIRST.
+ */
+const MEMORY_CATEGORY_PRIORITY: Record<string, number> = { PREFERENCE: 0, RISK_FACTOR: 1, BUYING_SIGNAL: 2, DEMOGRAPHIC: 3 }
+
 export async function loadCustomerMemory(
   customerId: string,
   preloadedInsights?: RawCustomerInsight[],
 ): Promise<string | null> {
-  const insights = preloadedInsights ?? (await loadCustomerInsights(customerId))
+  const loaded = preloadedInsights ?? (await loadCustomerInsights(customerId))
 
-  if (insights.length === 0) return null
+  if (loaded.length === 0) return null
+
+  // PREFERENCE first, then by freshest confirmation within each category.
+  const insights = [...loaded].sort((a, b) =>
+    (MEMORY_CATEGORY_PRIORITY[a.category] ?? 9) - (MEMORY_CATEGORY_PRIORITY[b.category] ?? 9)
+    || b.lastConfirmedAt.getTime() - a.lastConfirmedAt.getTime())
 
   const now = Date.now()
   const byCategory = new Map<string, string[]>()

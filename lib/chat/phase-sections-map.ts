@@ -9,17 +9,21 @@ import { maskVerificationTarget } from '@/lib/customer/verification-service'
 // PAYMENT/POLICY, replaced by the dedicated per-state sections (rows 6, 9 —
 // the compliance CHECKER still runs there).
 const ALWAYS = ['agentIdentity', 'constraints', 'stateGrounding', 'catalogOverview', 'situationalBriefing']
+// Task 3.3 (D3): customerMemory survives the phase transition — the
+// returning-customer block (PREFERENCE + RISK_FACTOR first) rides
+// APPLICATION and QUOTE, not just DISCOVERY; the fast path still excludes
+// it (FAST_PATH_GATE), so questionnaire latency is unchanged.
 const BY_PHASE: Record<Phase, string[]> = {
   DISCOVERY: ['capabilityManifest', 'customerContext', 'customerMemory', 'agentKnowledge', 'productContext', 'coachingBriefing'],
   APPLICATION: [], // subphase-driven
-  QUOTE: ['productContext', 'complianceGuidance'],
+  QUOTE: ['productContext', 'complianceGuidance', 'customerMemory'],
   PAYMENT: ['paymentContext'],
   POLICY: ['policyContext'],
 }
 const BY_SUBPHASE: Record<AppSubphase, string[]> = {
-  DNT: ['dntContext', 'complianceGuidance'],
-  QUESTIONNAIRE: ['questionnaireContext', 'complianceGuidance'],
-  QUOTE_GENERATION: ['productContext', 'complianceGuidance'],
+  DNT: ['dntContext', 'complianceGuidance', 'customerMemory'],
+  QUESTIONNAIRE: ['questionnaireContext', 'complianceGuidance', 'customerMemory'],
+  QUOTE_GENERATION: ['productContext', 'complianceGuidance', 'customerMemory'],
 }
 export function getRequiredSectionsFor(phase: Phase, subphase: AppSubphase | null): string[] {
   const extras = phase === 'APPLICATION' && subphase ? BY_SUBPHASE[subphase] : BY_PHASE[phase]

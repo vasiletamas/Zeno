@@ -50,6 +50,35 @@ describe('loadCustomerMemory — preloaded insights', () => {
   })
 })
 
+describe('loadCustomerMemory — PREFERENCE-first ordering under the token cap (Task 3.3, D3)', () => {
+  const mk = (over: Record<string, unknown> & { id: string; key: string }) => ({ ...sampleInsight, ...over })
+
+  it('renders PREFERENCE before other categories regardless of confidence order', async () => {
+    const rows = [
+      mk({ id: 'a', key: 'age', category: 'DEMOGRAPHIC', value: '40', confidence: 0.99 }),
+      mk({ id: 'b', key: 'preferredTier', category: 'PREFERENCE', value: 'optim', confidence: 0.8 }),
+      mk({ id: 'c', key: 'smokingStatus', category: 'RISK_FACTOR', value: 'non_smoker', confidence: 0.95 }),
+    ]
+    const text = await loadCustomerMemory('c1', rows as never)
+    const prefIdx = text!.indexOf('PREFERENCE:')
+    const riskIdx = text!.indexOf('RISK_FACTOR:')
+    const demoIdx = text!.indexOf('DEMOGRAPHIC:')
+    expect(prefIdx).toBeGreaterThanOrEqual(0)
+    expect(prefIdx).toBeLessThan(riskIdx)
+    expect(riskIdx).toBeLessThan(demoIdx)
+  })
+
+  it('truncation under the token cap drops the tail, never the PREFERENCE head', async () => {
+    const rows = [
+      mk({ id: 'p1', key: 'preferredTier', category: 'PREFERENCE', value: 'optim' }),
+      ...Array.from({ length: 80 }, (_, i) =>
+        mk({ id: `d${i}`, key: `someLongDetailKey${i}`, category: 'DEMOGRAPHIC', value: `a-rather-long-descriptive-value-${i}` })),
+    ]
+    const text = await loadCustomerMemory('c1', rows as never)
+    expect(text).toContain('preferredTier: optim')
+  })
+})
+
 describe('loadCustomerInsights', () => {
   it('returns raw rows from prisma.customerInsight.findMany', async () => {
     findManySpy.mockClear()
