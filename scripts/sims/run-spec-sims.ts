@@ -74,6 +74,13 @@ function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedC
   if (policy === 'refuse-consent' && /(semnez|semnarea|semn[ăa]m|\bsign\b|gdpr|prelucrarea datelor)/.test(m)) {
     return 'nu, nu sunt de acord cu prelucrarea datelor si nu semnez'
   }
+  // A refusing persona STAYS refused: the agent's polite re-engagement
+  // ("Dacă te răzgândești, te pot ajuta să reiei" / "confirmi în cardul
+  // afișat") must never collect the fallback 'da' — that literally
+  // re-consents and legitimizes a second sign_dnt attempt.
+  if (policy === 'refuse-consent' && /r[ăa]zg[âa]nd|reiei|relu[ăa]|pe viitor|cardul afi[șs]at|confirmi [îi]n card/.test(m)) {
+    return 'nu, raman la decizia mea'
+  }
   if (/yes_all/.test(m) || /consultan/.test(m)) return 'yes_all'
   if (/marketing/.test(m)) return 'nu'
   if (/electronic|coresponden/.test(m)) return 'da'
@@ -100,6 +107,11 @@ function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedC
   // answered 'da' forever (2026-07-06 battery: phone never declared, close
   // walled on requires_identity).
   if (/telefon/.test(m) && /num[ăa]r|format|07/.test(m)) return '0712345678'
+  // Consent to SEND the verification code — must outrank the acceptance
+  // rule: the agent gates the close on "Scrie-mi exact: trimite codul pe
+  // email" and a persona stuck on "vreau sa accept oferta" loops there
+  // forever, re-collecting known fields (2026-07-06 battery).
+  if (!typedCode && /trimite codul|trimit codul|verificarea? (identit[ăa][țt]ii )?(pe|prin) email|verificarea (adresei )?de email/.test(m)) return 'da, trimite codul pe email'
   // The acceptance ask — MUST outrank the greedy keyword rules below: a
   // quote presentation enumerates coverages ("spitalizare", "venit",
   // "familia"), and a stray keyword answer at the close kills the sale.
@@ -375,8 +387,10 @@ async function runTrial(sc: SpecSimScenario, trial: number): Promise<{ pass: boo
   // merge later trials into the first verified one, and the merged-in policy
   // walls the funnel at POLICY phase (repeat purchase is out of scope —
   // snapshot policy is customer-scoped by design, D4.4). The merge path
-  // itself is covered by the claim-merge integration ring.
-  const personaEmail = `ion.sim+${conv.id}@example.com`
+  // itself is covered by the claim-merge integration ring. Digits-only
+  // suffix: a cuid in the local-part gets mined by the model and passed as
+  // a productId (2026-07-06 battery).
+  const personaEmail = `ion.sim+${Date.now()}@example.com`
   // Task 2.2 (D1): the latest unanswered DNT card on screen (cards mode taps it).
   let pendingDntCard: DntCard | null = null
   const send = async (msg: string, syntheticToolCall?: { id: string; name: string; arguments: Record<string, unknown> }) => {
@@ -385,8 +399,11 @@ async function runTrial(sc: SpecSimScenario, trial: number): Promise<{ pass: boo
       const first = await drain(handleChatTurn({ conversationId: conv.id, customerId: customer.id, message: msg, language: 'ro', ...(syntheticToolCall ? { syntheticToolCall } : {}) }))
       if (first.dntCards.length > 0) pendingDntCard = first.dntCards[first.dntCards.length - 1]
       // Replay each confirm card as the customer's click (same commit + token
-      // the GUI round-trips via the action adapter).
+      // the GUI round-trips via the action adapter). A refuse-consent persona
+      // never taps the signing card — auto-clicking it would consent on the
+      // customer's behalf and legitimize a post-refusal sign_dnt.
       for (const c of first.confirms) {
+        if (sc.answerPolicy === 'refuse-consent' && c.tool === 'sign_dnt') continue
         turns++
         const replay = await drain(handleChatTurn({
           conversationId: conv.id,
