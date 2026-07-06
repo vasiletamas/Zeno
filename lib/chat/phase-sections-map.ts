@@ -58,6 +58,13 @@ export function formatDerivedBriefing(state: DerivedStateV3, actions: ExposedAct
   // and tool results are not replayed across turns — this line is the model's only
   // durable source for the exact code (2026-07-06 debug report).
   if (state.dnt.sessionActive && state.dnt.pendingCode) lines.push(`DNT current question code: ${state.dnt.pendingCode} — pass this EXACT code to write_dnt_answer for the current answer. To correct an already-answered DNT question, call write_dnt_answer with THAT question's own code instead (answers are write-or-change; get_dnt_questions lists all codes) — never write the correction into the current question.`)
+  // The re-ask lapse (2026-07-06 battery): show what is ON FILE, not just
+  // what is missing — the model occasionally re-asked a collected field when
+  // it could only see the needs list.
+  const knownFields = Object.keys(state.identity.fields ?? {}).filter((f) => state.identity.fields[f] !== undefined)
+  if (knownFields.length > 0) {
+    lines.push(`Identity on file: ${knownFields.join(', ')} — these are already recorded; do NOT ask the customer for them again and do NOT re-collect them.`)
+  }
   // Task 1.1 (D5): the endgame that killed the recorded sale — while a code
   // is in flight the ONE correct move is confirming the digits the customer
   // supplies; a re-send silently invalidates the code they are reading.

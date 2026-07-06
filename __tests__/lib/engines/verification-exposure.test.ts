@@ -58,4 +58,24 @@ describe('verification briefing (Task 1.1, D5)', () => {
     const briefing = formatDerivedBriefing(r.state, r.actions)
     expect(briefing).toContain('3 attempts remaining')
   })
+
+  // The re-ask lapse (2026-07-06 battery): the model occasionally re-asked a
+  // KYC field it had already collected. The briefing must SHOW what is on
+  // file, not just what is missing.
+  it('lists the identity fields already on file with a do-not-re-ask instruction', () => {
+    const identity = {
+      tier: 'declared' as const,
+      fields: { name: { provenance: 'declared' as const }, email: { provenance: 'verified' as const } },
+      verifiedChannels: ['email'] as ('email' | 'sms')[], pendingChallenge: null,
+    }
+    const r = deriveAndExpose(makeSnapshot({ identity }))
+    const briefing = formatDerivedBriefing(r.state, r.actions)
+    expect(briefing).toMatch(/Identity on file: name, email/i)
+    expect(briefing).toMatch(/do NOT ask.*again|never re-ask/i)
+  })
+
+  it('no identity-on-file line when nothing is declared', () => {
+    const r = deriveAndExpose(makeSnapshot())
+    expect(formatDerivedBriefing(r.state, r.actions)).not.toMatch(/Identity on file/i)
+  })
 })
