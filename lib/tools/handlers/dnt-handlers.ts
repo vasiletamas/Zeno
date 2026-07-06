@@ -18,6 +18,7 @@ import { isDntValidFor, isExpiringOrExpired, decideSessionType, computeCoverage,
 import { appendConsentEvents } from '@/lib/customer/consent-service'
 import { setDeclaredField } from '@/lib/customer/profile-service'
 import { validateCnpChecksum } from '@/lib/engines/cnp-validation'
+import { maskCnp } from '@/lib/security/encryption'
 import type { GroundingOption } from '@/lib/engines/anti-fabrication'
 import { valueNotGroundedError } from './grounding-guard'
 import type { ToolHandler } from '@/lib/tools/types'
@@ -344,10 +345,15 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
     const notGrounded = await valueNotGroundedError(context, v.normalizedValue, (question.options as GroundingOption[] | null) ?? undefined, existingAnswer?.value ?? null)
     if (notGrounded) return { success: false, error: notGrounded }
 
+    // P0-3: the raw CNP never lands in DntAnswer — the encrypted profile
+    // store (AES-GCM envelope) is the only carrier; the regulatory record
+    // keeps the masked form, enough to evidence collection + checksum
+    // validity without holding the identifier itself.
+    const persistedValue = questionCode === 'DNT_CNP' ? maskCnp(v.normalizedValue) : v.normalizedValue
     await context.db.dntAnswer.upsert({
       where: { sessionId_questionId: { sessionId: session.id, questionId: question.id } },
-      create: { sessionId: session.id, questionId: question.id, value: v.normalizedValue },
-      update: { value: v.normalizedValue, answeredAt: new Date() },
+      create: { sessionId: session.id, questionId: question.id, value: persistedValue },
+      update: { value: persistedValue, answeredAt: new Date() },
     })
 
     // D1.4: the CNP declared in the DNT is a PROFILE fact (B0 SSOT) — it

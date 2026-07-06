@@ -51,6 +51,19 @@ export async function executeErasure(customerId: string, executedBy: string, db:
     bump('dnt_unsigned_sessions', (await db.dntSession.deleteMany({ where: { id: { in: draftSessions } } })).count)
   }
 
+  // ── P0-3: the CNP inside SURVIVING (signed) sessions is profile data —
+  // scrub it (new writes persist the mask, but legacy rows hold plaintext).
+  const cnpQuestion = await db.question.findFirst({ where: { code: 'DNT_CNP' }, select: { id: true } })
+  if (cnpQuestion) {
+    const survivingSessions = (await db.dntSession.findMany({ where: { customerId }, select: { id: true } })).map((s) => s.id)
+    if (survivingSessions.length > 0) {
+      bump('customer_profile', (await db.dntAnswer.updateMany({
+        where: { sessionId: { in: survivingSessions }, questionId: cnpQuestion.id },
+        data: { value: ERASED_MARKER },
+      })).count)
+    }
+  }
+
   // ── turn_debug (erase in both contexts; before conversations die) ────
   if (conversationIds.length > 0) {
     bump('turn_debug', (await db.turnDebug.deleteMany({ where: { conversationId: { in: conversationIds } } })).count)
