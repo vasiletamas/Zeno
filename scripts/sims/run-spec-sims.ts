@@ -25,6 +25,7 @@ import {
   assertToolOrder, assertToolNeverCalled, toolCallsByTurn,
 } from '@/lib/testing/conversation-assertions'
 import { SPEC_SIM_SCENARIOS, type SpecSimScenario } from './spec-scenarios'
+import { pickAnswer } from './answer-policy'
 
 const ROOT = process.cwd()
 const SIMS_DIR = path.join(ROOT, 'artifacts/sims')
@@ -48,41 +49,6 @@ const ASSERTS: Record<string, (e: ConversationExport) => void> = {
     const signs = toolCallsByTurn(e).flat().filter((n) => n === 'sign_dnt').length
     if (signs > 1) throw new Error(`sign_dnt re-attempted after refusal (${signs} calls)`)
   },
-}
-
-// ---- question-aware answer picking (verify-advance-flow lineage) -----------
-// Enum questions get the EXACT option token where known (the agent passes
-// them through); the refusal policy refuses ONLY the actual signing ask -
-// DNT questions that merely mention consent (marketing, electronic
-// communication) get valid enum answers, otherwise the transcript fills
-// with invalid-option loops the diagnostics rightly flag as stuck.
-function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy']): string {
-  const m = msg.toLowerCase()
-  if (policy === 'refuse-consent' && /(semnez|semnarea|semn[ăa]m|\bsign\b|gdpr|prelucrarea datelor)/.test(m)) {
-    return 'nu, nu sunt de acord cu prelucrarea datelor si nu semnez'
-  }
-  if (/yes_all/.test(m) || /consultan/.test(m)) return 'yes_all'
-  if (/marketing/.test(m)) return 'nu'
-  if (/electronic|coresponden/.test(m)) return 'da'
-  if (/fum[ăa]tor/.test(m)) return 'nu'
-  if (/c[âa]ți ani|ce v[âa]rst[ăa]|v[âa]rsta ta/.test(m)) return '35'
-  if (/\bcnp\b/.test(m)) return '1960229410015' // checksum-valid (the old 4-final variant failed collect_customer_field)
-  if (/cu cine loc|gospod[ăa]r/.test(m)) return 'singur'
-  if (/sursa|provin/.test(m)) return 'din salariu'
-  if (/2000_5000|interval/.test(m)) return 'intre 2000 si 5000'
-  if (/venit|salar/.test(m)) return '5000'
-  if (/ocupa|profesi|lucrezi/.test(m)) return 'sunt angajat cu carte de munca (employee)'
-  if (/copii|dependen/.test(m)) return '0'
-  // Seed question text is now "Câți membri are familia ta, inclusiv tu?" —
-  // must come AFTER the minors check (that text also contains "membrii").
-  if (/membri|famili/.test(m)) return '2'
-  if (/tip de protec|protec[țt]ie simpl/.test(m)) return 'simple_protection'
-  if (/educa|studii/.test(m)) return 'studii universitare (university)'
-  if (/email/.test(m)) return 'ion.sim@example.com'
-  if (/\bcod\b|verificare|verificat/.test(m)) return 'am dat click pe linkul din email'
-  if (/document|buletin|carte de identitate/.test(m)) return 'am incarcat buletinul in aplicatie'
-  if (/frecven|plat[ăa] anual|trimestrial/.test(m)) return 'anual'
-  return 'da'
 }
 
 /** Drain the SSE stream, collecting confirm_required ui_actions (F5.5 gap:
@@ -155,10 +121,17 @@ async function worldHooks(customerId: string, conversationId: string): Promise<v
   if (challenge) {
     await prisma.verificationChallenge.update({ where: { id: challenge.id }, data: { consumedAt: new Date() } })
   }
+  // The customer uploads the ID when the agent ASKS for it (the upload card
+  // = a request_document_upload commit — run cmr9cq7e5 asked pre-accept and
+  // deadlocked on the accepted-only condition), or once the quote is
+  // accepted (the pre-payment document requirement).
+  const uploadRequested = await prisma.commitLedger.count({
+    where: { conversationId, tool: 'request_document_upload', outcome: 'applied' },
+  })
   const accepted = await prisma.quote.count({
     where: { status: 'ACCEPTED', application: { originConversationId: conversationId } },
   })
-  if (accepted > 0) {
+  if (uploadRequested > 0 || accepted > 0) {
     const doc = await prisma.customerDocument.findFirst({ where: { customerId, kind: 'id_card' } })
     if (!doc) {
       await prisma.customerDocument.create({
@@ -186,6 +159,11 @@ async function fullFunnelDbChecks(customerId: string, conversationId: string): P
   if (policy?.status !== 'PENDING_SUBMISSION') failures.push(`policy ${policy?.status ?? 'missing'} != PENDING_SUBMISSION`)
   const acceptRow = await prisma.commitLedger.findFirst({ where: { conversationId, tool: 'accept_quote', outcome: 'applied' } })
   if (!acceptRow?.effects.includes('advance_phase')) failures.push('accept_quote ledger row missing advance_phase effect')
+  // T6.D3 deviation: the addon path collects BD answers — they must be
+  // batch-signed exactly once before the quote existed at all.
+  if (app && (await prisma.medicalDeclarationSignature.count({ where: { applicationId: app.id } })) === 0) {
+    failures.push('no MedicalDeclarationSignature row (batch sign never happened)')
+  }
   return failures
 }
 

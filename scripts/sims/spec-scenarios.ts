@@ -21,7 +21,10 @@ export const SPEC_SIM_SCENARIOS: SpecSimScenario[] = [
       'buna',
       'vreau o asigurare de viata',
       'cel mai mult ma intereseaza accesul la tratament in strainatate',
-      'standard nivelul 1 cred ca e cel mai potrivit',
+      // run cmr99s5cb: without the explicit addon election the agent quoted
+      // base-only, then cancelled the quote to fix the mismatch (QUOTE ->
+      // DISCOVERY regression). The customer says it up front.
+      'standard nivelul 1, si vreau inclusa si optiunea de tratament in strainatate',
       'da, hai sa facem cererea',
     ],
     answerPolicy: 'valid',
