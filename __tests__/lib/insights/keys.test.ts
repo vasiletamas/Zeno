@@ -16,6 +16,15 @@ describe('GLOBAL_INSIGHT_KEYS', () => {
     expect(keys).toContain('smokingStatus')
     expect(keys).toContain('urgency')
   })
+  it('carries the PREFERENCE vocabulary (Task 3.1, D3) — the "Optim" memory class', () => {
+    const byKey = Object.fromEntries(GLOBAL_INSIGHT_KEYS.map(k => [k.key, k]))
+    expect(byKey.preferredTier).toMatchObject({ category: 'PREFERENCE' })
+    expect(byKey.preferredLevel).toMatchObject({ category: 'PREFERENCE' })
+    expect(byKey.addonInterest).toMatchObject({ category: 'PREFERENCE' })
+    expect(byKey.budgetSensitivity).toMatchObject({ category: 'PREFERENCE', type: 'enum' })
+    expect(byKey.budgetSensitivity.options).toEqual(['low', 'medium', 'high'])
+    expect(byKey.preferredPaymentFrequency).toMatchObject({ category: 'PREFERENCE', type: 'enum' })
+  })
 })
 
 describe('getActiveInsightKeys', () => {
@@ -36,6 +45,19 @@ describe('getActiveInsightKeys', () => {
     const result = await getActiveInsightKeys('prod-1')
     expect(result.length).toBe(GLOBAL_INSIGHT_KEYS.length + 1)
     expect(result.find(k => k.key === 'selectedTier')).toBeDefined()
+  })
+
+  it('a product key OVERRIDES the global spec by key (Task 3.1: tiers are product-defined enums)', async () => {
+    vi.mocked(prisma.product.findUnique).mockResolvedValue({
+      insightKeys: [
+        { key: 'preferredTier', category: 'PREFERENCE', type: 'enum', options: ['standard', 'optim'] },
+      ],
+    } as never)
+    const result = await getActiveInsightKeys('prod-1')
+    const specs = result.filter(k => k.key === 'preferredTier')
+    expect(specs).toHaveLength(1)
+    expect(specs[0].type).toBe('enum')
+    expect(specs[0].options).toEqual(['standard', 'optim'])
   })
 
   it('returns globals when product has null insightKeys', async () => {

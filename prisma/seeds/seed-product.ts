@@ -466,6 +466,11 @@ export async function seedProduct(prisma: PrismaClient) {
       { key: 'selectedLevel', category: 'PREFERENCE', type: 'enum', options: ['level_1', 'level_2', 'level_3'] },
       { key: 'selectedAddon_externalTreatment', category: 'PREFERENCE', type: 'boolean' },
       { key: 'budgetPreference', category: 'BUYING_SIGNAL', type: 'enum', options: ['lowest', 'balanced', 'best_coverage'] },
+      // Task 3.1 (D3): DISCOVERY-time preferences ("mă interesează Optim")
+      // — the product specializes the global string specs to its own enums
+      // (override by key). selected* above stay the post-choice facts.
+      { key: 'preferredTier', category: 'PREFERENCE', type: 'enum', options: ['standard', 'optim'] },
+      { key: 'preferredLevel', category: 'PREFERENCE', type: 'enum', options: ['level_1', 'level_2', 'level_3'] },
     ],
     eligibility: PROTECT_ELIGIBILITY,
     suitabilityRules: PROTECT_SUITABILITY,
