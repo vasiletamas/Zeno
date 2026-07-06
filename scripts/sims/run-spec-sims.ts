@@ -118,7 +118,10 @@ function pickAnswer(msg: string, policy: SpecSimScenario['answerPolicy'], typedC
   // "Ca să poți accepta oferta... scrie adresa ta de email" — the acceptance
   // match stonewalled the ask for 3 turns and the pressured model misfired
   // set_candidate_product with random entity ids.
-  if (/adres[ăa]( ta)? de e?mail|ce e?mail|emailul t[ăa]u|care.*e?mail|scrie e?mailul/.test(m)) return email
+  // ...but NOT on statements about the address ("adresa de email este
+  // verificată") — volunteering the address there makes the agent re-store
+  // it (a counted replay).
+  if (!/verificat/.test(m) && /adres[ăa]( ta)? de e?mail|ce e?mail|emailul t[ăa]u|care.*e?mail|scrie e?mailul/.test(m)) return email
   // The acceptance ask — MUST outrank the greedy keyword rules below: a
   // quote presentation enumerates coverages ("spitalizare", "venit",
   // "familia"), and a stray keyword answer at the close kills the sale.
