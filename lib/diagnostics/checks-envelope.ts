@@ -24,7 +24,12 @@ export const blockedActionAttempted: DiagnosticCheck = {
       let blocked = new Map(turnStart.actions.blocked.map((b) => [b.action, b.reason]))
       for (const l of (t.legality ?? []).filter((x) => x.point === 'post_commit')) {
         const row = l.commitLedgerId ? rowsById.get(l.commitLedgerId) : undefined
-        if (row && row.outcome === 'applied' && blocked.has(row.tool)) {
+        if (row && row.outcome === 'applied' && blocked.has(row.tool)
+          // Task 1.1 (D5): an explicit resend:true or a NEW target legally
+          // applies while legality lists the tool blocked — the gateway's
+          // verificationResendEscape is a deliberate arg-level hatch the
+          // action-level snapshot cannot see.
+          && blocked.get(row.tool) !== 'verification_already_pending') {
           out.push({ checkId: 'blocked_action_attempted', severity: 'error', turn: t.messageIndex, evidence: { tool: row.tool, reason: blocked.get(row.tool) } })
         }
         if (l.actions) blocked = new Map(l.actions.blocked.map((b) => [b.action, b.reason]))

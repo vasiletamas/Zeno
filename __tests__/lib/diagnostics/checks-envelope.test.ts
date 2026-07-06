@@ -50,6 +50,19 @@ describe('envelope/legality diagnostic checks (v2)', () => {
     })
     expect(runDiagnostics(e).filter((x) => x.checkId === 'blocked_action_attempted')).toEqual([])
   })
+  it('blocked_action_attempted: NOT flagged for an applied start_channel_verification under a verification_already_pending baseline (the gateway resend escape)', () => {
+    // Task 1.1 (D5): an explicit resend:true or a NEW target legally applies
+    // while legality lists the tool blocked — verificationResendEscape is the
+    // deliberate arg-level hatch the action-level snapshot cannot see.
+    const e = makeExport({
+      turns: [turn(0, { legality: [
+        ...legality({ phase: 'QUOTE', quote: { id: 'q1' } }, { available: [], blocked: [{ action: 'start_channel_verification', reason: 'verification_already_pending' }] }),
+        postCommit('l1', { phase: 'QUOTE', quote: { id: 'q1' } }),
+      ] })] as never,
+      ledger: [{ id: 'l1', tool: 'start_channel_verification', actor: 'agent', outcome: 'applied', effects: [], reasonCode: null, phaseFrom: 'QUOTE', phaseTo: 'QUOTE', idempotencyDisposition: 'fresh', targetRef: 'ch-1', createdAt: 'x' }] as never,
+    })
+    expect(runDiagnostics(e).some((x) => x.checkId === 'blocked_action_attempted')).toBe(false)
+  })
   it('missing_consequences: a successful writing tool call with no ledger row in its conversation', () => {
     const e = makeExport({ turns: [turn(0, { toolCalls: [{ round: 0, toolCallId: 'x', name: 'sign_dnt', args: {}, partition: 'writing', result: { success: true, durationMs: 1, cached: false } }] })] as never, ledger: [] })
     expect(runDiagnostics(e).find((x) => x.checkId === 'missing_consequences')).toMatchObject({ severity: 'error', evidence: { tool: 'sign_dnt' } })

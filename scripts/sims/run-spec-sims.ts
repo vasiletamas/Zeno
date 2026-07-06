@@ -229,8 +229,9 @@ async function fullFunnelDbChecks(customerId: string, conversationId: string): P
   const acceptRow = await prisma.commitLedger.findFirst({ where: { conversationId, tool: 'accept_quote', outcome: 'applied' } })
   if (!acceptRow?.effects.includes('advance_phase')) failures.push('accept_quote ledger row missing advance_phase effect')
   // T6.D3 deviation: the addon path collects BD answers — they must be
-  // batch-signed exactly once before the quote existed at all.
-  if (app && (await prisma.medicalDeclarationSignature.count({ where: { applicationId: app.id } })) === 0) {
+  // batch-signed exactly once before the quote existed at all. Without the
+  // addon there are no medical declarations and nothing to sign.
+  if (app?.includesAddon && (await prisma.medicalDeclarationSignature.count({ where: { applicationId: app.id } })) === 0) {
     failures.push('no MedicalDeclarationSignature row (batch sign never happened)')
   }
   return failures
@@ -289,12 +290,14 @@ async function dntTypedFlowDbChecks(customerId: string, conversationId: string):
   for (const a of answers) {
     const code = a.question.code
     if (!code) continue
-    const expected = DNT_CARD_ANSWERS[code]
-    // Task 5.4: the CNP is an AES envelope at rest on BOTH paths — compare
-    // the decrypted fact, not the ciphertext (random IV per write).
-    const stored = code === 'DNT_CNP' ? (await import('@/lib/security/encryption')).decryptEnvelopeTolerant(a.value) : a.value
-    if (expected !== undefined && stored !== expected) {
-      failures.push(`fact divergence at ${code}: typed path stored "${stored}", card path stores "${expected}"`)
+    // P0-3 (merge): the DNT_CNP at-rest form is the MASK on both paths —
+    // compare mask to mask; the raw CNP never lands in the regulatory record.
+    const expectedRaw = DNT_CARD_ANSWERS[code]
+    const expected = code === 'DNT_CNP' && expectedRaw !== undefined
+      ? (await import('@/lib/security/encryption')).maskCnp(expectedRaw)
+      : expectedRaw
+    if (expected !== undefined && a.value !== expected) {
+      failures.push(`fact divergence at ${code}: typed path stored "${a.value}", card path stores "${expected}"`)
     }
   }
   return failures
