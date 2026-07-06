@@ -138,6 +138,24 @@ describe('conversation assertions (F1.8 — agent-behavioral layer)', () => {
     ok.messages = e.messages
     expect(() => assertNoPremiumBeforeQuote(ok)).not.toThrow()
   })
+  it('premium-claim scan joins turns by ABSOLUTE message index (D9 semantics): premium talk in the quote turn passes, earlier talk still throws', () => {
+    const msg = (i: number, role: 'user' | 'assistant', content: string) =>
+      ({ id: 'm' + i, role, content, toolCalls: null, toolResults: null, createdAt: 'x' })
+    // turns are keyed by the user message's own index: 0, 2, 4 — quote lands in the third turn
+    const ok = exp([gateTurn(0, 'DISCOVERY'), gateTurn(2, 'APPLICATION'), gateTurn(4, 'QUOTE', { id: 'q1' })])
+    ok.messages = [
+      msg(0, 'user', 'salut'), msg(1, 'assistant', 'buna!'),
+      msg(2, 'user', 'vreau o asigurare'), msg(3, 'assistant', 'sigur, cateva intrebari'),
+      msg(4, 'user', 'cat costa?'), msg(5, 'assistant', 'Prima ta lunară este 84 lei.'),
+    ]
+    expect(() => assertNoPremiumBeforeQuote(ok)).not.toThrow()
+    const bad = exp([gateTurn(0, 'DISCOVERY'), gateTurn(2, 'QUOTE', { id: 'q1' })])
+    bad.messages = [
+      msg(0, 'user', 'salut'), msg(1, 'assistant', 'Prima ta lunară este 84 lei.'),
+      msg(2, 'user', 'ok'), msg(3, 'assistant', 'super'),
+    ]
+    expect(() => assertNoPremiumBeforeQuote(bad)).toThrow(/premium/)
+  })
 })
 
 describe('assertNoBlockedActionExecuted (F2.5)', () => {
