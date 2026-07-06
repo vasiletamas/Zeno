@@ -28,7 +28,7 @@ describe.skipIf(!process.env.DATABASE_URL)('loadDomainSnapshot (integration)', (
     const product = await ensureTestProduct()
     const customer = await prisma.customer.create({ data: { isAnonymous: true, language: 'ro' } })
     const conv = await prisma.conversation.create({ data: { customerId: customer.id, candidateProductId: product.id } })
-    const ctx = { customerId: customer.id, conversationId: conv.id, language: 'ro', db: prisma } as unknown as ToolContext
+    const ctx = { customerId: customer.id, conversationId: conv.id, language: 'ro', db: prisma, actor: 'gui' } as unknown as ToolContext
 
     const opened = await openDntSession({}, ctx)
     expect(opened.success).toBe(true)

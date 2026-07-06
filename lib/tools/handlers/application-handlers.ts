@@ -26,6 +26,8 @@ import { buildBranchingMetadata } from '@/lib/engines/branching-provenance'
 import { getIdentityFacts } from '@/lib/customer/profile-service'
 import { deriveIdentityTier } from '@/lib/engines/identity-rules'
 import { loadMedicalDeclarationState } from '@/lib/engines/medical-declaration-state'
+import type { GroundingOption } from '@/lib/engines/anti-fabrication'
+import { valueNotGroundedError } from './grounding-guard'
 import type { ToolHandler, ToolContext } from '@/lib/tools/types'
 import { bumpInsightOnAnswer } from './insight-bump'
 
@@ -234,6 +236,16 @@ export const writeQuestionAnswer: ToolHandler = async (args, context) => {
     // eligibility, derived flags/status all come from the plan.
     const graph = await loadDependencyGraph(context.db, application.productId)
     const snapshot = await buildPlannerSnapshot(context.db, context.conversationId)
+
+    // P0-1 write-guard: BEFORE the plan — a fabricated value must never even
+    // reach a confirmation card. Re-writing the active value is idempotent.
+    const notGrounded = await valueNotGroundedError(
+      context, validation.normalizedValue,
+      (currentQuestion.options as GroundingOption[] | null) ?? undefined,
+      snapshot.answers.active[currentQuestion.code] ?? null,
+    )
+    if (notGrounded) return { success: false, error: notGrounded }
+
     const plan = computeConsequences(graph, snapshot, { node: `answer:${currentQuestion.code}`, newValue: validation.normalizedValue })
     if (plan.requiresConfirmation && !context.confirmed) {
       return { success: false, requiresConfirmation: { preview: planPreview(plan) } }
@@ -424,6 +436,16 @@ export const modifyAnswer: ToolHandler = async (args, context) => {
     if (!validation.valid) {
       return { success: false, error: validation.error ?? 'Invalid answer.' }
     }
+
+    // P0-1 write-guard: corrections are values too — BEFORE the plan so a
+    // fabricated correction never reaches the confirmation card. (A modify
+    // that repeats the active value replays at the ledger before this runs.)
+    const notGrounded = await valueNotGroundedError(
+      context, validation.normalizedValue,
+      (question.options as GroundingOption[] | null) ?? undefined,
+      snapshot.answers.active[questionCode] ?? null,
+    )
+    if (notGrounded) return { success: false, error: notGrounded }
 
     const plan = computeConsequences(graph, snapshot, { node: `answer:${questionCode}`, newValue: validation.normalizedValue })
     if (plan.requiresConfirmation && !context.confirmed) {

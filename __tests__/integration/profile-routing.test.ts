@@ -7,7 +7,8 @@ import { getToolDefinition } from '@/lib/tools/registry'
 import { prisma } from '@/lib/db'
 
 beforeEach(async () => { await resetDb() })
-const ctx = (id: string) => ({ customerId: id, conversationId: 'conv-x', language: 'ro' as const, db: prisma })
+// actor 'gui': this suite pins provenance routing, not the P0-1 grounding guard
+const ctx = (id: string) => ({ customerId: id, conversationId: 'conv-x', language: 'ro' as const, db: prisma, actor: 'gui' })
 it('collect_customer_field writes through the service with declared provenance', async () => {
   const c = await createCustomer()
   const r = await collectCustomerField({ field: 'email', value: 'ana@example.ro' }, ctx(c.id) as never)

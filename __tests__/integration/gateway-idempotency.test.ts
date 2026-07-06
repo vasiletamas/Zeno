@@ -9,7 +9,7 @@ async function fixture(productOnConversation = false) {
   const product = await ensureTestProduct()
   const customer = await prisma.customer.create({ data: { isAnonymous: false, language: 'ro' } })
   const conv = await prisma.conversation.create({ data: { customerId: customer.id, ...(productOnConversation ? { productId: product.id } : {}) } })
-  const ctx = { customerId: customer.id, conversationId: conv.id, language: 'ro', db: prisma } as unknown as ToolContext
+  const ctx = { customerId: customer.id, conversationId: conv.id, language: 'ro', db: prisma, actor: 'gui' } as unknown as ToolContext
   return { product, customer, conv, ctx }
 }
 

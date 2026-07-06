@@ -18,6 +18,8 @@ import { isDntValidFor, isExpiringOrExpired, decideSessionType, computeCoverage,
 import { appendConsentEvents } from '@/lib/customer/consent-service'
 import { setDeclaredField } from '@/lib/customer/profile-service'
 import { validateCnpChecksum } from '@/lib/engines/cnp-validation'
+import type { GroundingOption } from '@/lib/engines/anti-fabrication'
+import { valueNotGroundedError } from './grounding-guard'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackDntCompleted } from '@/lib/analytics/events'
 import { bumpInsightOnAnswer } from './insight-bump'
@@ -331,6 +333,16 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
     if (questionCode === 'DNT_CNP' && !validateCnpChecksum(v.normalizedValue)) {
       return { success: false, error: 'cnp_checksum_invalid: the CNP control digit does not match — ask the customer to re-check the 13 digits.' }
     }
+
+    // P0-1 write-guard: a regulatory answer must be anchored in the
+    // customer's words (family-size "2" was persisted after five bare "da").
+    // Re-writing the recorded value is idempotent, not invention.
+    const existingAnswer = await context.db.dntAnswer.findUnique({
+      where: { sessionId_questionId: { sessionId: session.id, questionId: question.id } },
+      select: { value: true },
+    })
+    const notGrounded = await valueNotGroundedError(context, v.normalizedValue, (question.options as GroundingOption[] | null) ?? undefined, existingAnswer?.value ?? null)
+    if (notGrounded) return { success: false, error: notGrounded }
 
     await context.db.dntAnswer.upsert({
       where: { sessionId_questionId: { sessionId: session.id, questionId: question.id } },

@@ -8,7 +8,8 @@ import type { ToolContext } from '@/lib/tools/types'
 
 beforeEach(async () => { await resetFunnelTables() })
 
-const ctx = (id: string) => ({ customerId: id, conversationId: 'c', language: 'ro' as const }) as never
+// actor 'gui': these suites pin validation semantics, not the P0-1 grounding guard
+const ctx = (id: string) => ({ customerId: id, conversationId: 'c', language: 'ro' as const, actor: 'gui' }) as never
 
 it('rejects checksum-invalid CNP with a precise reason', async () => {
   const c = await createCustomer()
@@ -40,7 +41,7 @@ it('write_dnt_answer rejects a checksum-invalid DNT_CNP with the same precise re
   const c = await prisma.customer.create({ data: { isAnonymous: true, language: 'ro' } })
   const p = await prisma.product.findFirstOrThrow()
   const conv = await prisma.conversation.create({ data: { customerId: c.id, candidateProductId: p.id } })
-  const tctx = { customerId: c.id, conversationId: conv.id, language: 'ro', db: prisma } as unknown as ToolContext
+  const tctx = { customerId: c.id, conversationId: conv.id, language: 'ro', db: prisma, actor: 'gui' } as unknown as ToolContext
   const opened = await openDntSession({}, tctx)
   expect(opened.success).toBe(true)
   // answer up to DNT_CNP

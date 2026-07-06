@@ -51,8 +51,10 @@ export async function buildReadyApplication(options: { escalationFlag?: string; 
   return fx
 }
 
+// actor 'gui': fixture values are the CUSTOMER's scripted input — the P0-1
+// write-guard only polices agent-actor writes.
 export const fixtureCtx = (customerId: string, conversationId: string) =>
-  ({ customerId, conversationId, language: 'ro', db: prisma } as unknown as ToolContext)
+  ({ customerId, conversationId, language: 'ro', db: prisma, actor: 'gui' } as unknown as ToolContext)
 
 /**
  * buildIssuedQuote + everything accept_quote's legality demands (D2.5,

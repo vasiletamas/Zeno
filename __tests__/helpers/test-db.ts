@@ -132,7 +132,8 @@ export async function signDntWithFacts(
   fx: { customerId: string; conversationId: string },
   facts: Record<string, string>,
 ): Promise<void> {
-  const ctx = { customerId: fx.customerId, conversationId: fx.conversationId, language: 'ro', db: prisma } as unknown as import('@/lib/tools/types').ToolContext
+  // actor 'gui': fixture facts are the CUSTOMER's scripted input (P0-1 guard bypass)
+  const ctx = { customerId: fx.customerId, conversationId: fx.conversationId, language: 'ro', db: prisma, actor: 'gui' } as unknown as import('@/lib/tools/types').ToolContext
   const opened = await openDntSession({}, ctx)
   if (!opened.success) throw new Error(`signDntWithFacts: open_dnt_session failed: ${opened.error}`)
   for (const [questionCode, value] of Object.entries(facts)) {

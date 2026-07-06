@@ -10,7 +10,7 @@ import type { ToolContext } from '@/lib/tools/types'
 beforeEach(async () => { await resetDb() })
 
 const ctx = (customerId: string, conversationId: string) =>
-  ({ customerId, conversationId, language: 'ro', db: prisma } as unknown as ToolContext)
+  ({ customerId, conversationId, language: 'ro', db: prisma, actor: 'gui' } as unknown as ToolContext)
 
 async function seedOpenApplicationWithHealthAnswer() {
   const fx = await seedDntFullyAnswered()

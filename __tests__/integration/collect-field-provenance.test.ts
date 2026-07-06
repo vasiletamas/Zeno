@@ -13,7 +13,7 @@ beforeEach(async () => { await resetDb() })
 it('collect_customer_field writes declared provenance via the profile service and never flips isAnonymous', async () => {
   const customer = await prisma.customer.create({ data: { isAnonymous: true, language: 'ro' } })
   const conv = await prisma.conversation.create({ data: { customerId: customer.id } })
-  const ctx = { customerId: customer.id, conversationId: conv.id, language: 'ro', db: prisma } as unknown as ToolContext
+  const ctx = { customerId: customer.id, conversationId: conv.id, language: 'ro', db: prisma, actor: 'gui' } as unknown as ToolContext
 
   const fields: Array<[string, string]> = [
     ['name', 'Ion Popescu'],

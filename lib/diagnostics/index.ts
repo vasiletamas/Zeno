@@ -7,6 +7,7 @@ import type { ConversationExport } from '@/lib/debug/conversation-export'
 import type { DiagnosticCheck, Finding } from './types'
 import * as basic from './checks-basic'
 import * as behavioral from './checks-behavioral'
+import { questionnaireAnswerFabricated, stateClaimWithoutCommit } from './checks-fabrication'
 import { blockedActionAttempted, missingConsequences, recomputeDriftFindings, type RecomputeOptions } from './checks-envelope'
 
 const isCheck = (v: unknown): v is DiagnosticCheck =>
@@ -17,6 +18,9 @@ export const CHECK_CATALOG: DiagnosticCheck[] = [
   ...Object.values(behavioral).filter(isCheck), // skips the exported trigramSimilarity helper
   blockedActionAttempted,
   missingConsequences,
+  // P0-1 ratchet (2026-07-06): fabrication + false-claim nets
+  questionnaireAnswerFabricated,
+  stateClaimWithoutCommit,
 ]
 
 export function runDiagnostics(
