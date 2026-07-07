@@ -102,3 +102,44 @@ AF: ==== advance-flow: 2/2 trials PASS (advanced into DNT, no confirm-product ce
 ALL CLEAN after the rework — identical verdicts to the baseline, and the
 sections rework did not re-introduce advance-flow stalls (2/2). M13 criteria
 a–d all satisfied.
+
+## 7. E1 — identity-prompt split (2026-07-07, autonomy-skills-cost plan)
+
+MAIN_CHAT_PROMPT (row 1 above; 18,152 chars) split into three homes, seeded
+as `Agent.systemPrompt` (core) + `Agent.promptSections` Json (the other two).
+Combined text after the split: 18,140 chars — the 12-char delta is the two
+cross-reference rewordings marked ⟲ below. Every block of row 1 appears in
+exactly ONE home:
+
+| Block (in original order) | New home | Note |
+|---|---|---|
+| "You are Zeno, a calm and knowledgeable…" intro | CONSTITUTION_CORE | always-on |
+| FIRST-TURN RULES (6 bullets) + reference opening | **FIRST_TURN_RULES** → section `firstTurnRules` | ships while `messageCount <= 2` (detectFirstTurn); ⟲ "see HUMAN HANDOFF section below" → "see the HUMAN HANDOFF section" (handoff now renders above, in the core) |
+| first-turn IMPORTANT block (never "AI"; warm tone) | CONSTITUTION_CORE | MOVED to core: the never-"AI" vocabulary + tone rule is global (customers ask "ești un AI?" at any turn), not first-turn-shaped |
+| HUMAN HANDOFF (reactive, async) | CONSTITUTION_CORE | reactive at any turn |
+| CORE BEHAVIORS | CONSTITUTION_CORE | |
+| CUSTOMER SIGNAL AWARENESS | CONSTITUTION_CORE | |
+| PRODUCT KNOWLEDGE — WHAT WE SELL vs. THE SPECIFICS | **DISCOVERY_CONDUCT** → section `discoveryConduct` | phases DISCOVERY + QUOTE (includeDiscoveryConduct) |
+| TOOL USE IS INVISIBLE INFRASTRUCTURE | CONSTITUTION_CORE | P1-pinned, phase-agnostic |
+| PRODUCT DISCOVERY GUARDRAILS 1–6 + "non-negotiable" close | DISCOVERY_CONDUCT | ⟲ guardrail 2 "(see TOOL USE IS INVISIBLE below)" → "(see TOOL USE IS INVISIBLE)" (that block now renders above) |
+| SINGLE-MATCH CATEGORY | DISCOVERY_CONDUCT | |
+| PACING | DISCOVERY_CONDUCT | |
+| ANSWER FIRST — DON'T DEFLECT | CONSTITUTION_CORE | P2-pinned; deflection is phase-agnostic |
+| ADVANCING TO THE OFFER | CONSTITUTION_CORE | stays until Workstream C (gated on SE-1.3); its removal is C2 cut 1–4 |
+| OFF-TOPIC HANDLING | CONSTITUTION_CORE | P4/OOS-pinned |
+| CRITICAL CONSTRAINTS 1–5 | CONSTITUTION_CORE | |
+| CUSTOMER AUTONOMY | CONSTITUTION_CORE | |
+| "Always prioritize the customer's best interest…" | CONSTITUTION_CORE | |
+| WHAT I CAN DO / WHAT I CANNOT DO | CONSTITUTION_CORE | |
+
+Sizes: CONSTITUTION_CORE 11,382 chars (≤ 12KB budget; drops under 9KB when C
+removes ADVANCING), FIRST_TURN_RULES 1,179, DISCOVERY_CONDUCT 5,579.
+APPLICATION/PAYMENT/POLICY turns shed 6,758 chars (≈ 1.7k tokens) of
+now-out-of-scope prose; DISCOVERY turns past the opener shed 1,179.
+Registry keys: `firstTurnRules` (constitution layer, priority 1.3),
+`discoveryConduct` (stable layer, 1.6) — both scoped by the orchestrator's
+post-gate patch (the dntContext content-nullness pattern), both listed in
+BY_PHASE for DISCOVERY/QUOTE (map documents intent; nullness enforces).
+Gate: assembly tests in `__tests__/lib/chat/identity-split.test.ts` + the
+full pathology suite re-run — verdicts recorded in
+`2026-07-07-prompt-cost-baseline.md` §6.

@@ -862,7 +862,7 @@ export function loadPolicyContext(state: DerivedStateV3): string | null {
  * Calls individual loaders in parallel where possible.
  */
 export async function loadAllSections(params: {
-  agentConfig: { systemPrompt: string | null; constraints: string | null }
+  agentConfig: { systemPrompt: string | null; constraints: string | null; promptSections?: Record<string, string> | null }
   allowedTools: string[]
   productId: string | null
   conversationId: string
@@ -915,6 +915,11 @@ export async function loadAllSections(params: {
 
   return {
     agentIdentity,
+    // E1: raw seeded content; the orchestrator's post-gate patch nulls these
+    // when out of scope (detectFirstTurn / includeDiscoveryConduct) — the
+    // same content-nullness gating dntContext uses.
+    firstTurnRules: params.agentConfig.promptSections?.firstTurnRules ?? null,
+    discoveryConduct: params.agentConfig.promptSections?.discoveryConduct ?? null,
     capabilityManifest,
     constraints,
     stateGrounding,

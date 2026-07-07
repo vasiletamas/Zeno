@@ -36,28 +36,36 @@ describe('main-chat agent constraints', () => {
     )
   })
 
-  it('main-chat system prompt tells the agent to use the catalog overview, not query blind', () => {
+  // E1 (2026-07-07): the discovery guardrails moved from systemPrompt to
+  // promptSections.discoveryConduct (ships on DISCOVERY + QUOTE turns).
+  // These pins follow the content to its new home — see the inventory note §7.
+  it('discovery conduct tells the agent to use the catalog overview, not query blind', () => {
     const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
-    expect(mainChat?.systemPrompt).toMatch(/USE THE CATALOG OVERVIEW/)
-    expect(mainChat?.systemPrompt).toMatch(/Do NOT call list_products for a category the catalog shows is empty/)
+    const conduct = mainChat?.promptSections?.discoveryConduct
+    expect(conduct).toMatch(/USE THE CATALOG OVERVIEW/)
+    expect(conduct).toMatch(/Do NOT call list_products for a category the catalog shows is empty/)
   })
 
-  it('main-chat system prompt requires fetching before quoting product specifics', () => {
+  it('discovery conduct requires fetching before quoting product specifics', () => {
     const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
-    expect(mainChat?.systemPrompt).toMatch(/NAME FROM THE CATALOG, QUOTE FROM THE TOOL/)
-    expect(mainChat?.systemPrompt).toMatch(/may NOT state its product code, describe its features/)
+    const conduct = mainChat?.promptSections?.discoveryConduct
+    expect(conduct).toMatch(/NAME FROM THE CATALOG, QUOTE FROM THE TOOL/)
+    expect(conduct).toMatch(/may NOT state its product code, describe its features/)
   })
 
-  it('main-chat system prompt grounds discovery questions in product dimensions', () => {
+  it('discovery conduct grounds discovery questions in product dimensions', () => {
     const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
-    expect(mainChat?.systemPrompt).toMatch(/DISCOVERY QUESTIONS MUST BE GROUNDED/)
+    expect(mainChat?.promptSections?.discoveryConduct).toMatch(/DISCOVERY QUESTIONS MUST BE GROUNDED/)
   })
 
-  it('main-chat system prompt distinguishes derived pricing examples from specific quotes (E1.8)', () => {
+  it('discovery conduct distinguishes derived pricing examples from specific quotes (E1.8)', () => {
     const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
-    expect(mainChat?.systemPrompt).toMatch(/SPECIFIC PRICES ONLY VIA QUOTE/)
-    expect(mainChat?.systemPrompt).toMatch(/pricing_examples/)
-    expect(mainChat?.systemPrompt).not.toMatch(/premiumRange/) // the retired column left the prompt
+    const conduct = mainChat?.promptSections?.discoveryConduct
+    expect(conduct).toMatch(/SPECIFIC PRICES ONLY VIA QUOTE/)
+    expect(conduct).toMatch(/pricing_examples/)
+    // the retired column left EVERY seeded prompt surface
+    const allSurfaces = (mainChat?.systemPrompt ?? '') + Object.values(mainChat?.promptSections ?? {}).join('')
+    expect(allSurfaces).not.toMatch(/premiumRange/)
   })
 
   it('routes tier/level/addon through select_coverage after set_application (B4)', () => {

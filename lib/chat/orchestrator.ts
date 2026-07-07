@@ -24,10 +24,10 @@ import { executeToolWithPipeline } from '@/lib/tools/pipeline'
 import { buildToolContext } from './context-builder'
 import { createSSEStream, pickStatusMessage, type SSEEvent } from './stream-handler'
 import type { ToolContext, PipelineResult, ToolResult } from '@/lib/tools/types'
-import { buildPrompt, type GateSelection, type PromptSections } from './prompt-builder'
+import { buildPrompt, detectFirstTurn, type GateSelection, type PromptSections } from './prompt-builder'
 import { accumulateTurnUsage } from './turn-usage'
 import { buildTurnMessages } from './build-turn-messages'
-import { getRequiredSectionsFor, formatDerivedBriefing } from './phase-sections-map'
+import { getRequiredSectionsFor, formatDerivedBriefing, includeDiscoveryConduct } from './phase-sections-map'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { deriveAndExpose, engineVersion } from '@/lib/engines/derive-and-expose'
 import type { DeriveAndExposeResult } from '@/lib/engines/domain-types'
@@ -476,7 +476,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       }
 
       sections = await loadAllSections({
-        agentConfig: { systemPrompt: agentConfig.systemPrompt, constraints: agentConfig.constraints },
+        agentConfig: { systemPrompt: agentConfig.systemPrompt, constraints: agentConfig.constraints, promptSections: agentConfig.promptSections },
         // capabilityManifest is patched after the gate resolves (A3.1 erratum
         // 3): exposure does not exist yet — context assembly deliberately
         // runs in parallel with the gate.
@@ -520,6 +520,8 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       }
       sections = {
         agentIdentity: agentConfig.systemPrompt,
+        firstTurnRules: agentConfig.promptSections?.firstTurnRules ?? null,
+        discoveryConduct: agentConfig.promptSections?.discoveryConduct ?? null,
         capabilityManifest: null,
         constraints: agentConfig.constraints,
         stateGrounding: loadStateGrounding(fallbackStateGroundingInput),
@@ -584,6 +586,13 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   sections.dntContext = exposure ? loadDntContext(exposure.state) : null
   sections.paymentContext = exposure ? loadPaymentContext(exposure.state) : null
   sections.policyContext = exposure ? loadPolicyContext(exposure.state) : null
+
+  // E1: scope the split identity sections (same content-nullness gating as
+  // dntContext above). First-turn rules ship only on the opening exchange;
+  // discovery conduct only where products are presented/priced. On exposure
+  // failure the phase falls back to DISCOVERY (conservative — conduct stays).
+  if (!detectFirstTurn(state.messageCount)) sections.firstTurnRules = null
+  if (!includeDiscoveryConduct(exposure?.state.phase ?? 'DISCOVERY')) sections.discoveryConduct = null
 
   // Pack subsystem deleted (A5.2, M12): gating is owned by the legality
   // engine, prompt content by the sections map.

@@ -16,6 +16,8 @@ function makeSections(
 ): PromptSections {
   return {
     agentIdentity: 'You are Zeno, an AI insurance agent.',
+    firstTurnRules: null,
+    discoveryConduct: null,
     capabilityManifest: 'I can help you find the right policy.',
     constraints: 'Never give medical advice.',
     stateGrounding: null,

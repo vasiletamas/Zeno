@@ -9,11 +9,21 @@ import type { Phase, AppSubphase, DerivedStateV3, ExposedActions } from '@/lib/e
 // the compliance CHECKER still runs there).
 const ALWAYS = ['agentIdentity', 'constraints', 'stateGrounding', 'catalogOverview', 'situationalBriefing']
 const BY_PHASE: Record<Phase, string[]> = {
-  DISCOVERY: ['capabilityManifest', 'customerContext', 'customerMemory', 'agentKnowledge', 'productContext', 'coachingBriefing'],
+  DISCOVERY: ['discoveryConduct', 'capabilityManifest', 'customerContext', 'customerMemory', 'agentKnowledge', 'productContext', 'coachingBriefing'],
   APPLICATION: [], // subphase-driven
-  QUOTE: ['productContext', 'complianceGuidance'],
+  QUOTE: ['discoveryConduct', 'productContext', 'complianceGuidance'],
   PAYMENT: ['paymentContext'],
   POLICY: ['policyContext'],
+}
+
+// E1: the discovery-conduct prose (guardrails 1–6, single-match, product
+// knowledge, pacing) binds where products are presented and priced —
+// DISCOVERY and QUOTE. On APPLICATION/PAYMENT/POLICY turns it is noise and
+// pathology surface. The orchestrator nulls the section content by this
+// predicate (the dntContext pattern — content nullness is what excludes,
+// requiredSections alone never does).
+export function includeDiscoveryConduct(phase: Phase): boolean {
+  return phase === 'DISCOVERY' || phase === 'QUOTE'
 }
 const BY_SUBPHASE: Record<AppSubphase, string[]> = {
   DNT: ['dntContext', 'complianceGuidance'],

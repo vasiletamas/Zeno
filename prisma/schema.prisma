@@ -1084,6 +1084,10 @@ model Agent {
   maxTokens        Int         @default(4096)
   systemPrompt     String?     @db.Text
   constraints      String?     @db.Text
+  // E1: phase-/turn-scoped prompt sections keyed by SECTION_REGISTRY key
+  // (firstTurnRules, discoveryConduct). One Json column instead of one
+  // migration per section; systemPrompt stays the always-on constitution.
+  promptSections   Json?
   isActive         Boolean     @default(true)
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
