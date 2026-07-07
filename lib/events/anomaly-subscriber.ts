@@ -91,16 +91,27 @@ export function registerAnomalySubscriber(bus: EventBus): void {
     }
   })
 
-  // Task 5.3 (P1-9): the call-count heuristic died — every tool round is a
-  // legitimate llm:call:start, so counting starts flagged healthy turns.
-  // Genuine transport retries announce themselves explicitly.
+  // P1-10: the call-count "LLM retry detected" heuristic is RETIRED — it
+  // fired on the normal second LLM round of every tool-calling turn (100%
+  // false positive) while real retries emitted nothing. The registry now
+  // reports the truth on dedicated events.
   bus.on('llm:call:retry', (event) => {
-    if (event.type !== 'llm:call:retry') return
+    if (event.type !== 'llm:call:retry' || !event.traceId) return
     addAnomaly(event.traceId, {
       type: 'error_pattern',
       severity: 'info',
-      message: `LLM retry (attempt ${event.attempt}) for agent "${event.agentSlug}": ${event.reason}`,
-      metadata: { agentSlug: event.agentSlug, attempt: event.attempt, reason: event.reason },
+      message: `LLM retry (attempt ${event.attempt}) for ${event.provider}/${event.model}: ${event.errorClass}`,
+      metadata: { provider: event.provider, model: event.model, attempt: event.attempt, delayMs: event.delayMs, errorClass: event.errorClass },
+    })
+  })
+
+  bus.on('llm:failover', (event) => {
+    if (event.type !== 'llm:failover' || !event.traceId) return
+    addAnomaly(event.traceId, {
+      type: 'error_pattern',
+      severity: 'warning',
+      message: `LLM failover ${event.fromModel} -> ${event.toModel} (${event.errorClass})`,
+      metadata: { fromModel: event.fromModel, toModel: event.toModel, errorClass: event.errorClass },
     })
   })
 

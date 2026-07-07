@@ -154,15 +154,7 @@ export const gateway = {
           reasoning: options.reasoning,
         })
       },
-      {
-        // Task 5.3 (P1-9): genuine transport retries announce themselves —
-        // the anomaly monitor no longer guesses from call counts.
-        onRetry: (attempt, reason) => {
-          if (options.traceId) {
-            eventBus.emit({ type: 'llm:call:retry', traceId: options.traceId, agentSlug, attempt, reason })
-          }
-        },
-      },
+      { traceId: options.traceId ?? null }, // P1-10: retry/failover events correlate to the turn
     )
 
     const durationMs = Date.now() - startMs
@@ -266,13 +258,7 @@ export const gateway = {
           reasoning: options.reasoning,
         })
       },
-      {
-        onRetry: (attempt, reason) => {
-          if (options.traceId) {
-            eventBus.emit({ type: 'llm:call:retry', traceId: options.traceId, agentSlug, attempt, reason })
-          }
-        },
-      },
+      { traceId: options.traceId ?? null }, // P1-10: retry/failover events correlate to the turn
     )
 
     // Wrap iterable to record call on completion

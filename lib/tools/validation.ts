@@ -150,6 +150,12 @@ const cancelQuoteSchema = z.object({
 
 const acknowledgeDisclosuresSchema = z.object({}).strict()
 
+// P2-15: previously absent — the permissive unknown-tool fallback let any
+// args through. The token is card-carried (never model-emitted).
+const signMedicalDeclarationsSchema = z.object({
+  confirmToken: z.string().optional(),
+}).strict()
+
 // ==============================================
 // DATA COLLECTION
 // ==============================================
@@ -271,6 +277,7 @@ const toolSchemas: Record<string, ZodType> = {
   get_quote_info: getQuoteInfoSchema,
   cancel_quote: cancelQuoteSchema,
   acknowledge_disclosures: acknowledgeDisclosuresSchema,
+  sign_medical_declarations: signMedicalDeclarationsSchema,
 
   // BD Eligibility
 

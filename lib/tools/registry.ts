@@ -802,7 +802,7 @@ registerTool('write_question_answer', {
 registerTool('modify_answer', {
   description:
     'Correct a previously answered application question by its code. The consequence planner computes the full cascade ' +
-    '(invalidated dependents, added/removed questions, eligibility, status) — sensitive answers require the customer\'s explicit confirmation (resend with confirmToken).',
+    '(invalidated dependents, added/removed questions, eligibility, status) — a sensitive correction shows a confirmation card the CUSTOMER completes; never re-call this tool yourself.',
   parameters: {
     type: 'object',
     properties: {
@@ -824,13 +824,11 @@ registerTool('modify_answer', {
 registerTool('sign_medical_declarations', {
   description:
     'Sign the batch medical declaration — ONE confirmation card affirming ALL the sensitive medical answers together (T6.D3 deviation 2026-07-06, sign_dnt precedent). ' +
-    'Two-step: the gateway returns a confirmation request with the declarations preview; the customer confirms on the card — do NOT re-call it yourself. ' +
+    'The first call shows the card with the declarations preview; the CUSTOMER completes it — never re-call this tool yourself. ' +
     'Exposed after the last sensitive question is answered; required before generate_quote.',
   parameters: {
     type: 'object',
-    properties: {
-      confirmToken: { type: 'string', description: 'Confirmation token from a prior requires_confirmation envelope (the card round-trips it).' },
-    },
+    properties: {},
     additionalProperties: false,
   },
   executionMode: 'blocking',
@@ -957,7 +955,7 @@ registerTool('generate_quote', {
 
 registerTool('accept_quote', {
   description:
-    'Accept the issued quote with the customer\'s ELECTED payment frequency (two-step: the gateway returns a confirmation request first; re-call with the token and the SAME paymentOption). ' +
+    'Accept the issued quote with the customer\'s ELECTED payment frequency. Two-step: the first call shows a confirmation card — the CUSTOMER completes it; never re-call this tool yourself. ' +
     'Acceptance freezes the price into a payment schedule — the policy is issued at the first successful payment, not here. Requires acknowledged disclosures and a verified channel.',
   parameters: {
     type: 'object',
@@ -1014,7 +1012,7 @@ registerTool('acknowledge_disclosures', {
 
 registerTool('cancel_quote', {
   description:
-    'Cancel the issued quote — terminal and confirmed in two steps (the gateway returns a confirmation request first; re-call with the token). ' +
+    'Cancel the issued quote — terminal; the first call shows a confirmation card the CUSTOMER completes (never re-call this tool yourself). ' +
     'The frozen application stays as the record of what was priced: to get a different quote, start a NEW application (previous answers are offered as prefill proposals). This is the only change path once a quote exists.',
   parameters: {
     type: 'object',
@@ -1075,7 +1073,7 @@ registerTool('ensure_payment_session', {
 
 registerTool('change_payment_option', {
   description:
-    'Change the payment frequency BEFORE any installment is captured (two-step: the gateway returns a confirmation request; re-call with the token and the SAME paymentOption). ' +
+    'Change the payment frequency BEFORE any installment is captured; the first call shows a confirmation card the CUSTOMER completes (never re-call this tool yourself). ' +
     'Re-rates the schedule from the accepted premium — the quote itself never changes. Once the first installment is paid the frequency is fixed.',
   parameters: {
     type: 'object',
@@ -1233,7 +1231,7 @@ registerTool('get_policy_info', {
 
 registerTool('request_cancellation', {
   description:
-    'Cancel the ACTIVE policy within the free-look window (two-step: the gateway returns a confirmation request first; re-call with the token). ' +
+    'Cancel the ACTIVE policy within the free-look window; the first call shows a confirmation card the CUSTOMER completes (never re-call this tool yourself). ' +
     'Terminal: the policy is cancelled and every captured payment is refunded. Outside the window this is rejected — offer escalation to a colleague instead.',
   parameters: {
     type: 'object',

@@ -217,6 +217,63 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     },
   })
 
+  // P1-12: a mid-pipeline crash used to abort this generator SILENTLY — the
+  // user message was saved, no reply came, and NO TurnDebug row existed
+  // (13 minutes of recorded dead air with zero diagnostics). Every fatal
+  // error now records the abort, persists the debug events collected so far
+  // (AWAITED — the turn is over anyway), and hands the GUI a structured,
+  // retryable error. The pipeline body below is unchanged.
+  try {
+    yield* pipeline()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const errorId = logFatal({
+      layer: 'orchestrator',
+      category: 'turn_aborted',
+      message: 'Turn aborted mid-pipeline',
+      context: { conversationId: state.conversationId, traceId: state.traceId },
+      error: err,
+    })
+    recordTurnAnomaly(state.traceId, { type: 'error_pattern', severity: 'critical', message: `turn_aborted: ${message}`, metadata: { errorId } })
+    recordDebugEvent(state, {
+      event: 'debug:turn_end',
+      data: {
+        traceId: state.traceId,
+        phases: state.phases,
+        totalInputTokens: state.totalInputTokens,
+        totalOutputTokens: state.totalOutputTokens,
+        cost: getTurnCost(state.traceId),
+        latencyMs: Date.now() - state.startMs,
+        anomalies: getTurnAnomalies(state.traceId),
+      },
+    })
+    eventBus.emit({
+      type: 'turn:end',
+      traceId: state.traceId,
+      conversationId: state.conversationId,
+      cost: getTurnCost(state.traceId),
+      latencyMs: Date.now() - state.startMs,
+      anomalies: getTurnAnomalies(state.traceId),
+    })
+    if (state.conversationId) {
+      await persistTurnDebug({
+        conversationId: state.conversationId,
+        messageIndex: state.messageCount,
+        traceId: state.traceId,
+        events: state.debugEvents,
+      })
+    }
+    yield {
+      event: 'error',
+      data: { errorId, type: 'internal', message: 'Service temporarily unavailable', retryable: true, traceId: state.traceId },
+    }
+  }
+  return
+
+  // eslint-disable-next-line no-inner-declarations -- hoisted so the guard
+  // above wraps the entire unchanged pipeline without re-indenting it
+  async function* pipeline(): AsyncGenerator<SSEEvent> {
+
   // =============================================
   // STEP 1 — Resolve conversation
   // =============================================
@@ -1606,6 +1663,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       latencyMs,
     },
   }
+  } // end pipeline() (P1-12 guard wrapper)
 }
 
 // ==============================================

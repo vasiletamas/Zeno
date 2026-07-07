@@ -18,6 +18,8 @@ interface MessageListProps {
   answeredMessageIds?: Set<string>
   onAction?: (action: UIAction) => void
   markAnswered?: (messageId: string) => void
+  /** P1-12: resend the message whose turn aborted */
+  onRetry?: () => void
   language?: Language
 }
 
@@ -30,6 +32,7 @@ export function MessageList({
   answeredMessageIds,
   onAction,
   markAnswered,
+  onRetry,
   language = 'ro',
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -116,7 +119,7 @@ export function MessageList({
           })
         })()}
 
-        {error && <ErrorMessage message={error} />}
+        {error && <ErrorMessage message={error} onRetry={onRetry} language={language === 'en' ? 'en' : 'ro'} />}
 
         <TypingIndicator
           visible={isStreaming && !messages.some((m) => m.isStreaming)}

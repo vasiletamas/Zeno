@@ -11,7 +11,10 @@ import type { UIAction } from '@/lib/chat/action-adapter'
  * token — buttons never self-confirm.
  */
 
-export const CONFIRMABLE_TOOLS = ['sign_dnt', 'accept_quote', 'write_question_answer', 'modify_answer', 'sign_medical_declarations'] as const
+// P2-15: EVERY requiresConfirmation commit renders a card — the four cancel/
+// change commits previously had NO carrier for their token (the P0-6 class:
+// the gateway asked for confirmation nothing could deliver).
+export const CONFIRMABLE_TOOLS = ['sign_dnt', 'accept_quote', 'write_question_answer', 'modify_answer', 'sign_medical_declarations', 'cancel_quote', 'cancel_application', 'change_payment_option', 'request_cancellation'] as const
 
 const COPY: Record<(typeof CONFIRMABLE_TOOLS)[number], { title: { ro: string; en: string }; body: { ro: string; en: string }; cta: { ro: string; en: string } }> = {
   sign_dnt: {
@@ -43,6 +46,26 @@ const COPY: Record<(typeof CONFIRMABLE_TOOLS)[number], { title: { ro: string; en
     title: { ro: 'Semnează declarația medicală', en: 'Sign the medical declaration' },
     body: { ro: 'Confirmi printr-o singură semnătură că toate răspunsurile medicale rezumate mai sus îți aparțin și sunt corecte? Modificarea ulterioară a unui răspuns anulează semnătura și cere una nouă.', en: 'Confirm with one signature that all the medical answers summarized above are yours and correct? Changing an answer later voids the signature and requires a new one.' },
     cta: { ro: 'Semnez declarația', en: 'Sign the declaration' },
+  },
+  cancel_quote: {
+    title: { ro: 'Confirmă anularea ofertei', en: 'Confirm quote cancellation' },
+    body: { ro: 'Anulezi oferta emisă? Anularea este definitivă — pentru un preț nou reluăm cererea de la selecția acoperirii.', en: 'Cancel the issued quote? Cancellation is final — a new price requires restarting from coverage selection.' },
+    cta: { ro: 'Anulez oferta', en: 'Cancel the quote' },
+  },
+  cancel_application: {
+    title: { ro: 'Confirmă anularea cererii', en: 'Confirm application cancellation' },
+    body: { ro: 'Anulezi cererea curentă? O cerere anulată nu poate fi reluată — se poate deschide oricând una nouă.', en: 'Cancel the current application? A cancelled application cannot be resumed — a new one can be opened anytime.' },
+    cta: { ro: 'Anulez cererea', en: 'Cancel the application' },
+  },
+  change_payment_option: {
+    title: { ro: 'Confirmă schimbarea frecvenței de plată', en: 'Confirm the payment frequency change' },
+    body: { ro: 'Schimbi frecvența de plată aleasă? Ratele se recalculează de la prima plată neîncasată.', en: 'Change the elected payment frequency? Installments recalculate from the first uncaptured payment.' },
+    cta: { ro: 'Schimb frecvența', en: 'Change frequency' },
+  },
+  request_cancellation: {
+    title: { ro: 'Confirmă renunțarea la poliță', en: 'Confirm the policy cancellation' },
+    body: { ro: 'Renunți la polița activă în perioada de renunțare (free-look)? Cererea se procesează de un coleg și primele plătite se returnează conform condițiilor.', en: 'Cancel the active policy within the free-look window? A colleague processes the request and paid premiums are returned per the terms.' },
+    cta: { ro: 'Renunț la poliță', en: 'Cancel the policy' },
   },
 }
 
