@@ -1379,6 +1379,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
               data: buildLegalityPayload({
                 traceId: state.traceId,
                 point: 'post_commit',
+                round,
                 commitLedgerId: env.ledgerId,
                 contentVersions: getLastInjectedProductContentVersions(),
                 snapshot: refreshSnap,

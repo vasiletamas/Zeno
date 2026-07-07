@@ -22,7 +22,9 @@ export const blockedActionAttempted: DiagnosticCheck = {
       // questionnaire, making the same-turn generate_quote legal) — judging
       // every commit against turn_start reports legal commits as violations.
       let blocked = new Map(turnStart.actions.blocked.map((b) => [b.action, b.reason]))
-      for (const l of (t.legality ?? []).filter((x) => x.point === 'post_commit')) {
+      const posts = (t.legality ?? []).filter((x) => x.point === 'post_commit')
+      for (let i = 0; i < posts.length; i++) {
+        const l = posts[i]
         const row = l.commitLedgerId ? rowsById.get(l.commitLedgerId) : undefined
         if (row && row.outcome === 'applied' && blocked.has(row.tool)
           // Task 1.1 (D5): an explicit resend:true or a NEW target legally
@@ -32,7 +34,16 @@ export const blockedActionAttempted: DiagnosticCheck = {
           && blocked.get(row.tool) !== 'verification_already_pending') {
           out.push({ checkId: 'blocked_action_attempted', severity: 'error', turn: t.messageIndex, evidence: { tool: row.tool, reason: blocked.get(row.tool) } })
         }
-        if (l.actions) blocked = new Map(l.actions.blocked.map((b) => [b.action, b.reason]))
+        // F2.2: every post_commit entry of one round carries the round's END
+        // state — a batched [collect, collect, generate_quote] round records
+        // the collects' snapshots with the quote already issued
+        // (application_frozen), so a same-round sibling is the commit's own
+        // effect, not its precondition (run cmrabhsyk turn 56). Re-baseline
+        // only at a round boundary; legacy exports without the round stamp
+        // keep the per-entry behavior.
+        const next = posts[i + 1]
+        const sameRound = l.round !== undefined && next?.round === l.round
+        if (l.actions && !sameRound) blocked = new Map(l.actions.blocked.map((b) => [b.action, b.reason]))
       }
     }
     return out

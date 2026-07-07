@@ -63,6 +63,42 @@ describe('envelope/legality diagnostic checks (v2)', () => {
     })
     expect(runDiagnostics(e).some((x) => x.checkId === 'blocked_action_attempted')).toBe(false)
   })
+  it('blocked_action_attempted: NOT flagged when same-round siblings share the post-ROUND recompute (batched collect ×2 + generate_quote, run cmrabhsyk turn 56)', () => {
+    // F2.2: every post_commit entry of one round carries the round's END
+    // state — a batched [collect, collect, generate_quote] round records the
+    // collects' snapshots WITH the quote already issued (application_frozen),
+    // so the sibling baseline is the commit's own effect, not its precondition.
+    // Entries stamped with the same round never re-baseline each other.
+    const frozen = { available: [], blocked: [{ action: 'generate_quote', reason: 'application_frozen' }] }
+    const e = makeExport({
+      turns: [turn(0, { legality: [
+        ...legality({ phase: 'APPLICATION', application: { id: 'a1' } }, { available: ['collect_customer_field', 'generate_quote'], blocked: [] }),
+        { ...postCommit('l1', { phase: 'QUOTE', quote: { id: 'q1' } }), round: 1, actions: frozen },
+        { ...postCommit('l2', { phase: 'QUOTE', quote: { id: 'q1' } }), round: 1, actions: frozen },
+        { ...postCommit('l3', { phase: 'QUOTE', quote: { id: 'q1' } }), round: 1, actions: frozen },
+      ] })] as never,
+      ledger: [
+        { id: 'l1', tool: 'collect_customer_field', actor: 'agent', outcome: 'applied', effects: [], reasonCode: null, phaseFrom: 'APPLICATION', phaseTo: 'APPLICATION', idempotencyDisposition: 'fresh', targetRef: 'a1', createdAt: 'x' },
+        { id: 'l2', tool: 'collect_customer_field', actor: 'agent', outcome: 'applied', effects: [], reasonCode: null, phaseFrom: 'APPLICATION', phaseTo: 'APPLICATION', idempotencyDisposition: 'fresh', targetRef: 'a1', createdAt: 'x' },
+        { id: 'l3', tool: 'generate_quote', actor: 'agent', outcome: 'applied', effects: ['advance_phase'], reasonCode: null, phaseFrom: 'APPLICATION', phaseTo: 'QUOTE', idempotencyDisposition: 'fresh', targetRef: 'q1', createdAt: 'x' },
+      ] as never,
+    })
+    expect(runDiagnostics(e).filter((x) => x.checkId === 'blocked_action_attempted')).toEqual([])
+  })
+  it('blocked_action_attempted: STILL flagged across a round boundary (round 1 blocked it, round 2 applied it anyway)', () => {
+    const e = makeExport({
+      turns: [turn(0, { legality: [
+        ...legality({ phase: 'APPLICATION', application: { id: 'a1' } }, { available: ['select_coverage'], blocked: [] }),
+        { ...postCommit('l1', { phase: 'APPLICATION', application: { id: 'a1' } }), round: 1, actions: { available: [], blocked: [{ action: 'generate_quote', reason: 'questionnaire_incomplete' }] } },
+        { ...postCommit('l2', { phase: 'QUOTE', quote: { id: 'q1' } }), round: 2, actions: { available: [], blocked: [{ action: 'generate_quote', reason: 'quote_already_issued' }] } },
+      ] })] as never,
+      ledger: [
+        { id: 'l1', tool: 'select_coverage', actor: 'agent', outcome: 'applied', effects: [], reasonCode: null, phaseFrom: 'APPLICATION', phaseTo: 'APPLICATION', idempotencyDisposition: 'fresh', targetRef: 'a1', createdAt: 'x' },
+        { id: 'l2', tool: 'generate_quote', actor: 'agent', outcome: 'applied', effects: ['advance_phase'], reasonCode: null, phaseFrom: 'APPLICATION', phaseTo: 'QUOTE', idempotencyDisposition: 'fresh', targetRef: 'q1', createdAt: 'x' },
+      ] as never,
+    })
+    expect(runDiagnostics(e).find((x) => x.checkId === 'blocked_action_attempted')).toMatchObject({ severity: 'error', evidence: { tool: 'generate_quote', reason: 'questionnaire_incomplete' } })
+  })
   it('missing_consequences: a successful writing tool call with no ledger row in its conversation', () => {
     const e = makeExport({ turns: [turn(0, { toolCalls: [{ round: 0, toolCallId: 'x', name: 'sign_dnt', args: {}, partition: 'writing', result: { success: true, durationMs: 1, cached: false } }] })] as never, ledger: [] })
     expect(runDiagnostics(e).find((x) => x.checkId === 'missing_consequences')).toMatchObject({ severity: 'error', evidence: { tool: 'sign_dnt' } })

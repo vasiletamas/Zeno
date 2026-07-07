@@ -130,6 +130,12 @@ export interface DebugLegalityPayload {
   traceId: string
   point: 'turn_start' | 'post_commit'
   commitLedgerId?: string
+  /** Tool-round ordinal (post_commit only). Every entry of one round carries
+   * the round's END state/actions — same-round siblings must never serve as
+   * each other's legality baseline (run cmrabhsyk turn 56: a batched
+   * [collect, collect, generate_quote] round recorded the collects' snapshots
+   * with the quote already issued). */
+  round?: number
   engineVersion: string
   /** ProductContent version id(s) injected into this turn's prompt (M8 pin 1). */
   contentVersions: string[]
