@@ -98,8 +98,17 @@ async function goalReached(key: string, customerId: string, conversationId: stri
     return (await prisma.policy.count({ where: { customerId } })) > 0
   }
   if (key === 'dnt-refusal') {
-    // any sign_dnt attempt has been ledgered (refused or otherwise)
-    return (await prisma.commitLedger.count({ where: { conversationId, tool: 'sign_dnt' } })) > 0
+    // P2-14 goal rewrite (run cmra79n7p, 2026-07-07): the goal is the REFUSAL
+    // taking effect — the customer said no and NO signed DNT exists. The old
+    // goal ("a sign_dnt ledger row exists, refused or otherwise") rewarded
+    // the agent for PUSHING the signing commit at a refusing customer; the
+    // live agent now honors the refusal without ever invoking sign_dnt,
+    // which is the desired behavior and must count as goal-reached.
+    const refused = await prisma.message.count({
+      where: { conversationId, role: 'user', content: { contains: 'nu semnez' } },
+    })
+    if (refused === 0) return false
+    return (await prisma.dnt.count({ where: { customerId, status: 'ACTIVE' } })) === 0
   }
   if (key === 'quote-decline') {
     return (await prisma.commitLedger.count({ where: { conversationId, tool: 'generate_quote', outcome: 'applied' } })) > 0
@@ -178,7 +187,10 @@ async function runTrial(sc: SpecSimScenario, trial: number): Promise<{ pass: boo
     try {
       const { confirms } = await drain(handleChatTurn({ conversationId: conv.id, customerId: customer.id, message: msg, language: 'ro' }))
       // Replay each confirm card as the customer's click (same commit + token
-      // the GUI round-trips via the action adapter).
+      // the GUI round-trips via the action adapter). Scenarios whose scripted
+      // customer REFUSES never click (P2-14: the auto-click was signing the
+      // DNT the customer had just refused).
+      if (sc.replayConfirms === false) return
       for (const c of confirms) {
         turns++
         await drain(handleChatTurn({
@@ -214,6 +226,12 @@ async function runTrial(sc: SpecSimScenario, trial: number): Promise<{ pass: boo
   if (!bundle) return { pass: false, export: null, failures: ['export failed to load'] }
 
   const failures: string[] = []
+  // P2-14: goal completion IS a pass criterion — dnt-refusal once "PASSED"
+  // without ever emitting the refusal and quote-decline without a quote
+  // (turn cap hit first, style asserts green). A vacuous run is a FAILURE.
+  if (!(await goalReached(sc.key, customer.id, conv.id))) {
+    failures.push('goal_not_reached: the scenario goal state never occurred (vacuous run)')
+  }
   if (sc.fullFunnel) failures.push(...await fullFunnelDbChecks(customer.id, conv.id))
   for (const name of sc.asserts) {
     const fn = ASSERTS[name]

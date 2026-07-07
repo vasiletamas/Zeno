@@ -12,6 +12,10 @@ export interface SpecSimScenario {
   /** F5.5: run the world hooks (email click, GUI doc upload, provider
    * settlement) between turns and the discovery->policy DB checks after. */
   fullFunnel?: boolean
+  /** P2-14: default true. false = the scripted customer does NOT click
+   * confirm cards (a refusing customer never taps "Semnează" — the harness
+   * auto-click was signing the DNT the customer had just refused). */
+  replayConfirms?: boolean
 }
 
 export const SPEC_SIM_SCENARIOS: SpecSimScenario[] = [
@@ -36,8 +40,12 @@ export const SPEC_SIM_SCENARIOS: SpecSimScenario[] = [
     key: 'dnt-refusal',
     opening: ['buna', 'vreau o asigurare de viata', 'da, hai sa facem cererea'],
     answerPolicy: 'refuse-consent',
-    maxTurns: 20,
+    // P2-14: 20 turns hit the cap BEFORE the signing ask — the scenario
+    // "passed" without ever emitting the refusal (vacuous). The goal is now
+    // a pass criterion, and the budget covers the full DNT walk.
+    maxTurns: 40,
     asserts: ['noNarrationViolations', 'noFunnelAfterRefusal'],
+    replayConfirms: false,
   },
   {
     key: 'quote-decline',
