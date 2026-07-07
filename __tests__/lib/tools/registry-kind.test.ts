@@ -45,9 +45,19 @@ describe('tool kind classification', () => {
       if (def?.kind === 'read') expect(def.sideEffects, name).toBe(false)
     }
   })
-  it('accept_quote, sign_dnt and cancel_application require confirmation (gateway-owned two-step)', () => {
-    expect(getToolDefinition('accept_quote')?.requiresConfirmation).toBe(true)
-    expect(getToolDefinition('sign_dnt')?.requiresConfirmation).toBe(true)
-    expect(getToolDefinition('cancel_application')?.requiresConfirmation).toBe(true) // B4.5
+  it('the six static-confirm commits require confirmation (gateway-owned two-step)', () => {
+    for (const t of ['accept_quote', 'sign_dnt', 'cancel_application', 'cancel_quote', 'change_payment_option', 'request_cancellation']) {
+      expect(getToolDefinition(t)?.requiresConfirmation, t).toBe(true)
+    }
+  })
+  it('P2-15: no LLM-facing schema of a confirmable commit offers confirmToken — the CARD owns the round-trip, the model never resends', () => {
+    for (const t of ['accept_quote', 'sign_dnt', 'cancel_application', 'cancel_quote', 'change_payment_option', 'request_cancellation', 'sign_medical_declarations']) {
+      expect(JSON.stringify(getToolDefinition(t)?.parameters), t).not.toContain('confirmToken')
+    }
+  })
+  it('P2-15: no confirmable commit description tells the model to re-call with the token', () => {
+    for (const t of ['accept_quote', 'sign_dnt', 'cancel_application', 'cancel_quote', 'change_payment_option', 'request_cancellation', 'sign_medical_declarations', 'write_question_answer', 'modify_answer']) {
+      expect(getToolDefinition(t)?.description ?? '', t).not.toMatch(/re-?call with the token|resend with (the )?confirmToken/i)
+    }
   })
 })

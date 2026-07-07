@@ -209,6 +209,35 @@ export function adaptAction(action: UIAction): ToolCall | null {
         arguments: action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {},
       }
 
+    // P2-15: the remaining confirmable commits' card round-trips — material
+    // args ride along so the token binds to the identical args hash.
+    case 'cancel_application':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'cancel_application',
+        arguments: {
+          ...(action.payload.reason ? { reason: String(action.payload.reason) } : {}),
+          ...(action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {}),
+        },
+      }
+
+    case 'change_payment_option':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'change_payment_option',
+        arguments: {
+          ...(action.payload.paymentOption ? { paymentOption: String(action.payload.paymentOption) } : {}),
+          ...(action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {}),
+        },
+      }
+
+    case 'request_cancellation':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'request_cancellation',
+        arguments: action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {},
+      }
+
     // legacy GUI action name; the tool is set_application since B4.3
     case 'start_application':
     case 'set_application':
