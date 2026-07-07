@@ -303,6 +303,7 @@ export class OpenAIProvider implements LLMProviderInterface {
     stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>,
   ): AsyncIterable<StreamChunk> {
     let usage: TokenUsage | undefined
+    let finished = false
 
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta
@@ -311,14 +312,20 @@ export class OpenAIProvider implements LLMProviderInterface {
         yield { type: 'content', content: delta.content }
       }
 
-      // Capture usage from the final chunk (stream_options.include_usage)
+      // stream_options.include_usage: usage arrives on a FINAL chunk with an
+      // empty choices array, AFTER the finish_reason chunk — so `done` must
+      // wait for stream end or it can never carry usage.
       if (chunk.usage) {
         usage = this.extractUsage(chunk.usage)
       }
 
       if (chunk.choices[0]?.finish_reason) {
-        yield { type: 'done', usage }
+        finished = true
       }
+    }
+
+    if (finished) {
+      yield { type: 'done', usage }
     }
   }
 
@@ -354,6 +361,7 @@ export class OpenAIProvider implements LLMProviderInterface {
     // Accumulate tool call deltas across chunks
     const toolCallAccum: Map<number, { id: string; name: string; args: string }> = new Map()
     let usage: TokenUsage | undefined
+    let finished = false
 
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta
@@ -380,24 +388,30 @@ export class OpenAIProvider implements LLMProviderInterface {
         }
       }
 
-      // Capture usage from the final chunk
+      // stream_options.include_usage: usage arrives on a FINAL chunk with an
+      // empty choices array, AFTER the finish_reason chunk — so tool_calls +
+      // done must wait for stream end or done can never carry usage.
       if (chunk.usage) {
         usage = this.extractUsage(chunk.usage)
       }
 
-      // Stream finished — emit accumulated tool calls then done
       if (chunk.choices[0]?.finish_reason) {
-        if (toolCallAccum.size > 0) {
-          const toolCalls: ToolCall[] = Array.from(toolCallAccum.values()).map(tc => ({
-            id: tc.id,
-            name: tc.name,
-            arguments: safeParse(tc.args),
-          }))
-          yield { type: 'tool_calls', toolCalls }
-        }
-
-        yield { type: 'done', usage }
+        finished = true
       }
+    }
+
+    // Stream finished — emit accumulated tool calls then done
+    if (finished) {
+      if (toolCallAccum.size > 0) {
+        const toolCalls: ToolCall[] = Array.from(toolCallAccum.values()).map(tc => ({
+          id: tc.id,
+          name: tc.name,
+          arguments: safeParse(tc.args),
+        }))
+        yield { type: 'tool_calls', toolCalls }
+      }
+
+      yield { type: 'done', usage }
     }
   }
 }

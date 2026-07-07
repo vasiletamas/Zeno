@@ -154,6 +154,81 @@ describe('AnthropicProvider streaming emits usage on done', () => {
 })
 
 // ==============================================
+// OpenAI streaming usage (was: dropped after finish_reason)
+// ==============================================
+
+// The REAL chunk order under stream_options.include_usage: the finish_reason
+// chunk carries NO usage; usage arrives on one final chunk whose choices
+// array is EMPTY. A `done` emitted at finish_reason time can never carry it.
+function openaiStreamEvents(withTool: boolean) {
+  return (async function* () {
+    if (withTool) {
+      yield {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                { index: 0, id: 'call_1', function: { name: 'list_products', arguments: '{}' } },
+              ],
+            },
+          },
+        ],
+      }
+      yield { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }
+    } else {
+      yield { choices: [{ delta: { content: 'Bună!' } }] }
+      yield { choices: [{ delta: {}, finish_reason: 'stop' }] }
+    }
+    yield {
+      choices: [],
+      usage: {
+        prompt_tokens: 1000,
+        completion_tokens: 50,
+        total_tokens: 1050,
+        prompt_tokens_details: { cached_tokens: 800 },
+      },
+    }
+  })()
+}
+
+describe('OpenAIProvider streaming emits usage on done', () => {
+  it('chatStream path: done chunk carries the post-finish usage chunk', async () => {
+    const provider = new OpenAIProvider()
+    const chunks = await collect((provider as any).emitStreamChunks(openaiStreamEvents(false)))
+    expect(chunks.some((c) => c.type === 'content')).toBe(true)
+    const done = chunks.find((c) => c.type === 'done')
+    expect(done?.usage).toBeDefined()
+    expect(done!.usage!.promptTokens).toBe(1000)
+    expect(done!.usage!.completionTokens).toBe(50)
+    expect(done!.usage!.cacheReadTokens).toBe(800)
+  })
+
+  it('chatStreamWithTools path: tool_calls still precede done, done carries usage', async () => {
+    const provider = new OpenAIProvider()
+    const chunks = await collect(
+      (provider as any).emitStreamWithToolsChunks(openaiStreamEvents(true)),
+    )
+    const toolIdx = chunks.findIndex((c) => c.type === 'tool_calls')
+    const doneIdx = chunks.findIndex((c) => c.type === 'done')
+    expect(toolIdx).toBeGreaterThanOrEqual(0)
+    expect(doneIdx).toBeGreaterThan(toolIdx)
+    const done = chunks[doneIdx]
+    expect(done.usage).toBeDefined()
+    expect(done.usage!.promptTokens).toBe(1000)
+    expect(done.usage!.cacheReadTokens).toBe(800)
+  })
+
+  it('stream ending without finish_reason still emits no done (abort semantics unchanged)', async () => {
+    const provider = new OpenAIProvider()
+    const aborted = (async function* () {
+      yield { choices: [{ delta: { content: 'partial' } }] }
+    })()
+    const chunks = await collect((provider as any).emitStreamChunks(aborted))
+    expect(chunks.some((c) => c.type === 'done')).toBe(false)
+  })
+})
+
+// ==============================================
 // Gateway: CacheUsage from normalized TokenUsage
 // ==============================================
 
