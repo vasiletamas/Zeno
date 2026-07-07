@@ -12,6 +12,7 @@ import { LLMError, classifyError, isRetryable, shouldFailover } from '@/lib/llm/
 import { CircuitBreaker } from '@/lib/errors/circuit-breaker'
 import { CircuitOpenError } from '@/lib/errors/types'
 import { logWarn } from '@/lib/errors/logger'
+import { eventBus } from '@/lib/events/event-bus'
 
 // ==============================================
 // PROVIDER REGISTRY
@@ -103,7 +104,11 @@ export async function callWithFailover<T>(
   primary: ProviderTarget,
   fallback: ProviderTarget | null,
   fn: (provider: LLMProviderInterface, model: string) => Promise<T>,
+  // P1-10: turn correlation for the real retry/failover events — optional so
+  // non-turn callers (jobs, scripts) stay source-compatible
+  signals?: { traceId?: string | null },
 ): Promise<T> {
+  const traceId = signals?.traceId ?? null
   let lastError: unknown
   const primaryName = primary.model.split('/')[0] ?? primary.model
   const primaryCircuit = getProviderCircuit(primaryName)
@@ -115,6 +120,7 @@ export async function callWithFailover<T>(
         executeWithRetries(
           () => fn(primary.provider, primary.model),
           2, // maxRetries
+          (attempt, delayMs, errorClass) => eventBus.emit({ type: 'llm:call:retry', traceId, provider: primaryName, model: primary.model, attempt, delayMs, errorClass }),
         ),
       )
     } catch (err) {
@@ -123,6 +129,7 @@ export async function callWithFailover<T>(
 
       // If should failover and we have a fallback, try it
       if (shouldFailover(errorClass) && fallback) {
+        eventBus.emit({ type: 'llm:failover', traceId, fromModel: primary.model, toModel: fallback.model, errorClass })
         logWarn({
           layer: 'gateway',
           category: 'failover',
@@ -142,6 +149,9 @@ export async function callWithFailover<T>(
       }
     }
   } else {
+    if (fallback) {
+      eventBus.emit({ type: 'llm:failover', traceId, fromModel: primary.model, toModel: fallback.model, errorClass: 'circuit_open' })
+    }
     logWarn({
       layer: 'gateway',
       category: 'circuit_open',
@@ -185,6 +195,8 @@ export async function callWithFailover<T>(
 async function executeWithRetries<T>(
   fn: () => Promise<T>,
   maxRetries: number,
+  // P1-10: the ONLY place a real LLM retry is known — report it upward
+  onRetry?: (attempt: number, delayMs: number, errorClass: string) => void,
 ): Promise<T> {
   let lastError: unknown
 
@@ -204,6 +216,7 @@ async function executeWithRetries<T>(
     const retryAfterMs = extractRetryAfter(lastError)
     const delay = calculateBackoff(attempt, retryAfterMs)
 
+    onRetry?.(attempt + 1, delay, classifyError(lastError))
     logWarn({
       layer: 'gateway',
       category: 'retry',

@@ -80,12 +80,13 @@ describe('AnomalySubscriber', () => {
     expect(anomalies).toContainEqual(expect.objectContaining({ type: 'error_pattern', severity: 'warning' }))
   })
 
-  it('flags LLM retry (same agentSlug called 2+ times) as info', () => {
+  it('P1-10: repeated llm:call:start is NORMAL (tool rounds) — the retired call-count heuristic never fires; llm:call:retry does', () => {
     emitTurnStart('t9')
     bus.emit({ type: 'llm:call:start', traceId: 't9', provider: 'OPENAI', model: 'gpt-5.4', agentSlug: 'main-chat' })
-    bus.emit({ type: 'llm:call:start', traceId: 't9', provider: 'ANTHROPIC', model: 'claude-4', agentSlug: 'main-chat' })
-    const anomalies = getTurnAnomalies('t9')
-    expect(anomalies).toContainEqual(expect.objectContaining({ type: 'error_pattern', severity: 'info' }))
+    bus.emit({ type: 'llm:call:start', traceId: 't9', provider: 'OPENAI', model: 'gpt-5.4', agentSlug: 'main-chat' })
+    expect(getTurnAnomalies('t9')).toEqual([])
+    bus.emit({ type: 'llm:call:retry', traceId: 't9', provider: 'OPENAI', model: 'gpt-5.4', attempt: 1, delayMs: 1000, errorClass: 'transient' })
+    expect(getTurnAnomalies('t9')).toContainEqual(expect.objectContaining({ type: 'error_pattern', severity: 'info' }))
   })
 
   // --- Behavioral anomalies ---

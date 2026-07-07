@@ -154,6 +154,7 @@ export const gateway = {
           reasoning: options.reasoning,
         })
       },
+      { traceId: options.traceId ?? null }, // P1-10: retry/failover events correlate to the turn
     )
 
     const durationMs = Date.now() - startMs
@@ -257,6 +258,7 @@ export const gateway = {
           reasoning: options.reasoning,
         })
       },
+      { traceId: options.traceId ?? null }, // P1-10: retry/failover events correlate to the turn
     )
 
     // Wrap iterable to record call on completion
