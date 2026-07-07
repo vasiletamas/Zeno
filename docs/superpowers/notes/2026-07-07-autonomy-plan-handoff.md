@@ -3,6 +3,23 @@
 **Branch:** `claude/exciting-knuth-dodcc1` · **PR:** #6 (draft) · **Plan:** `docs/superpowers/plans/2026-07-06-zeno-autonomy-skills-cost-plan.md`
 **Cloud session limits:** no Postgres, no LLM API keys — everything below marked ⚠ could NOT run there and must run locally before merge.
 
+---
+
+## LOCAL SESSION UPDATE (2026-07-07, laptop, live keys) — gate cleared, E1 + B2 landed
+
+The ⚠ verification gate ran and is GREEN; PR #6 is marked **ready for review**. Commits added this session (on top of `3652105`):
+- `c8952f7` — **telemetry bug found by the gate:** OpenAI streaming emitted `done` at `finish_reason` time, but under `stream_options.include_usage` OpenAI sends usage on a LATER chunk with empty `choices`. So A1's whole accumulation recorded zeros on the primary provider (the first `measure-prompt-cost` run printed all-zero token columns). Fixed both stream generators to defer `done` to stream end; 3 regression tests. Live-verified real usage now persists.
+- `c8a3d3e` — A2/A3 baseline note `2026-07-07-prompt-cost-baseline.md`: full suite (261 files / 1264→1267 tests), P1–P4 + advance-flow all clean at pinned criteria, per-phase cost table. This is the criterion-a "before" for D2/E1/C.
+- `92bcd77` — **E1 done.** MAIN_CHAT_PROMPT split into `CONSTITUTION_CORE` (systemPrompt) + `FIRST_TURN_RULES` + `DISCOVERY_CONDUCT` (new `Agent.promptSections` Json column, migration `20260707000000`). Registry keys `firstTurnRules` (detectFirstTurn, messageCount≤2) + `discoveryConduct` (includeDiscoveryConduct, DISCOVERY+QUOTE), scoped by the orchestrator's post-gate content-nullness patch. Gate: 16 assembly tests + full pathology re-run identical to baseline; live TurnDebug confirms scoping across a DISCOVERY→APPLICATION transition. Cost: APPLICATION turns shed ~6.8k chars (~1.7k tok), acceptance met. Inventory note §7.
+- `aee0ea5` — E1 after-measurement (baseline note §6).
+- `06cc8ca` — **B2 done (documentation-only).** Multi-agent sweep (inventory note §8): 126 imperatives, 39 proposed for rewrite, **0 survived adversarial verification**. B1 already flipped the only D5-flippable imperative (`nextBestAction`); every residual is pathology/compliance/persona-pinned. No prompt change. The next imperative reduction is a REMOVAL (ADVANCING choreography), i.e. Workstream C — not a reword.
+
+**Local-setup gotchas confirmed this session:** DB synced with `npx prisma db push` (cloud authors schema without migrations — but E1 DID author a migration file); dev on port 3001 (`.claude/launch.json` `zeno-dev`); tsx needs `--env-file=.env` and DOES NOT resolve the `@/` alias in one-off `-e` scripts — write a scratch `.ts` importing from an absolute path instead. Full suite ~6 min; each live pathology ~2-4 min.
+
+**Still open (unchanged queue below):** D2 waits for telemetry-over-traffic; C is blocked on SE-1.3; E2–E5 + F come next. PR #6 base is still `main` (247-commit lineage) — re-target to `zeno-v3-fable` before merge if only A/D1/B1/E1 is intended (flagged on the PR).
+
+---
+
 ## 1. What is already implemented on this branch (all TDD, suite green)
 
 | Commit | Task | Content |
