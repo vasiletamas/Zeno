@@ -79,3 +79,45 @@ Reading guide for the after-measurements:
 ## 5. Gate verdict
 
 Suite green (incl. integration ring) + P1–P4 + advance-flow all clean at pinned criteria + baseline recorded ⇒ **the A3 gate is satisfied**: PR #6 is marked ready for review, and E1 (identity split) / B2 (imperative sweep) may start per the handoff queue. Every later cost claim (D2, E1, C) must cite the §4 table as its before.
+
+## 6. E1 after-measurement — identity split (commit `92bcd77`)
+
+E1 splits MAIN_CHAT_PROMPT into CONSTITUTION_CORE (always-on) + FIRST_TURN_RULES (messageCount ≤ 2) + DISCOVERY_CONDUCT (DISCOVERY + QUOTE). Full inventory in `2026-06-zeno-prompt-section-inventory.md` §7.
+
+**Pathology re-run (E1 gate, live OpenAI, 2026-07-07 after the split + reseed):**
+
+```
+P1: ==== 3/3 trials fully detector-clean ====
+P2: ==== stalls-after-"da" across 2 trials: 0 ====
+P3: ==== across 3 trials: BLIND choices=0 (want 0), INFORMED choices=7 ====
+P4: ==== 3/3 trials clean (pivots to Protect, no invented categories) ====
+AF: ==== advance-flow: 2/2 trials PASS (advanced into DNT, no confirm-product ceremony) ====
+happy-path spec sim: => happy-path: 1/1 PASS (n-of-m met)
+```
+
+IDENTICAL to §2 on every pinned criterion (BLIND=0, stalls=0, P1/P4 clean, AF 2/2). The phase-scoping did not regress any pathology — P4 confirms discovery conduct still ships on DISCOVERY, AF confirms it is correctly ABSENT once the flow crosses into APPLICATION.
+
+**Live end-to-end scoping (TurnDebug section presence across recent conversations):** DISCOVERY idx 2 → `firstTurnRules=Y, discoveryConduct=Y`; DISCOVERY idx ≥ 4 → `firstTurnRules=-, discoveryConduct=Y`; APPLICATION → both `-`. The DISCOVERY→APPLICATION transition in one conversation (`siea0q`) shows discoveryConduct dropping exactly at the phase boundary. Proves the DB-loaded `Agent.promptSections` path, not just the unit assembly.
+
+**Cost after-measurement** (`measure-prompt-cost.ts`, post-E1 traffic incl. the full-funnel sim; all turns measured, 0 without usage):
+
+```
+| Phase | Turns | Avg prompt tok | Avg cache read | Hit rate | Stable chars | Dynamic chars | Tooldef chars | Identity share |
+|---|---|---|---|---|---|---|---|---|
+| DISCOVERY | 39 | 17641 | 10509 | 68% | 22334 | 1753 | 8417 | 47% |
+| APPLICATION | 13 | 28235 | 10978 | 41% | 33315 | 3659 | 12010 | 31% |
+| QUOTE | 8 | 28529 | 3744 | 13% | 38618 | 3717 | 10937 | 27% |
+| PAYMENT | 1 | 29134 | 13952 | 50% | 32899 | 3643 | 10472 | 31% |
+| POLICY | 1 | 14430 | 0 | 0% | 32618 | 4441 | 9911 | 31% |
+| OVERALL | 62 | 21401 | 9621 | 54% | 27074 | 2480 | 9553 | 41% |
+```
+
+**Before → after (§4 → §6), the deterministic stable-char measure:**
+
+| Phase | Stable chars before | after | Δ | Identity share before → after |
+|---|---|---|---|---|
+| APPLICATION | 40,078 | 33,315 | **−6,763 (~1.7k tok)** | 42% → 31% |
+| QUOTE | 39,534 | 38,618 | −916 (conduct KEPT here by design) | 42% → 27% |
+| DISCOVERY | 23,359 | 22,334 | −1,025 (first-turn rules gone past the opener) | 73% → 47% |
+
+**E1 acceptance MET:** APPLICATION turns (which include the QUESTIONNAIRE subphase) shed 6,763 stable chars ≈ 1.7k tokens — above the ≥ 1.5k-token bar — driven entirely by the DISCOVERY_CONDUCT removal (5,579 chars) plus first-turn-rules absence. The drop is exactly where the plan targeted it: high-volume questionnaire turns where the discovery guardrails were noise. QUOTE stable chars barely move because `includeDiscoveryConduct` deliberately keeps the pricing guardrails there. No pathology regression (verdicts above). Identity share falls everywhere because the "identity" section is now only the constitution core; the ADVANCING choreography still inside it is the next ≥ 900-token cut, gated to Workstream C.
