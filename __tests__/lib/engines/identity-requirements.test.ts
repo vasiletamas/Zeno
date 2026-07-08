@@ -50,9 +50,20 @@ describe('identity-requirements mechanism (contradiction #1)', () => {
     )
     expect(r.ok).toBe(false)
     // tier 'declared' with empty fields is a synthetic fixture: decomposition
-    // reads the FIELDS, so all five KYC gaps surface, then the channel, then
-    // the anyDeclaredOf clause.
-    if (!r.ok) expect(r.needs).toEqual(['declared:name', 'declared:cnp', 'declared:dateOfBirth', 'declared:email', 'declared:phone', 'verified_channel', 'declared:cnp'])
+    // reads the FIELDS, so all five KYC gaps surface, then the channel; the
+    // anyDeclaredOf clause's declared:cnp DEDUPES into the decomposition's
+    // (a duplicate need is noise for the model).
+    if (!r.ok) expect(r.needs).toEqual(['declared:name', 'declared:cnp', 'declared:dateOfBirth', 'declared:email', 'declared:phone', 'verified_channel'])
+  })
+  it('falls back to valid:cnp when fields+channel are complete but the tier still refuses (checksum/DOB mismatch)', () => {
+    const allDeclared = Object.fromEntries(['name', 'cnp', 'dateOfBirth', 'email', 'phone'].map((f) => [f, { provenance: 'declared' as const }]))
+    const r = checkIdentityRequirement(
+      IDENTITY_REQUIREMENTS,
+      'accept_quote',
+      { tier: 'anonymous', fields: allDeclared, verifiedChannels: ['email'], pendingChallenge: null },
+    )
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.needs).toEqual(['valid:cnp'])
   })
   it('product-document requirements resolve against validated documents', () => {
     const row = { initiate_payment: { minTier: 'anonymous' as const, productDocuments: true } }

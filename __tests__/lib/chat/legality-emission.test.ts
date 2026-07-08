@@ -15,6 +15,18 @@ describe('buildLegalityPayload (F2.2)', () => {
     expect(p.actions.available).toContain('set_candidate_product')
     expect(p.point).toBe('turn_start')
   })
+  it('redacts identity.pendingChallenge.target in the STATE too (Task 1.1 follow-up): raw emails never persist, and the stored state matches a recompute from the redacted snapshot', () => {
+    const p = buildLegalityPayload({
+      traceId: 't1', point: 'turn_start', contentVersions: [],
+      snapshot: { identity: { pendingChallenge: { channel: 'email', target: 'maria@example.ro' } } },
+      state: { phase: 'QUOTE', subphase: null, identity: { tier: 'declared', fields: {}, verifiedChannels: [], pendingChallenge: { channel: 'email', target: 'maria@example.ro', attemptsRemaining: 5 } } } as never,
+      actions: { available: [], blocked: [] },
+    })
+    expect(JSON.stringify(p)).not.toContain('maria@example.ro')
+    expect((p.state.identity.pendingChallenge as { target?: string }).target).toBe('[redacted]')
+    // non-PII challenge facts survive for the briefing/drift checks
+    expect((p.state.identity.pendingChallenge as { attemptsRemaining?: number }).attemptsRemaining).toBe(5)
+  })
   it('carries the commit ledger row id on post_commit entries (erratum 2 join key)', () => {
     const p = buildLegalityPayload({
       traceId: 't1', point: 'post_commit', commitLedgerId: 'led_9', contentVersions: [],

@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db'
 import { gateway } from '@/lib/llm/gateway'
 import { logError, logWarn } from '@/lib/errors/logger'
 import { getActiveInsightKeys, findKeySpec, GLOBAL_INSIGHT_KEYS, type InsightKeySpec } from '@/lib/insights/keys'
+import { validateInsightValue } from '@/lib/insights/validate'
 
 const DEFAULT_CONFIDENCE = 0.7
 const PERSONAL_INFO_REGEX =
@@ -95,7 +96,20 @@ export async function extractAndPersistInsights(input: ExtractorInput): Promise<
       continue
     }
 
-    const stringValue = String(item.value)
+    // Task 3.2 (D4): the typed gate — reject before String() flattens the
+    // sloppiness (age=0, boolean "yes", out-of-options enums) into "facts".
+    const validation = validateInsightValue(spec, item.value)
+    if (!validation.ok) {
+      logWarn({
+        layer: 'orchestrator',
+        category: 'insight_rejected',
+        message: 'Extractor value failed the typed key spec — skipped, never persisted',
+        context: { customerId, conversationId, key: spec.key, value: item.value, reason: validation.reason },
+      })
+      continue
+    }
+
+    const stringValue = validation.value
     const confidence =
       typeof item.confidence === 'number' && item.confidence >= 0 && item.confidence <= 1
         ? item.confidence
@@ -148,8 +162,10 @@ function buildExtractorPrompt(active: InsightKeySpec[]): string {
   lines.push('')
   lines.push('Rules:')
   lines.push('- Only emit insights the customer explicitly stated. Never infer or guess.')
+  lines.push('- OMIT a fact entirely if the customer did not explicitly state it — never emit 0, "unknown", or any placeholder value.')
   lines.push('- If the message contains no extractable facts, return { "insights": [] }.')
   lines.push('- For enum keys, value MUST match one of the listed options exactly.')
+  lines.push('- For boolean keys, value MUST be true or false (never "yes"/"da").')
   lines.push('- confidence reflects how clearly the customer stated this fact.')
   return lines.join('\n')
 }

@@ -40,6 +40,8 @@ export interface QuestionData {
   validationRules: unknown
   orderIndex: number
   isRequired: boolean
+  /** Task 1.2 (D2): CustomerInsight key for the context-hit lookup — null when the question maps to no stored insight. */
+  insightKey: string | null
 }
 
 // ==========================================
@@ -495,6 +497,7 @@ export async function getNextQuestion(
         validationRules: q.validationRules,
         orderIndex: q.orderIndex,
         isRequired: q.isRequired,
+        insightKey: q.insightKey ?? null,
       }
     }
   }

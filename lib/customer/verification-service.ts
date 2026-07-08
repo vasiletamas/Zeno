@@ -9,6 +9,7 @@
  */
 import { createHash, randomInt, randomUUID } from 'crypto'
 import { prisma } from '@/lib/db'
+import { appBaseUrl } from '@/lib/app-url'
 import { getEmailProvider } from '@/lib/email'
 import { setVerifiedField } from '@/lib/customer/profile-service'
 import { claimAndMerge } from '@/lib/customer/claim-merge'
@@ -24,7 +25,20 @@ const sha256 = (s: string) => createHash('sha256').update(s).digest('hex')
 
 export type ConfirmResult =
   | { ok: true; channel: 'email' | 'sms'; target: string; conversationId: string | null; challengeId: string; customerId: string }
-  | { ok: false; reason: 'no_active_challenge' | 'code_mismatch' | 'attempts_exhausted' | 'expired_or_consumed' }
+  | { ok: false; reason: 'no_active_challenge' | 'code_mismatch' | 'attempts_exhausted' | 'expired_or_consumed'; attemptsRemaining?: number }
+
+/**
+ * One mask for every surface that speaks a verification target (the OTP
+ * handler's envelope, the situational briefing) — raw targets never reach
+ * the model or the transcript.
+ */
+export const maskVerificationTarget = (channel: 'email' | 'sms', target: string): string => {
+  if (channel === 'email') {
+    const [user, domain] = target.split('@')
+    return `${user.slice(0, 1)}***@${domain ?? ''}`
+  }
+  return `***${target.slice(-3)}`
+}
 
 /**
  * Callers embedding the link in their own message (e.g. the post-payment
@@ -63,7 +77,7 @@ export async function issueChallenge(
 
   const customer = await db.customer.findUniqueOrThrow({ where: { id: customerId } })
   const locale = customer.language === 'en' ? 'en' : 'ro'
-  const link = `${process.env.APP_URL ?? 'http://localhost:3000'}/api/auth/verify?token=${linkToken}`
+  const link = `${appBaseUrl()}/api/auth/verify?token=${linkToken}`
   // one message, both presentations: the code for in-chat entry, the link
   // for one-click verification — same challenge either way.
   const subject = locale === 'ro' ? `Codul tău de verificare: ${code}` : `Your verification code: ${code}`
@@ -100,10 +114,10 @@ export async function confirmByCode(customerId: string, code: string, db: Db = p
     orderBy: { createdAt: 'desc' },
   })
   if (!challenge) return { ok: false, reason: 'no_active_challenge' }
-  if (challenge.attemptsRemaining <= 0) return { ok: false, reason: 'attempts_exhausted' }
+  if (challenge.attemptsRemaining <= 0) return { ok: false, reason: 'attempts_exhausted', attemptsRemaining: 0 }
   if (challenge.codeHash !== sha256(code)) {
     await db.verificationChallenge.update({ where: { id: challenge.id }, data: { attemptsRemaining: challenge.attemptsRemaining - 1 } })
-    return { ok: false, reason: 'code_mismatch' }
+    return { ok: false, reason: 'code_mismatch', attemptsRemaining: challenge.attemptsRemaining - 1 }
   }
   return completeChannelVerification(challenge, db)
 }

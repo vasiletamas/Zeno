@@ -51,6 +51,101 @@ it('confirm verifies the channel; when the target belongs to another customer it
   expect(ch.conversationId).toBe(conv.id)
 })
 
+it('NEGATIVE: sms verification is rejected with a redirect while the transport is unimplemented (a standing sms challenge is an unfulfillable dead end)', async () => {
+  const c = await createCustomer()
+  const conv = await prisma.conversation.create({ data: { customerId: c.id } })
+  const r = await executeCommit({
+    tool: 'start_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
+    args: { channel: 'sms', target: '0712345678' }, toolContext: ctx(c.id, conv.id),
+  })
+  expect(r.outcome).toBe('rejected')
+  expect(String((r.data as { error?: string })?.error)).toMatch(/sms.*(not|nu).*(available|disponibil)|email/i)
+  expect(await prisma.verificationChallenge.count({ where: { customerId: c.id } })).toBe(0)
+})
+
+// Task 1.1 (D5): the verification endgame — wrong codes decrement a visible
+// attempt budget, and a live challenge blocks silent re-sends.
+
+it('wrong code → rejected envelope carrying attemptsRemaining; next-turn briefing says attempts remaining', async () => {
+  const c = await createCustomer()
+  const conv = await prisma.conversation.create({ data: { customerId: c.id } })
+  await executeCommit({
+    tool: 'start_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
+    args: { channel: 'email', target: 'maria@example.ro' }, toolContext: ctx(c.id, conv.id),
+  })
+  const wrong = String((Number(lastIssuedCode()) + 1) % 1_000_000).padStart(6, '0')
+  const r = await executeCommit({
+    tool: 'confirm_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
+    args: { code: wrong }, toolContext: ctx(c.id, conv.id),
+  })
+  expect(r.outcome).toBe('rejected')
+  expect((r.data as { attemptsRemaining?: number }).attemptsRemaining).toBe(4)
+  // the briefing the model reads next turn carries the surviving budget
+  const { loadDomainSnapshot } = await import('@/lib/engines/snapshot-loader')
+  const { deriveAndExpose } = await import('@/lib/engines/derive-and-expose')
+  const { formatDerivedBriefing } = await import('@/lib/chat/phase-sections-map')
+  const derived = deriveAndExpose(await loadDomainSnapshot(conv.id))
+  expect(formatDerivedBriefing(derived.state, derived.actions)).toContain('4 attempts remaining')
+})
+
+it('second start for the SAME target while a challenge is pending → rejected verification_already_pending (the old code survives)', async () => {
+  const c = await createCustomer()
+  const conv = await prisma.conversation.create({ data: { customerId: c.id } })
+  await executeCommit({
+    tool: 'start_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
+    args: { channel: 'email', target: 'maria@example.ro' }, toolContext: ctx(c.id, conv.id),
+  })
+  const code = lastIssuedCode()
+  const r = await executeCommit({
+    tool: 'start_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
+    args: { channel: 'email', target: 'maria@example.ro' }, toolContext: ctx(c.id, conv.id),
+  })
+  expect(r.outcome).toBe('rejected')
+  expect(r.reason).toBe('verification_already_pending')
+  // the FIRST code still confirms — nothing was invalidated behind the customer's back
+  const confirm = await executeCommit({
+    tool: 'confirm_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
+    args: { code }, toolContext: ctx(c.id, conv.id),
+  })
+  expect(confirm.outcome).toBe('applied')
+})
+
+it('explicit resend: true re-issues for the same target (fresh code, old one dead)', async () => {
+  const c = await createCustomer()
+  const conv = await prisma.conversation.create({ data: { customerId: c.id } })
+  await executeCommit({
+    tool: 'start_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
+    args: { channel: 'email', target: 'maria@example.ro' }, toolContext: ctx(c.id, conv.id),
+  })
+  const oldCode = lastIssuedCode()
+  const r = await executeCommit({
+    tool: 'start_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
+    args: { channel: 'email', target: 'maria@example.ro', resend: true }, toolContext: ctx(c.id, conv.id),
+  })
+  expect(r.outcome).toBe('applied')
+  const newCode = lastIssuedCode()
+  expect(newCode).not.toBe(oldCode)
+  const confirm = await executeCommit({
+    tool: 'confirm_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
+    args: { code: newCode }, toolContext: ctx(c.id, conv.id),
+  })
+  expect(confirm.outcome).toBe('applied')
+})
+
+it('a NEW target passes the guard without resend (customer corrected their address)', async () => {
+  const c = await createCustomer()
+  const conv = await prisma.conversation.create({ data: { customerId: c.id } })
+  await executeCommit({
+    tool: 'start_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
+    args: { channel: 'email', target: 'typo@example.ro' }, toolContext: ctx(c.id, conv.id),
+  })
+  const r = await executeCommit({
+    tool: 'start_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
+    args: { channel: 'email', target: 'correct@example.ro' }, toolContext: ctx(c.id, conv.id),
+  })
+  expect(r.outcome).toBe('applied')
+})
+
 it('confirm verifies in place when nobody else owns the target; tier climbs to verified_channel', async () => {
   const c = await createCustomer()
   const conv = await prisma.conversation.create({ data: { customerId: c.id } })

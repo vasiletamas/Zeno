@@ -32,6 +32,13 @@ describe('accept_quote legality (pure, D2.5)', () => {
     )
     expect(r).toEqual({ ok: false, outcome: 'requires_identity', needs: ['declared:phone', 'verified_channel'] })
   })
+  it('falls back to valid:cnp when the decomposition is complete but the tier still refuses (checksum/DOB mismatch)', () => {
+    const r = acceptQuoteLegality(
+      { ...ok, identity: { tier: 'anonymous', missingFields: [], hasVerifiedChannel: true } },
+      new Date(),
+    )
+    expect(r).toEqual({ ok: false, outcome: 'requires_identity', needs: ['valid:cnp'] })
+  })
   it('quote_expired via the shared isExpired predicate', () => {
     expect(acceptQuoteLegality({ ...ok, quote: { ...ok.quote, validUntil: new Date(0) } }, new Date()))
       .toEqual({ ok: false, outcome: 'rejected', reason: 'quote_expired' })

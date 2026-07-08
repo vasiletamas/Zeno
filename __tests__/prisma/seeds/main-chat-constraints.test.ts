@@ -77,4 +77,20 @@ describe('main-chat agent constraints', () => {
     expect(mainChat?.systemPrompt).toMatch(/COMPLETION RULE/i)
     expect(mainChat?.systemPrompt).toMatch(/(isComplete|readyForQuote)[^\n]*generate_quote/i)
   })
+  it('carries the tool-failure protocol (Task 1.3, D8): typed errorCode policy, confirmed-failure apology, no silent re-confirmation', () => {
+    const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
+    expect(mainChat?.systemPrompt).toMatch(/TOOL FAILURE PROTOCOL/)
+    expect(mainChat?.systemPrompt).toMatch(/errorCode/)
+    expect(mainChat?.systemPrompt).toMatch(/NEVER silently re-issue a confirmation/i)
+    expect(mainChat?.systemPrompt).toMatch(/escalate_to_human/)
+    expect(mainChat?.systemPrompt).toMatch(/repeated_failure/)
+    // customer-facing prose stays clean: apologize + plain words, no internals
+    expect(mainChat?.systemPrompt).toMatch(/something went wrong on our side/i)
+  })
+  it('forbids re-collecting known customer fields (the batch re-send loop, 2026-07-06 battery)', () => {
+    const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
+    expect(mainChat?.systemPrompt).toMatch(/CUSTOMER FIELD DISCIPLINE/)
+    expect(mainChat?.systemPrompt).toMatch(/NEVER re-collect a field/i)
+    expect(mainChat?.systemPrompt).toMatch(/never ask the customer to retype/i)
+  })
 })

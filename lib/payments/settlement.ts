@@ -24,6 +24,7 @@ import { issueChallenge } from '@/lib/customer/verification-service'
 import { purchaseConfirmationEmail } from '@/lib/email/templates/purchase-confirmation'
 import { trackPaymentCompleted } from '@/lib/analytics/events'
 import { logError } from '@/lib/errors/logger'
+import { appBaseUrl } from '@/lib/app-url'
 
 export interface SettlementEvent {
   provider: 'STRIPE' | 'PAYU' | 'MOCK'
@@ -200,7 +201,7 @@ async function runFirstCaptureSideEffects(paymentId: string): Promise<void> {
   await prisma.customer.update({ where: { id: customer.id }, data: { isAnonymous: false } })
 
   if (!customer.email) return
-  const appUrl = process.env.APP_URL ?? 'http://localhost:3001'
+  const appUrl = appBaseUrl()
   const conversationId = quote.application?.originConversationId ?? null
   const { linkToken } = await issueChallenge(
     customer.id, 'email', customer.email, conversationId,

@@ -15,7 +15,7 @@ import type { RawCustomerInsight } from './context-loaders'
 import type { DerivedStateV3, ExposedActions } from '@/lib/engines/domain-types'
 import { calculateAge } from './age'
 import { writeDebugEvent } from './debug-persistence'
-import { redactSnapshot } from '@/lib/debug/redact'
+import { redactSnapshot, maskCnpShapes } from '@/lib/debug/redact'
 import { engineVersion } from '@/lib/engines/derive-and-expose'
 
 // ==============================================
@@ -130,6 +130,12 @@ export interface DebugLegalityPayload {
   traceId: string
   point: 'turn_start' | 'post_commit'
   commitLedgerId?: string
+  /** Tool-round ordinal (post_commit only). Every entry of one round carries
+   * the round's END state/actions — same-round siblings must never serve as
+   * each other's legality baseline (run cmrabhsyk turn 56: a batched
+   * [collect, collect, generate_quote] round recorded the collects' snapshots
+   * with the quote already issued). */
+  round?: number
   engineVersion: string
   /** ProductContent version id(s) injected into this turn's prompt (M8 pin 1). */
   contentVersions: string[]
@@ -141,12 +147,22 @@ export interface DebugLegalityPayload {
 
 /**
  * Pure builder (F2.2, mirroring buildIdentityPayload): stamps the LIVE
- * engine version and redacts the snapshot; state/actions pass verbatim.
- * The engine version comes from Block A's derive-and-expose stamp — no
- * second version constant to drift (plan's version.ts skipped by design).
+ * engine version and redacts the snapshot; state/actions pass verbatim —
+ * EXCEPT identity.pendingChallenge.target (Task 1.1 added it for the
+ * gateway's resend guard): a raw email/phone must not persist in TurnDebug,
+ * and the stored value must equal what a recompute from the REDACTED
+ * snapshot yields (same '[redacted]' literal), or same-version drift fires.
  */
 export function buildLegalityPayload(input: Omit<DebugLegalityPayload, 'engineVersion'>): DebugLegalityPayload {
-  return { ...input, engineVersion, snapshot: redactSnapshot(input.snapshot) }
+  const pc = input.state.identity?.pendingChallenge
+  let state = pc?.target
+    ? { ...input.state, identity: { ...input.state.identity, pendingChallenge: { ...pc, target: '[redacted]' } } }
+    : input.state
+  // Task 5.4 (D11): CNP-shaped values are masked in the STATE too — same
+  // rule as redactSnapshot, so a recompute from the redacted snapshot still
+  // matches the stored state (no false same-version drift).
+  state = JSON.parse(maskCnpShapes(JSON.stringify(state))) as DerivedStateV3
+  return { ...input, engineVersion, state, snapshot: redactSnapshot(input.snapshot) }
 }
 
 export interface DebugIdentityMemoryEntry {

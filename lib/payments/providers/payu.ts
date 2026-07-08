@@ -10,6 +10,7 @@
  */
 
 import crypto from 'crypto'
+import { appBaseUrl } from '@/lib/app-url'
 import type {
   PaymentProvider,
   PaymentIntent,
@@ -65,7 +66,7 @@ export class PayUPaymentProvider implements PaymentProvider {
     const { merchantId, secretKey } = getPayUConfig()
     const accessToken = await getAccessToken(merchantId, secretKey)
 
-    const appUrl = process.env.APP_URL ?? 'http://localhost:3001'
+    const appUrl = appBaseUrl()
 
     const orderPayload = {
       merchantPosId: merchantId,

@@ -5,14 +5,22 @@ const mockFindMany = vi.fn()
 const mockCreate = vi.fn()
 // B4: the scorer resolves the application via the activeApplicationId pointer
 const mockAppFindUnique = vi.fn()
+// Task 5.5 (D12): quality signals — export + challenge seams
+const mockChallengeFindFirst = vi.fn()
+const mockLoadExport = vi.fn()
 
 vi.mock('@/lib/db', () => ({
   prisma: {
     conversation: { findMany: (...args: unknown[]) => mockFindMany(...args) },
     conversationScore: { create: (...args: unknown[]) => mockCreate(...args) },
     application: { findUnique: (...args: unknown[]) => mockAppFindUnique(...args) },
+    verificationChallenge: { findFirst: (...args: unknown[]) => mockChallengeFindFirst(...args) },
   },
 }))
+vi.mock('@/lib/debug/load-export', () => ({
+  loadConversationExport: (...args: unknown[]) => mockLoadExport(...args),
+}))
+vi.mock('@/lib/errors/logger', () => ({ logWarn: vi.fn(), logError: vi.fn(), logInfo: vi.fn() }))
 
 const { scoreConversations } = await import('@/lib/self-improvement/scorer')
 
@@ -118,6 +126,41 @@ describe('scoreConversations', () => {
         score: 0,
       }),
     })
+  })
+
+  it('scores the diagnosed-conversation shape: reaskedKnownFactCount >= 1, verificationCompleted = false (Task 5.5, D12)', async () => {
+    mockFindMany.mockResolvedValue([
+      {
+        id: 'conv-diag',
+        messageCount: 44,
+        mode: 'SALES',
+        activeApplicationId: null,
+        turnTraces: [{ cost: 0.2, latencyMs: 900, anomalies: [] }],
+      },
+    ])
+    mockCreate.mockResolvedValue({ id: 'score-d' })
+    mockChallengeFindFirst.mockResolvedValue(null) // challenge never consumed — the endgame died
+    const ledgerRow = (over: Record<string, unknown>) => ({
+      id: 'l1', tool: 'collect_customer_field', actor: 'agent', outcome: 'applied', effects: [],
+      reasonCode: null, phaseFrom: 'QUOTE', phaseTo: 'QUOTE',
+      idempotencyDisposition: 'fresh', targetRef: 'field:name', createdAt: '2026-07-06T14:00:00Z', ...over,
+    })
+    mockLoadExport.mockResolvedValue({
+      schemaVersion: 2, exportedAt: 'x', conversationId: 'conv-diag',
+      conversation: { id: 'conv-diag', status: 'ACTIVE' },
+      summary: { turns: 0, messages: 0, toolCalls: 0, toolsUsed: [] },
+      messages: [], turns: [],
+      ledger: [
+        ledgerRow({ id: 'l1' }),
+        ledgerRow({ id: 'l2', idempotencyDisposition: 'replay', createdAt: '2026-07-06T14:05:00Z' }),
+      ],
+    })
+
+    await scoreConversations()
+
+    const data = mockCreate.mock.calls[0][0].data
+    expect(data.reaskedKnownFactCount).toBeGreaterThanOrEqual(1)
+    expect(data.verificationCompleted).toBe(false)
   })
 
   it('returns 0 when no unscored conversations exist', async () => {

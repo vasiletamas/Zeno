@@ -6,8 +6,17 @@
  * a future loader change, preserving provenance states and derived facts so
  * recompute-and-diff replay still works on the stored snapshot.
  */
+import { maskCnp } from '@/lib/security/encryption'
+
 const PII_KEYS = new Set(['cnp', 'email', 'phone', 'name', 'value', 'target'])
 const IDENTITY_SCOPE_KEYS = new Set(['customer', 'identity', 'fields'])
+
+// Task 5.4 (D11): a CNP is exactly 13 digits — mask the shape ANYWHERE in
+// the payload (dnt facts, typed answers), bare or embedded in prose.
+const CNP_SHAPE = /(?<!\d)\d{13}(?!\d)/g
+export function maskCnpShapes(s: string): string {
+  return s.replace(CNP_SHAPE, (m) => maskCnp(m))
+}
 
 export function redactSnapshot(snapshot: unknown): unknown {
   const walk = (node: unknown, inIdentity: boolean): unknown => {
@@ -21,6 +30,7 @@ export function redactSnapshot(snapshot: unknown): unknown {
       }
       return out
     }
+    if (typeof node === 'string') return maskCnpShapes(node)
     return node
   }
   return walk(snapshot, false)

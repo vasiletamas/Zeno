@@ -13,6 +13,7 @@ import { getOpenCircuitTools } from '@/lib/tools/circuit-state'
 import { deriveConsents, type ConsentEventLike } from '@/lib/customer/consent'
 import { getIdentityFacts, getAge } from '@/lib/customer/profile-service'
 import { deriveIdentityTier } from '@/lib/engines/identity-rules'
+import { maskCnp, decryptEnvelopeTolerant } from '@/lib/security/encryption'
 import { loadMedicalDeclarationState } from '@/lib/engines/medical-declaration-state'
 import type { DomainSnapshot } from './domain-types'
 
@@ -30,7 +31,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   const identityFacts = await getIdentityFacts(conversation.customerId, db)
   const pendingChallenge = await db.verificationChallenge.findFirst({
     where: { customerId: conversation.customerId, consumedAt: null, expiresAt: { gt: new Date() } },
-    select: { channel: true },
+    select: { channel: true, target: true, attemptsRemaining: true },
     orderBy: { createdAt: 'desc' },
   })
   const validatedDocs = await db.customerDocument.findMany({
@@ -195,7 +196,13 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
       where: { sessionId: latestDnt.sourceSessionId },
       include: { question: { select: { code: true } } },
     })
-    dntFacts = Object.fromEntries(signedAnswers.filter((a) => a.question.code).map((a) => [a.question.code as string, a.value]))
+    // Task 5.4 (D11): the CNP fact is MASKED at the source — no suitability
+    // rule reads it, and the facts flow into legality snapshots/TurnDebug;
+    // age/residency derive from the (encrypted) profile mirror instead.
+    dntFacts = Object.fromEntries(signedAnswers.filter((a) => a.question.code).map((a) => [
+      a.question.code as string,
+      a.question.code === 'DNT_CNP' ? maskCnp(decryptEnvelopeTolerant(a.value)) : a.value,
+    ]))
   }
   // C3.4: acks for the active application (documented-warning state)
   const suitabilityAcks = application && application.status !== 'CANCELLED'
@@ -217,6 +224,18 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     latestOutcomeSeen.add(row.tool)
     if (row.outcome === 'requires_confirmation') pendingConfirmationTools.push(row.tool)
   }
+  // Task 1.3 (D8) loop-breaker: the SAME (tool, argsHash) failing >= 3 times
+  // in this conversation blocks the tool with repeated_failure — the model
+  // must explain-and-escalate, never hammer. requires_confirmation is NOT a
+  // failure (the customer's card tap resolves it, confirmation_stalled
+  // diagnoses that class).
+  const repeatedFailureRows = await db.commitLedger.groupBy({
+    by: ['tool', 'argsHash'],
+    where: { conversationId, outcome: { in: ['rejected', 'unavailable'] } },
+    _count: { _all: true },
+    having: { argsHash: { _count: { gte: 3 } } },
+  })
+  const repeatedFailureTools = [...new Set(repeatedFailureRows.map((r) => r.tool))]
   return {
     conversationId, customerId: conversation.customerId,
     product: prod ? { id: prod.id, code: prod.code, insuranceType: prod.insuranceType, eligibilityRules, suitabilityRules } : null,
@@ -228,7 +247,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
       tier: deriveIdentityTier(identityFacts),
       fields: Object.fromEntries(Object.entries(identityFacts.fields).map(([k, v]) => [k, { provenance: v.provenance }])),
       verifiedChannels: identityFacts.verifiedChannels,
-      pendingChallenge: pendingChallenge ? { channel: pendingChallenge.channel } : null,
+      pendingChallenge: pendingChallenge ? { channel: pendingChallenge.channel, target: pendingChallenge.target, attemptsRemaining: pendingChallenge.attemptsRemaining } : null,
     },
     consents,
     dnt: {
@@ -257,6 +276,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     openItems: [], // M2 (Block B) wires openItems
     circuit: { openTools: getOpenCircuitTools() }, // M10 degraded-mode input (A2.7)
     degraded: [], // backend circuits land with their blocks (payment provider in D3)
+    repeatedFailureTools,
     answers: appAnswers, // C2.6: ACTIVE application answers (code → value) feed the eligibility answer-facts
   }
 }

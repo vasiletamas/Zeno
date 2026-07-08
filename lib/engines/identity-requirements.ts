@@ -57,11 +57,13 @@ export interface IdentityDetail { missingFields: string[]; hasVerifiedChannel: b
  * agent can act on (run cmr9dw3s5 2026-07-06: the channel WAS verified and
  * dateOfBirth+phone were the real blockers, but the payload said only
  * 'verified_channel' — the agent polled state 15 turns, then escalated).
+ * When fields and channel are complete but the tier still refuses, the one
+ * remaining reason is an invalid CNP (checksum / DOB mismatch): valid:cnp.
  */
 export function evaluateRow(
   req: IdentityRequirement,
   tier: IdentityTier,
-  hasDeclared: (field: 'cnp' | 'dateOfBirth') => boolean,
+  hasDeclared: (field: KycField) => boolean,
   requiredDocs: string[] = [],
   validatedDocs: string[] = [],
   detail?: IdentityDetail,
@@ -71,9 +73,10 @@ export function evaluateRow(
     if (req.minTier === 'verified_channel' && detail) {
       for (const f of detail.missingFields) needs.push(`declared:${f}`)
       if (!detail.hasVerifiedChannel) needs.push('verified_channel')
-      // conflict-only / invalid-CNP cases decompose to nothing visible —
-      // fall back to the tier label rather than reporting no gap at all
-      if (needs.length === 0) needs.push('verified_channel')
+      // fields + channel complete yet the tier refuses: the one remaining
+      // reason is an invalid CNP (checksum / DOB mismatch) — name it, never
+      // a tier word the agent may already have satisfied.
+      if (needs.length === 0) needs.push('valid:cnp')
     } else {
       needs.push(req.minTier === 'verified_channel' ? 'verified_channel' : 'declared')
     }
@@ -84,7 +87,7 @@ export function evaluateRow(
   if (req.productDocuments) {
     for (const kind of requiredDocs) if (!validatedDocs.includes(kind)) needs.push(`document:${kind}`)
   }
-  return needs
+  return [...new Set(needs)]
 }
 
 /** Snapshot-side check consumed by deriveAndExpose (tier already derived by the loader). */

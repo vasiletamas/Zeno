@@ -49,16 +49,30 @@ const ASSERTS: Record<string, (e: ConversationExport) => void> = {
     const signs = toolCallsByTurn(e).flat().filter((n) => n === 'sign_dnt').length
     if (signs > 1) throw new Error(`sign_dnt re-attempted after refusal (${signs} calls)`)
   },
+  // Task 2.2 (D1): the card shows the options — the agent must never
+  // enumerate them in prose ("Opțiuni:" lists).
+  noDntOptionEnumeration: (e) => {
+    for (const m of e.messages) {
+      if (m.role === 'assistant' && /op[țt]iuni\s*:/i.test(m.content)) {
+        throw new Error(`agent enumerated options in prose: "${m.content.slice(0, 100)}"`)
+      }
+    }
+  },
 }
+
+/** Task 2.2 (D1): a DNT question card captured from a show_question ui_action. */
+interface DntCard { code: string; type: string; options: { value: string }[] | null }
 
 /** Drain the SSE stream, collecting confirm_required ui_actions (F5.5 gap:
  * the GUI confirm card is a CUSTOMER click, so the sim must replay it —
- * without this the funnel deadlocks at sign_dnt/accept_quote forever). */
-async function drain(stream: ReadableStream<Uint8Array>): Promise<{ confirms: { tool: string; confirmToken: string; args: Record<string, unknown> }[] }> {
+ * without this the funnel deadlocks at sign_dnt/accept_quote forever) and
+ * DNT question cards (Task 2.2: the cards-mode persona taps, never types). */
+async function drain(stream: ReadableStream<Uint8Array>): Promise<{ confirms: { tool: string; confirmToken: string; args: Record<string, unknown> }[]; dntCards: DntCard[] }> {
   const reader = stream.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
   const confirms: { tool: string; confirmToken: string; args: Record<string, unknown> }[] = []
+  const dntCards: DntCard[] = []
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
@@ -71,14 +85,50 @@ async function drain(stream: ReadableStream<Uint8Array>): Promise<{ confirms: { 
       const dataLine = raw.match(/^data: (.+)$/m)?.[1]
       if (eventLine !== 'ui_action' || !dataLine) continue
       try {
-        const data = JSON.parse(dataLine) as { type?: string; payload?: { tool?: string; confirmToken?: string; args?: Record<string, unknown> } }
+        const data = JSON.parse(dataLine) as { type?: string; payload?: { tool?: string; confirmToken?: string; args?: Record<string, unknown>; groupType?: string; question?: { code?: string | null; type?: string; options?: { value: string }[] | null } } }
         if (data.type === 'confirm_required' && data.payload?.tool && data.payload.confirmToken) {
           confirms.push({ tool: data.payload.tool, confirmToken: data.payload.confirmToken, args: data.payload.args ?? {} })
+        }
+        if (data.type === 'show_question' && data.payload?.groupType === 'dnt' && data.payload.question?.code) {
+          dntCards.push({ code: data.payload.question.code, type: data.payload.question.type ?? 'DROPDOWN', options: data.payload.question.options ?? null })
         }
       } catch { /* non-JSON data lines are not ours */ }
     }
   }
-  return { confirms }
+  return { confirms, dntCards }
+}
+
+/**
+ * Task 2.2 (D1): the cards-mode persona's tap — exact option VALUES per
+ * question code (never labels, never free text), OPEN_ENDED get typed text.
+ */
+const DNT_CARD_ANSWERS: Record<string, string> = {
+  DNT_CONSULTATION_CONSENT: 'yes_all',
+  DNT_MARKETING_CONSENT: 'no',
+  DNT_ELECTRONIC_COMMUNICATION: 'yes',
+  DNT_CNP: '1960229410015',
+  DNT_INCOME_SOURCE: 'salary_pension',
+  DNT_OCCUPATION: 'employee',
+  DNT_FAMILY_SIZE: '2',
+  DNT_MINOR_CHILDREN: '0',
+  DNT_EDUCATION: 'university',
+  DNT_LIFE_SUBTYPE: 'simple_protection',
+  DNT_LIFE_NEEDS_PRIORITY: 'protejarea familiei daca patesc ceva',
+  DNT_LIFE_FAMILY_INCOME: '2000_5000',
+  DNT_LIFE_MONTHLY_EXPENSES: '3000 lei',
+  DNT_LIFE_INSURANCE_VALIDITY: '5_9_years',
+  DNT_LIFE_ACCIDENT_COVERAGE: 'yes',
+  DNT_LIFE_ILLNESS_COVERAGE: 'yes',
+  DNT_LIFE_SEVERE_CONDITIONS: 'no',
+  DNT_LIFE_INVALIDITY_COVERAGE: 'yes',
+  DNT_LIFE_INDEXATION: 'no',
+  DNT_LIFE_PAYMENT_FREQUENCY: 'annual',
+  DNT_LIFE_BUDGET: '100 lei pe luna',
+  DNT_SUSTAINABILITY_IMPORTANCE: 'not_necessary',
+  DNT_SUSTAINABILITY_PREFERENCE: 'no_preference',
+}
+function pickCardAnswer(card: DntCard): string {
+  return DNT_CARD_ANSWERS[card.code] ?? card.options?.[0]?.value ?? 'da'
 }
 
 async function lastAssistant(conversationId: string): Promise<string> {
@@ -92,7 +142,7 @@ async function lastAssistant(conversationId: string): Promise<string> {
 
 /** Scenario-specific early-exit: the goal state has been reached. */
 async function goalReached(key: string, customerId: string, conversationId: string): Promise<boolean> {
-  if (key === 'happy-path') {
+  if (key === 'happy-path' || key === 'verification-typed-code') {
     // F5.5: the full funnel — the trial ends when the first successful
     // payment has issued the Policy (PENDING_SUBMISSION, contradiction #5)
     return (await prisma.policy.count({ where: { customerId } })) > 0
@@ -110,6 +160,11 @@ async function goalReached(key: string, customerId: string, conversationId: stri
     if (refused === 0) return false
     return (await prisma.dnt.count({ where: { customerId, status: 'ACTIVE' } })) === 0
   }
+  if (key === 'dnt-card-flow' || key === 'dnt-typed-flow') {
+    // Task 2.2/2.3 (D1): the DNT is signed — the card (or typed-fallback)
+    // path carried it end-to-end
+    return (await prisma.dnt.count({ where: { customerId } })) > 0
+  }
   if (key === 'quote-decline') {
     return (await prisma.commitLedger.count({ where: { conversationId, tool: 'generate_quote', outcome: 'applied' } })) > 0
   }
@@ -122,13 +177,27 @@ async function goalReached(key: string, customerId: string, conversationId: stri
  * consumed challenge, which IS channel verification per B3.4), the GUI
  * document upload + operator validation, and the payment provider settling
  * the session the agent opened. The CHAT side stays entirely agent-driven.
+ *
+ * Task 4.2 (D7): the link click is HONEST — it drives the real
+ * /api/auth/verify route (same consumption + verified-claim path the
+ * customer's email client hits), never flips consumedAt directly. With
+ * typedCodeVerification the email hook is disabled entirely: the persona
+ * types the code and the AGENT must confirm it.
  */
-async function worldHooks(customerId: string, conversationId: string): Promise<void> {
-  const challenge = await prisma.verificationChallenge.findFirst({
-    where: { customerId, consumedAt: null },
-  })
-  if (challenge) {
-    await prisma.verificationChallenge.update({ where: { id: challenge.id }, data: { consumedAt: new Date() } })
+async function worldHooks(customerId: string, conversationId: string, opts: { typedCodeVerification?: boolean } = {}): Promise<void> {
+  if (!opts.typedCodeVerification) {
+    const challenge = await prisma.verificationChallenge.findFirst({
+      where: { customerId, consumedAt: null, expiresAt: { gt: new Date() } },
+    })
+    if (challenge) {
+      const { GET } = await import('@/app/api/auth/verify/route')
+      const { NextRequest } = await import('next/server')
+      const res = await GET(new NextRequest(`http://localhost:3001/api/auth/verify?token=${challenge.linkToken}`))
+      const location = res.headers.get('location') ?? ''
+      if (location.includes('error=')) {
+        console.warn(`    [worldHooks] link click failed: ${location}`)
+      }
+    }
   }
   // The customer uploads the ID when the agent ASKS for it (the upload card
   // = a request_document_upload commit — run cmr9cq7e5 asked pre-accept and
@@ -169,9 +238,76 @@ async function fullFunnelDbChecks(customerId: string, conversationId: string): P
   const acceptRow = await prisma.commitLedger.findFirst({ where: { conversationId, tool: 'accept_quote', outcome: 'applied' } })
   if (!acceptRow?.effects.includes('advance_phase')) failures.push('accept_quote ledger row missing advance_phase effect')
   // T6.D3 deviation: the addon path collects BD answers — they must be
-  // batch-signed exactly once before the quote existed at all.
-  if (app && (await prisma.medicalDeclarationSignature.count({ where: { applicationId: app.id } })) === 0) {
+  // batch-signed exactly once before the quote existed at all. Without the
+  // addon there are no medical declarations and nothing to sign.
+  if (app?.includesAddon && (await prisma.medicalDeclarationSignature.count({ where: { applicationId: app.id } })) === 0) {
     failures.push('no MedicalDeclarationSignature row (batch sign never happened)')
+  }
+  return failures
+}
+
+/**
+ * Task 4.2 (D7): typed-code scenario checks — the AGENT confirmed the code
+ * the persona typed (outcome applied proves the digits matched the hash),
+ * the challenge is consumed, and accept_quote's identity gate opened
+ * (accept_quote applied ⟹ it was exposed).
+ */
+async function typedCodeDbChecks(customerId: string, conversationId: string): Promise<string[]> {
+  const failures: string[] = []
+  const consumed = await prisma.verificationChallenge.findFirst({ where: { customerId, consumedAt: { not: null } } })
+  if (!consumed) failures.push('no consumed verification challenge')
+  const confirmRow = await prisma.commitLedger.findFirst({
+    where: { conversationId, tool: 'confirm_channel_verification', outcome: 'applied', actor: 'agent' },
+  })
+  if (!confirmRow) failures.push('confirm_channel_verification never applied by actor=agent (the typed-code path was not exercised)')
+  return failures
+}
+
+/**
+ * Task 2.2 (D1): cards-mode checks — EVERY DNT answer landed through the
+ * gui actor (the card), zero through the agent (no transcription), and the
+ * session was signed.
+ */
+async function dntCardFlowDbChecks(customerId: string, conversationId: string): Promise<string[]> {
+  const failures: string[] = []
+  const agentWrites = await prisma.commitLedger.count({ where: { conversationId, tool: 'write_dnt_answer', actor: 'agent' } })
+  if (agentWrites > 0) failures.push(`${agentWrites} write_dnt_answer call(s) from actor=agent — the card should collect`)
+  const dnt = await prisma.dnt.findFirst({ where: { customerId } })
+  if (!dnt) { failures.push('DNT never signed'); return failures }
+  const answerCount = await prisma.dntAnswer.count({ where: { sessionId: dnt.sourceSessionId } })
+  const guiWrites = await prisma.commitLedger.count({ where: { conversationId, tool: 'write_dnt_answer', actor: 'gui', outcome: 'applied' } })
+  if (guiWrites < answerCount) failures.push(`only ${guiWrites}/${answerCount} DNT answers landed via actor=gui`)
+  return failures
+}
+
+/**
+ * Task 2.3 (D1): typed-fallback parity — the persona TYPED every answer
+ * (agent transcribes through write_dnt_answer), and the signed facts are
+ * IDENTICAL to what the card path would have posted (same answer table).
+ */
+async function dntTypedFlowDbChecks(customerId: string, conversationId: string): Promise<string[]> {
+  const failures: string[] = []
+  const dnt = await prisma.dnt.findFirst({ where: { customerId } })
+  if (!dnt) { failures.push('DNT never signed'); return failures }
+  const guiWrites = await prisma.commitLedger.count({ where: { conversationId, tool: 'write_dnt_answer', actor: 'gui' } })
+  if (guiWrites > 0) failures.push(`${guiWrites} gui write(s) — the typed variant must exercise the AGENT transcription path`)
+  const answers = await prisma.dntAnswer.findMany({
+    where: { sessionId: dnt.sourceSessionId },
+    include: { question: { select: { code: true } } },
+  })
+  if (answers.length === 0) failures.push('no DNT answers recorded')
+  for (const a of answers) {
+    const code = a.question.code
+    if (!code) continue
+    // P0-3 (merge): the DNT_CNP at-rest form is the MASK on both paths —
+    // compare mask to mask; the raw CNP never lands in the regulatory record.
+    const expectedRaw = DNT_CARD_ANSWERS[code]
+    const expected = code === 'DNT_CNP' && expectedRaw !== undefined
+      ? (await import('@/lib/security/encryption')).maskCnp(expectedRaw)
+      : expectedRaw
+    if (expected !== undefined && a.value !== expected) {
+      failures.push(`fact divergence at ${code}: typed path stored "${a.value}", card path stores "${expected}"`)
+    }
   }
   return failures
 }
@@ -182,36 +318,93 @@ async function runTrial(sc: SpecSimScenario, trial: number): Promise<{ pass: boo
     data: { customerId: customer.id, language: 'ro', channel: 'web' },
   })
   let turns = 0
-  const send = async (msg: string) => {
+  // Each trial is an INDEPENDENT customer: a shared mailbox would claim-and-
+  // merge later trials into the first verified one, and the merged-in policy
+  // walls the funnel at POLICY phase (repeat purchase is out of scope —
+  // snapshot policy is customer-scoped by design, D4.4). The merge path
+  // itself is covered by the claim-merge integration ring. Digits-only
+  // suffix: a cuid in the local-part gets mined by the model and passed as
+  // a productId (2026-07-06 battery).
+  const personaEmail = `ion.sim+${Date.now()}@example.com`
+  // Task 2.2 (D1): the latest unanswered DNT card on screen (cards mode taps it).
+  let pendingDntCard: DntCard | null = null
+  const send = async (msg: string, syntheticToolCall?: { id: string; name: string; arguments: Record<string, unknown> }) => {
     turns++
     try {
-      const { confirms } = await drain(handleChatTurn({ conversationId: conv.id, customerId: customer.id, message: msg, language: 'ro' }))
+      const first = await drain(handleChatTurn({ conversationId: conv.id, customerId: customer.id, message: msg, language: 'ro', ...(syntheticToolCall ? { syntheticToolCall } : {}) }))
+      if (first.dntCards.length > 0) pendingDntCard = first.dntCards[first.dntCards.length - 1]
       // Replay each confirm card as the customer's click (same commit + token
       // the GUI round-trips via the action adapter). Scenarios whose scripted
       // customer REFUSES never click (P2-14: the auto-click was signing the
       // DNT the customer had just refused).
       if (sc.replayConfirms === false) return
-      for (const c of confirms) {
+      for (const c of first.confirms) {
         turns++
-        await drain(handleChatTurn({
+        const replay = await drain(handleChatTurn({
           conversationId: conv.id,
           customerId: customer.id,
           message: `[Action: confirm ${c.tool}]`,
           language: 'ro',
           syntheticToolCall: { id: `sim_confirm_${turns}`, name: c.tool, arguments: { ...c.args, confirmToken: c.confirmToken } },
         }))
+        if (replay.dntCards.length > 0) pendingDntCard = replay.dntCards[replay.dntCards.length - 1]
       }
     } catch (e) {
       console.error(`    [${sc.key}#${trial}] turn "${msg.slice(0, 30)}" errored:`, (e as Error).message)
     }
   }
 
+  /**
+   * Task 2.3 (D1): typed-fallback parity — the card is on screen but a
+   * flaky-UI persona TYPES the answer instead of tapping. The pending card
+   * names the question; the persona types the same answer the card path
+   * would post, so both paths converge to identical dnt.facts. Cleared once
+   * the card's question has an answer (or the session closed).
+   */
+  const typedCardAnswer = async (): Promise<string | null> => {
+    if (!pendingDntCard || sc.dnt === 'cards') return null
+    const session = await prisma.dntSession.findFirst({ where: { customerId: customer.id, status: 'ACTIVE' }, select: { id: true } })
+    if (!session) { pendingDntCard = null; return null }
+    const q = await prisma.question.findFirst({ where: { code: pendingDntCard.code }, select: { id: true } })
+    if (!q || (await prisma.dntAnswer.count({ where: { sessionId: session.id, questionId: q.id } })) > 0) {
+      pendingDntCard = null
+      return null
+    }
+    return pickCardAnswer(pendingDntCard)
+  }
+
+  const hookOpts = { typedCodeVerification: sc.verification === 'typed' }
+  /** Task 4.2 (D7): the live unconsumed code from the mock-email seam — the
+   * persona types it instead of the world hook clicking the link. */
+  const currentCode = async (): Promise<string | null> => {
+    if (sc.verification !== 'typed') return null
+    const challenge = await prisma.verificationChallenge.findFirst({
+      where: { customerId: customer.id, consumedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!challenge) return null
+    const { lastMockEmailTo } = await import('@/lib/email/providers/mock')
+    return lastMockEmailTo(challenge.target)?.code ?? null
+  }
+
   for (const msg of sc.opening) await send(msg)
   while (turns < sc.maxTurns && !(await goalReached(sc.key, customer.id, conv.id))) {
-    if (sc.fullFunnel) await worldHooks(customer.id, conv.id)
-    await send(pickAnswer(await lastAssistant(conv.id), sc.answerPolicy))
+    if (sc.fullFunnel) await worldHooks(customer.id, conv.id, hookOpts)
+    // Task 2.2 (D1) cards mode: an unanswered DNT card on screen gets TAPPED
+    // — the same synthetic gui-actor commit the real card click posts.
+    if (sc.dnt === 'cards' && pendingDntCard !== null) {
+      const card: DntCard = pendingDntCard
+      pendingDntCard = null
+      await send(`[Action: answer_dnt ${card.code}]`, { id: `sim_card_${turns}`, name: 'write_dnt_answer', arguments: { questionCode: card.code, value: pickCardAnswer(card) } })
+      continue
+    }
+    // Task 2.3: typed personas answer the PENDING CARD's question (the
+    // agent no longer enumerates options in prose, so the card is the
+    // question's one visible source).
+    const typed = await typedCardAnswer()
+    await send(typed ?? pickAnswer(await lastAssistant(conv.id), sc.answerPolicy, await currentCode(), sc.verification ?? 'link', personaEmail))
   }
-  if (sc.fullFunnel) await worldHooks(customer.id, conv.id)
+  if (sc.fullFunnel) await worldHooks(customer.id, conv.id, hookOpts)
   if (sc.key === 'quote-decline' && (await goalReached(sc.key, customer.id, conv.id))) {
     await send('nu, mulțumesc, nu vreau să accept oferta acum')
   }
@@ -233,6 +426,9 @@ async function runTrial(sc: SpecSimScenario, trial: number): Promise<{ pass: boo
     failures.push('goal_not_reached: the scenario goal state never occurred (vacuous run)')
   }
   if (sc.fullFunnel) failures.push(...await fullFunnelDbChecks(customer.id, conv.id))
+  if (sc.verification === 'typed') failures.push(...await typedCodeDbChecks(customer.id, conv.id))
+  if (sc.dnt === 'cards') failures.push(...await dntCardFlowDbChecks(customer.id, conv.id))
+  if (sc.key === 'dnt-typed-flow') failures.push(...await dntTypedFlowDbChecks(customer.id, conv.id))
   for (const name of sc.asserts) {
     const fn = ASSERTS[name]
     if (!fn) { failures.push(`unknown assert: ${name}`); continue }

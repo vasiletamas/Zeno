@@ -9,16 +9,8 @@
  * transaction — the conversation is repointed and the envelope carries the
  * canonical customerId for the session layer to rebind.
  */
-import { issueChallenge, confirmByCode, applyVerifiedClaim } from '@/lib/customer/verification-service'
+import { issueChallenge, confirmByCode, applyVerifiedClaim, maskVerificationTarget as maskTarget } from '@/lib/customer/verification-service'
 import type { ToolHandler } from '@/lib/tools/types'
-
-const maskTarget = (channel: 'email' | 'sms', target: string): string => {
-  if (channel === 'email') {
-    const [user, domain] = target.split('@')
-    return `${user.slice(0, 1)}***@${domain ?? ''}`
-  }
-  return `***${target.slice(-3)}`
-}
 
 export const startChannelVerification: ToolHandler = async (args, context) => {
   const channel = args.channel as 'email' | 'sms'
@@ -27,8 +19,12 @@ export const startChannelVerification: ToolHandler = async (args, context) => {
     if (channel === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target)) {
       return { success: false, error: 'invalid_args: target is not a valid email address.' }
     }
-    if (channel === 'sms' && !/^(\+?40|0)\d{9}$/.test(target.replace(/[\s-]/g, ''))) {
-      return { success: false, error: 'invalid_args: target is not a valid Romanian phone number.' }
+    if (channel === 'sms') {
+      // The SMS transport is not implemented (B3.5 placeholder) — a standing
+      // sms challenge could never be satisfied, and Task 1.1's re-send guard
+      // would then wall the funnel behind an undeliverable code. Reject with
+      // the redirect until a real SMS provider lands.
+      return { success: false, error: 'invalid_args: SMS verification is not available yet — verify the EMAIL address instead (start_channel_verification with channel "email").' }
     }
     await issueChallenge(context.customerId, channel, target, context.conversationId, context.db)
     // anti-enumeration: the payload never says whether the target belongs to
@@ -72,7 +68,14 @@ export const confirmChannelVerification: ToolHandler = async (args, context) => 
         attempts_exhausted: 'too many wrong attempts — start a fresh verification.',
         expired_or_consumed: 'this verification expired or was already used — start a fresh one.',
       }
-      return { success: false, error: `${r.reason}: ${prose[r.reason]}` }
+      // Task 1.1 (D5): the envelope carries the live attempt budget so the
+      // agent can tell the customer how many tries are left instead of
+      // silently re-sending a fresh code.
+      return {
+        success: false,
+        error: `${r.reason}: ${prose[r.reason]}`,
+        data: r.attemptsRemaining !== undefined ? { attemptsRemaining: r.attemptsRemaining } : undefined,
+      }
     }
 
     // Verified claim path (T4.D4) — shared with the magic-link route so the

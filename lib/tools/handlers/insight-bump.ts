@@ -1,5 +1,7 @@
 import { prisma } from '@/lib/db'
 import { logInfo, logWarn } from '@/lib/errors/logger'
+import { getActiveInsightKeys, findKeySpec } from '@/lib/insights/keys'
+import { validateInsightValue } from '@/lib/insights/validate'
 
 export interface BumpInput {
   customerId: string
@@ -13,11 +15,30 @@ export interface BumpInput {
   answerValue: string
   previousInsightValue?: string
   previousInsightCategory?: string
+  /** Task 3.2 (D4): resolves the product-specialized key spec for the typed gate. */
+  productId?: string | null
 }
 
 export async function bumpInsightOnAnswer(input: BumpInput): Promise<void> {
   const { customerId, conversationId, question, answerValue } = input
   if (!question.insightKey) return
+
+  // Task 3.2 (D4): the SAME typed gate the extractor uses — an answer that
+  // violates the key spec never overwrites a stored insight. Keys outside
+  // the vocabulary (question-specific insight keys) pass through unchanged.
+  const spec = findKeySpec(await getActiveInsightKeys(input.productId ?? null), question.insightKey)
+  if (spec) {
+    const validation = validateInsightValue(spec, answerValue)
+    if (!validation.ok) {
+      logWarn({
+        layer: 'questionnaire',
+        category: 'insight_rejected',
+        message: 'Answer value failed the typed key spec — insight not bumped',
+        context: { customerId, conversationId, key: question.insightKey, value: answerValue, reason: validation.reason },
+      })
+      return
+    }
+  }
 
   try {
     await prisma.customerInsight.update({

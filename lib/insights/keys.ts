@@ -20,6 +20,14 @@ export const GLOBAL_INSIGHT_KEYS: InsightKeySpec[] = [
   { key: 'chronicConditions', category: 'RISK_FACTOR', type: 'string' },
   { key: 'urgency', category: 'BUYING_SIGNAL', type: 'enum', options: ['immediate', 'weeks', 'exploring'] },
   { key: 'primaryMotivation', category: 'BUYING_SIGNAL', type: 'enum', options: ['family_protection', 'self_protection', 'investment'] },
+  // Task 3.1 (D3): the PREFERENCE vocabulary — the "Știu că te interesa
+  // Optim" memory class. Tier/level values are PRODUCT-defined, so products
+  // specialize these to enums via Product.insightKeys (override by key).
+  { key: 'preferredTier', category: 'PREFERENCE', type: 'string' },
+  { key: 'preferredLevel', category: 'PREFERENCE', type: 'string' },
+  { key: 'addonInterest', category: 'PREFERENCE', type: 'string' },
+  { key: 'budgetSensitivity', category: 'PREFERENCE', type: 'enum', options: ['low', 'medium', 'high'] },
+  { key: 'preferredPaymentFrequency', category: 'PREFERENCE', type: 'enum', options: ['monthly', 'quarterly', 'semi_annual', 'annual', 'integral'] },
 ]
 
 export async function getActiveInsightKeys(
@@ -33,7 +41,11 @@ export async function getActiveInsightKeys(
   })
   const raw = product?.insightKeys
   if (!Array.isArray(raw)) return GLOBAL_INSIGHT_KEYS
-  return [...GLOBAL_INSIGHT_KEYS, ...(raw as unknown as InsightKeySpec[])]
+  // Product keys OVERRIDE globals by key (Task 3.1): the product speaks its
+  // own tier/level enum where the global spec can only say 'string'.
+  const productKeys = raw as unknown as InsightKeySpec[]
+  const overridden = new Set(productKeys.map((k) => k.key))
+  return [...GLOBAL_INSIGHT_KEYS.filter((k) => !overridden.has(k.key)), ...productKeys]
 }
 
 export function findKeySpec(

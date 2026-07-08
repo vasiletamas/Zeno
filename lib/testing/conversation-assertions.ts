@@ -98,13 +98,17 @@ export function assertNoNarrationViolations(e: ConversationExport): void {
 }
 const PREMIUM_RE = /\b(prim[aă]|premium|rat[aă] lunar[aă])\b[^.]{0,40}?\d/i
 export function assertNoPremiumBeforeQuote(e: ConversationExport): void {
+  // turns are keyed by the user message's ABSOLUTE index in e.messages (D9
+  // semantics) — join on it directly, never on the user-message ordinal.
   const turnByIndex = new Map(e.turns.map((t) => [t.messageIndex, t]))
   let quoteSeen = false
-  let turnIdx = -1
-  for (const m of e.messages) {
-    if (m.role === 'user') turnIdx++
-    const st = turnByIndex.get(turnIdx) ? turnState(turnByIndex.get(turnIdx)!) : null
-    if (st && (st as { quote?: unknown }).quote) quoteSeen = true
+  for (let i = 0; i < e.messages.length; i++) {
+    const m = e.messages[i]
+    if (m.role === 'user') {
+      const t = turnByIndex.get(i)
+      const st = t ? turnState(t) : null
+      if (st && (st as { quote?: unknown }).quote) quoteSeen = true
+    }
     if (m.role === 'assistant' && !quoteSeen && PREMIUM_RE.test(m.content)) {
       throw new Error(`premium claim before quote: "${m.content.slice(0, 80)}"`)
     }

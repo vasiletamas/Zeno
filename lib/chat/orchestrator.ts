@@ -28,16 +28,16 @@ import { buildPrompt, type GateSelection, type PromptSections } from './prompt-b
 import { getRequiredSectionsFor, formatDerivedBriefing } from './phase-sections-map'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { deriveAndExpose, engineVersion } from '@/lib/engines/derive-and-expose'
-import type { DeriveAndExposeResult } from '@/lib/engines/domain-types'
+import type { DeriveAndExposeResult, Phase, AppSubphase } from '@/lib/engines/domain-types'
 import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
-import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, loadDntContext, loadPaymentContext, loadPolicyContext, getLastInjectedProductContentVersions, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
+import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, loadDntContext, loadPaymentContext, loadPolicyContext, loadQuestionnaireContextForState, getLastInjectedProductContentVersions, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
 import { buildTurnTools, DEGRADED_FLOOR } from './turn-tools'
 import { shouldRefreshExposure, formatRoundRefreshMessage } from './round-refresh'
 import { evaluateTurnInvariants, recommendedActionsFromBriefing } from '@/lib/monitors/turn-invariants'
 import { loadTurnContext, reactivateIfArchived, type TurnContext } from './turn-context'
 import { inferCandidate, hasAnyCategoryKeyword } from './candidate-inference'
 import { resolveAgent } from './agent-resolver'
-import { executeComplianceCheck, COMPLIANCE_RELEVANT_BY_PHASE, type ComplianceCheckResult } from './compliance-checker'
+import { executeComplianceCheck, shouldRunComplianceCheck, COMPLIANCE_RELEVANT_BY_PHASE, type ComplianceCheckResult } from './compliance-checker'
 import { trackChatStarted } from '@/lib/analytics/events'
 import { estimateTokens, calculateMessageBudget } from '@/lib/chat/token-budget'
 import { compactMessages } from '@/lib/chat/compaction'
@@ -128,6 +128,13 @@ interface TurnState {
   customerId: string
   language: 'en' | 'ro'
   messageCount: number
+  /**
+   * Task 5.1 (D9): the 0-based index of the USER message that started this
+   * turn — the value TurnDebug/TurnTrace persist. messageCount keeps
+   * incrementing with each save (user, assistant), so persisting IT at
+   * turn end sat +2 off the message array and misattributed every turn.
+   */
+  userMessageIndex: number
   productId: string | null
   savedMessageId: string | null
   totalInputTokens: number
@@ -168,6 +175,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     customerId: input.customerId ?? '',
     language: input.language ?? 'ro',
     messageCount: 0,
+    userMessageIndex: 0,
     productId: null,
     savedMessageId: null,
     totalInputTokens: 0,
@@ -405,6 +413,8 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   }
 
   state.messageCount = turnCtx.conversation.messageCount
+  // messageCount BEFORE this turn's saves = the new user message's 0-based index
+  state.userMessageIndex = turnCtx.conversation.messageCount
   state.productId = turnCtx.conversation.productId
   state.conversationMode = turnCtx.conversation.mode ?? 'SALES'
   state.phases['step1_resolve'] = Date.now() - step1Start
@@ -632,6 +642,27 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   sections.paymentContext = exposure ? loadPaymentContext(exposure.state) : null
   sections.policyContext = exposure ? loadPolicyContext(exposure.state) : null
 
+  // Task 1.2 (D2): questionnaireContext keys on the derived (phase, subphase)
+  // — loadAllSections cannot know the step (it runs parallel to the gate), so
+  // the orchestrator patches it here; a loader failure degrades to no section,
+  // never a dead turn.
+  if (exposure) {
+    try {
+      sections.questionnaireContext = await loadQuestionnaireContextForState(
+        exposure.state, state.conversationId, state.customerId, state.language,
+      )
+    } catch (err) {
+      logWarn({
+        layer: 'orchestrator',
+        category: 'db_error',
+        message: 'questionnaireContext load failed; continuing without the section',
+        context: { conversationId: state.conversationId },
+        error: err,
+      })
+      sections.questionnaireContext = null
+    }
+  }
+
   // Pack subsystem deleted (A5.2, M12): gating is owned by the legality
   // engine, prompt content by the sections map.
   const mergedSections: PromptSections = sections
@@ -643,7 +674,26 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const complianceRelevant = exposure
     ? COMPLIANCE_RELEVANT_BY_PHASE[exposure.state.phase]
     : false
+  // Task 5.2 (D10) cadence: the judge runs at (phase, subphase) TRANSITIONS,
+  // not per turn — a stable QUESTIONNAIRE stretch pays zero judge latency.
+  // The previous turn's derived state comes from its TurnDebug row; a missing
+  // row (first turn, racing persist) fails open toward checking.
+  let complianceDue = complianceRelevant
   if (exposure && complianceRelevant) {
+    try {
+      const prevRow = await prisma.turnDebug.findFirst({
+        where: { conversationId: state.conversationId },
+        orderBy: { createdAt: 'desc' },
+        select: { payload: true },
+      })
+      const prevLegality = (prevRow?.payload as { legality?: { point: string; state: { phase: Phase; subphase: AppSubphase | null } }[] } | null)?.legality?.find((l) => l.point === 'turn_start')
+      complianceDue = shouldRunComplianceCheck(
+        prevLegality ? { phase: prevLegality.state.phase, subphase: prevLegality.state.subphase ?? null } : null,
+        { phase: exposure.state.phase, subphase: exposure.state.subphase },
+      )
+    } catch { /* fail open toward checking */ }
+  }
+  if (exposure && complianceRelevant && complianceDue) {
     // Use recent messages from turnCtx instead of querying DB again
     const complianceMessages: Message[] = turnCtx.recentMessages
       .slice(-10)
@@ -654,6 +704,14 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         messages: complianceMessages,
         customerProfile: null,
         phase: exposure.state.phase,
+        language: state.language,
+        // Task 5.2 (D10): ground the judge in the ledger-verified facts
+        recordedFacts: {
+          gdprProcessing: exposure.state.consents.gdprProcessing,
+          aiDisclosure: exposure.state.consents.aiDisclosure,
+          dntSigned: exposure.state.dnt.signed && exposure.state.dnt.valid,
+          dntValidUntil: exposure.state.dnt.validUntil,
+        },
       })
       state.complianceResult = complianceResult
       if (!complianceResult.passed && complianceResult.gaps.length > 0) {
@@ -1321,6 +1379,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
               data: buildLegalityPayload({
                 traceId: state.traceId,
                 point: 'post_commit',
+                round,
                 commitLedgerId: env.ledgerId,
                 contentVersions: getLastInjectedProductContentVersions(),
                 snapshot: refreshSnap,
@@ -1536,7 +1595,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   void prisma.turnTrace.create({
     data: {
       conversationId: state.conversationId,
-      messageIndex: state.messageCount,
+      messageIndex: state.userMessageIndex,
       phases: JSON.parse(JSON.stringify(state.phases)),
       inputTokens: state.totalInputTokens || null,
       outputTokens: state.totalOutputTokens || null,
@@ -1584,7 +1643,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // fire-and-forget, errors swallowed inside persistTurnDebug.
   void persistTurnDebug({
     conversationId: state.conversationId,
-    messageIndex: state.messageCount,
+    messageIndex: state.userMessageIndex,
     traceId: state.traceId,
     events: state.debugEvents,
   })

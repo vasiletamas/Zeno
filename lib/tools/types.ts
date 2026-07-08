@@ -85,6 +85,13 @@ export interface ToolResult {
   effects?: CommitResult['effects']
   data?: Record<string, unknown>
   error?: string
+  /**
+   * Task 1.3 (D8): typed failure contract — set on every failing result by
+   * the executor (lib/tools/failure-classification.ts) and serialized to the
+   * model, so retry policy never has to be guessed from an error string.
+   */
+  errorCode?: 'transient' | 'precondition' | 'validation' | 'permanent'
+  retryable?: boolean
   message?: string
   uiAction?: { type: string; payload: Record<string, unknown> }
   /**

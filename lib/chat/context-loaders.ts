@@ -20,6 +20,7 @@ import { resolveGroupCodes } from '@/lib/engines/question-groups'
 import { getNextQuestion, calculateProgress } from '@/lib/engines/questionnaire-engine'
 import { logInfo } from '@/lib/errors/logger'
 import { calculateAge } from './age'
+import { workflowStepCodeFor } from './phase-sections-map'
 import { getPublishedProductContent, collectPublishedContentIds, registerPublishFlushHook } from '@/lib/products/product-content'
 import { derivePricingExamples, type PricingExampleGrid } from '@/lib/engines/pricing-examples'
 import type { PromptSections } from './prompt-builder'
@@ -451,6 +452,22 @@ export function flushCoachingBriefingCache(): void {
 }
 
 /**
+ * Task 1.2 (D2): the questionnaire surface keyed on the ENGINE's derived
+ * (phase, subphase) — the orchestrator patches this after the gate, same
+ * pattern as dntContext. The DNT stage's surface is dntContext's job; this
+ * wrapper only wakes the APPLICATION questionnaire surface.
+ */
+export async function loadQuestionnaireContextForState(
+  state: Pick<DerivedStateV3, 'phase' | 'subphase'>,
+  conversationId: string,
+  customerId: string,
+  language: 'en' | 'ro',
+): Promise<string | null> {
+  if (workflowStepCodeFor(state.phase, state.subphase) !== 'application_fill') return null
+  return loadQuestionnaireContext(conversationId, customerId, language)
+}
+
+/**
  * Load questionnaire context section (P0-7 rebuild, 2026-07-06).
  *
  * Previously keyed on a workflowStepCode that every caller passed as null
@@ -469,7 +486,7 @@ export async function loadQuestionnaireContext(
 ): Promise<string | null> {
   const conv = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { activeApplicationId: true },
+    select: { activeApplicationId: true, productId: true, candidateProductId: true },
   })
   if (!conv?.activeApplicationId) return null
   const application = await prisma.application.findUnique({ where: { id: conv.activeApplicationId } })
@@ -504,7 +521,7 @@ export async function loadQuestionnaireContext(
   parts.push(questionText)
   parts.push(`Type: ${currentQuestion.type}`)
   if (currentQuestion.code) {
-    parts.push(`Pass this EXACT code to write_question_answer: ${currentQuestion.code}`)
+    parts.push(`Question code: ${currentQuestion.code} — pass this EXACT code to write_question_answer.`)
   }
 
   if (currentQuestion.options) {
@@ -692,13 +709,26 @@ export async function loadCustomerInsights(
  * formats insights by category. Marks insights older than 30 days as
  * (unverified).
  */
+/**
+ * Task 3.3 (D3): category priority for the returning-customer block —
+ * PREFERENCE ("te interesa Optim") and RISK_FACTOR are what the agent must
+ * not lose mid-funnel; the token-cap truncation drops the tail, so these
+ * render FIRST.
+ */
+const MEMORY_CATEGORY_PRIORITY: Record<string, number> = { PREFERENCE: 0, RISK_FACTOR: 1, BUYING_SIGNAL: 2, DEMOGRAPHIC: 3 }
+
 export async function loadCustomerMemory(
   customerId: string,
   preloadedInsights?: RawCustomerInsight[],
 ): Promise<string | null> {
-  const insights = preloadedInsights ?? (await loadCustomerInsights(customerId))
+  const loaded = preloadedInsights ?? (await loadCustomerInsights(customerId))
 
-  if (insights.length === 0) return null
+  if (loaded.length === 0) return null
+
+  // PREFERENCE first, then by freshest confirmation within each category.
+  const insights = [...loaded].sort((a, b) =>
+    (MEMORY_CATEGORY_PRIORITY[a.category] ?? 9) - (MEMORY_CATEGORY_PRIORITY[b.category] ?? 9)
+    || b.lastConfirmedAt.getTime() - a.lastConfirmedAt.getTime())
 
   const now = Date.now()
   const byCategory = new Map<string, string[]>()
@@ -794,7 +824,9 @@ export function loadDntContext(state: DerivedStateV3): string | null {
     // Salvaged questionnaire-facilitation guidance (A5.1 audit):
     'If the customer interrupts with a question or concern, answer it fully FIRST, then offer to resume — never force resumption.',
     'Medical/health questions: frame them before asking (needed for the insurance assessment, treated confidentially), keep a neutral non-judgmental tone, never comment on the answers.',
-    'Active questionnaire questions render as UI cards — do not repeat the card text; keep your transitions brief and warm.',
+    // Task 2.2 (D1): the CARD collects, the agent narrates.
+    'Active DNT and questionnaire questions render as UI CARDS with tappable option buttons — the card collects the answer. NEVER enumerate the options in prose (no "Opțiuni:" lists — the card already shows them); briefly frame the question in one warm sentence and invite the customer to tap an option on the card.',
+    'If the customer TYPES an answer instead of tapping, map it to the EXACT option value from the tool result (e.g. "da, sunt sănătos" on a yes/no question → value "yes"; "lucrez la stat" on the occupation question → value "employee") and pass THAT value to write_dnt_answer — NEVER pass raw free text as the value of an option question.',
   ].join('\n')
 }
 
@@ -891,11 +923,12 @@ export async function loadAllSections(params: {
     customerContext,
     coachingBriefing,
     domainGuidance: null, // former pack-injection slot; the pack subsystem died in A5.2
-    questionnaireContext,
     productContext,
     catalogOverview,
-    // Rendered from the derived state after the gate resolves (A4.2) — the
-    // orchestrator patches these alongside situationalBriefing.
+    // P0-7: eagerly derived from the active application; the orchestrator
+    // re-patches it after the gate from the derived (phase, subphase) —
+    // Task 1.2 (D2) — suppressing it outside the questionnaire stage.
+    questionnaireContext,
     dntContext: null,
     paymentContext: null,
     policyContext: null,

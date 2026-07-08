@@ -9,6 +9,9 @@
  */
 
 import { prisma } from '@/lib/db'
+import { loadConversationExport } from '@/lib/debug/load-export'
+import { logWarn } from '@/lib/errors/logger'
+import { computeQualitySignals, type QualitySignals } from './quality-signals'
 
 const MAX_SCORE = 0.3 + 0.6 + 1.0 // 1.9
 
@@ -97,6 +100,23 @@ export async function scoreConversations(): Promise<number> {
       return sum + (Array.isArray(anomalies) ? anomalies.length : 0)
     }, 0)
 
+    // Task 5.5 (D12): quality signals from the recorded evidence — re-asks,
+    // unexplained errors, rejected insights; verification completion from
+    // the challenge rows (the link click leaves no ledger row, so the
+    // consumed challenge is the truth). Signal failures never block scoring.
+    let quality: QualitySignals = { reaskedKnownFactCount: 0, unexplainedToolErrorCount: 0, insightRejectedCount: 0 }
+    let verificationCompleted = false
+    try {
+      const bundle = await loadConversationExport(conv.id)
+      if (bundle) quality = computeQualitySignals(bundle)
+      verificationCompleted = (await prisma.verificationChallenge.findFirst({
+        where: { conversationId: conv.id, consumedAt: { not: null } },
+        select: { id: true },
+      })) !== null
+    } catch (err) {
+      logWarn({ layer: 'orchestrator', category: 'scorer_quality', message: 'quality-signal computation failed; scoring with zeros', context: { conversationId: conv.id }, error: err })
+    }
+
     await prisma.conversationScore.create({
       data: {
         conversationId: conv.id,
@@ -108,6 +128,8 @@ export async function scoreConversations(): Promise<number> {
         totalCost,
         totalLatencyMs,
         anomalyCount,
+        ...quality,
+        verificationCompleted,
         mode: conv.mode,
         skillPackSlugs: [], // pack subsystem deleted (A5.2); column kept for history
       },

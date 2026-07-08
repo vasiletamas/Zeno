@@ -1229,6 +1229,12 @@ model ConversationScore {
   totalCost            Float
   totalLatencyMs       Int
   anomalyCount         Int
+  // Task 5.5 (D12): quality signals — re-asks, unexplained tool errors,
+  // rejected insight emissions, and whether channel verification completed.
+  reaskedKnownFactCount     Int     @default(0)
+  unexplainedToolErrorCount Int     @default(0)
+  insightRejectedCount      Int     @default(0)
+  verificationCompleted     Boolean @default(false)
   mode                 String
   skillPackSlugs       String[]
   scoredAt             DateTime @default(now())

@@ -11,7 +11,7 @@ export const COMMIT_OUTCOMES = ['applied', 'rejected', 'referred', 'pending', 'u
 export type CommitOutcome = (typeof COMMIT_OUTCOMES)[number]
 export const COMMIT_EFFECTS = ['advance_phase', 're_rating', 'cascade_invalidate', 'cascade_expand', 'questions_removed', 'eligibility_recheck', 'terminal'] as const
 export type CommitEffect = (typeof COMMIT_EFFECTS)[number]
-export const REASON_CODES = ['no_product_in_focus', 'no_open_application', 'application_already_open', 'application_paused', 'no_candidate_product', 'invalid_level_for_tier', 'illegal_status_transition', 'with_underwriter', 'requires_consent', 'gdpr_processing_withdrawn', 'dnt_not_signed', 'dnt_incomplete', 'dnt_expired', 'dnt_session_already_active', 'dnt_session_incomplete', 'no_active_dnt_session', 'questionnaire_incomplete', 'selection_incomplete', 'quote_already_issued', 'no_issued_quote', 'quote_expired', 'quote_already_accepted', 'requires_confirmation', 'requires_identity', 'requires_disclosures', 'already_applied', 'stale_confirm_token', 'invalid_args', 'handler_rejected', 'temporarily_unavailable', 'degraded_mode', 'no_policy', 'payment_not_pending', 'actor_not_permitted', 'work_item_not_found', 'work_item_not_open', 'permission_denied', 'not_exposed', 'validity_dependency_changed', 'removed_by_branch', 'addon_ineligible_medical_history', 'ineligible_age_minimum', 'ineligible_age_maximum', 'ineligible_residency', 'addon_age_band_unavailable', 'one_facet_per_commit', 'eligibility_facts_missing', 'suitability_warning_unacknowledged', 'no_suitability_warning_pending', 'product_has_no_investment_component', 'severe_conditions_demand_needs_addon', 'compliance_block', 'application_frozen', 'manual_underwriting', 'no_due_installment', 'schedule_already_captured', 'outside_free_look', 'medical_declarations_unsigned', 'medical_declarations_incomplete', 'already_escalated', 'value_not_grounded'] as const
+export const REASON_CODES = ['no_product_in_focus', 'no_open_application', 'application_already_open', 'application_paused', 'no_candidate_product', 'invalid_level_for_tier', 'illegal_status_transition', 'with_underwriter', 'requires_consent', 'gdpr_processing_withdrawn', 'dnt_not_signed', 'dnt_incomplete', 'dnt_expired', 'dnt_session_already_active', 'dnt_session_incomplete', 'no_active_dnt_session', 'questionnaire_incomplete', 'selection_incomplete', 'quote_already_issued', 'no_issued_quote', 'quote_expired', 'quote_already_accepted', 'requires_confirmation', 'requires_identity', 'requires_disclosures', 'already_applied', 'stale_confirm_token', 'invalid_args', 'handler_rejected', 'temporarily_unavailable', 'degraded_mode', 'no_policy', 'payment_not_pending', 'actor_not_permitted', 'work_item_not_found', 'work_item_not_open', 'permission_denied', 'not_exposed', 'validity_dependency_changed', 'removed_by_branch', 'addon_ineligible_medical_history', 'ineligible_age_minimum', 'ineligible_age_maximum', 'ineligible_residency', 'addon_age_band_unavailable', 'one_facet_per_commit', 'eligibility_facts_missing', 'suitability_warning_unacknowledged', 'no_suitability_warning_pending', 'product_has_no_investment_component', 'severe_conditions_demand_needs_addon', 'compliance_block', 'application_frozen', 'manual_underwriting', 'no_due_installment', 'schedule_already_captured', 'outside_free_look', 'verification_already_pending', 'repeated_failure', 'medical_declarations_unsigned', 'medical_declarations_incomplete', 'already_escalated', 'value_not_grounded'] as const
 export type ReasonCode = (typeof REASON_CODES)[number]
 
 export type CommitActor = 'agent' | 'gui' | 'system' | 'operator'
@@ -22,7 +22,7 @@ export interface DomainSnapshot {
   customerId: string
   product: { id: string; code: string; insuranceType: string; eligibilityRules?: EligibilityRuleSet | null; suitabilityRules?: SuitabilityRuleSet | null } | null // committed > candidate; eligibilityRules = the PARSED typed ruleset (C2.6), null/absent when the row carries no engine-evaluable rules
   candidateProductId: string | null
-  identity: { tier: IdentityTier; fields: Record<string, { provenance: Provenance } | undefined>; verifiedChannels: ('email' | 'sms')[]; pendingChallenge: { channel: 'email' | 'sms' } | null } // tier DERIVED by the loader via identity-rules (B3.2), never stored; pendingChallenge = live unconsumed VerificationChallenge (B3.5 exposure fact)
+  identity: { tier: IdentityTier; fields: Record<string, { provenance: Provenance } | undefined>; verifiedChannels: ('email' | 'sms')[]; pendingChallenge: { channel: 'email' | 'sms'; target?: string; attemptsRemaining?: number } | null } // tier DERIVED by the loader via identity-rules (B3.2), never stored; pendingChallenge = live unconsumed VerificationChallenge (B3.5 exposure fact); target/attemptsRemaining (Task 1.1, D5) feed the resend guard + briefing — optional keeps pre-existing test literals compiling
   consents: { gdprProcessing: boolean; aiDisclosure: boolean; marketing: boolean; gdprWithdrawn: boolean; hasAnyEvents: boolean } // derived from the ConsentEvent ledger (B1); gdprWithdrawn = latest gdpr event is an explicit withdrawal
   dnt: {
     // legacy conversation-stamp semantics — retired at B2.6 with the columns
@@ -79,6 +79,13 @@ export interface DomainSnapshot {
    * their blocks (e.g. the payment provider in D3); the loader stubs [].
    */
   degraded: string[]
+  /**
+   * Task 1.3 (D8) loop-breaker: tools whose SAME argsHash failed (rejected /
+   * unavailable) >= 3 times in this conversation — blocked repeated_failure
+   * for the rest of the conversation; recovery is explain-and-escalate.
+   * Optional — undefined ≡ [] — keeps pre-existing test literals compiling.
+   */
+  repeatedFailureTools?: string[]
   answers: Record<string, string>
 }
 

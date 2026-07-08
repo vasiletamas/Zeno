@@ -21,6 +21,12 @@ describe('getRequiredSectionsFor (A1 content-preserving mapping)', () => {
       expect(getRequiredSectionsFor(p, p === 'APPLICATION' ? sub : null)).toContain('situationalBriefing')
     }
   })
+  it('memory survives the phase transition (Task 3.3, D3): customerMemory rides APPLICATION subphases and QUOTE, not just DISCOVERY', () => {
+    expect(getRequiredSectionsFor('APPLICATION', 'DNT')).toContain('customerMemory')
+    expect(getRequiredSectionsFor('APPLICATION', 'QUESTIONNAIRE')).toContain('customerMemory')
+    expect(getRequiredSectionsFor('APPLICATION', 'QUOTE_GENERATION')).toContain('customerMemory')
+    expect(getRequiredSectionsFor('QUOTE', null)).toContain('customerMemory')
+  })
   it('TARGET map: APPLICATION/DNT injects dntContext; PAYMENT injects paymentContext and NO coaching; POLICY injects policyContext', () => {
     expect(getRequiredSectionsFor('APPLICATION', 'DNT')).toEqual(expect.arrayContaining(['dntContext', 'complianceGuidance']))
     const pay = getRequiredSectionsFor('PAYMENT', null)

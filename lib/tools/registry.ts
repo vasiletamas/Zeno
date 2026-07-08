@@ -568,14 +568,16 @@ registerTool('set_candidate_product', {
     "Set or update the candidate product the conversation is currently focused on. " +
     "Use when the customer's intent is clear enough that you can confidently say 'we are talking about X.' " +
     "Re-call to raise/lower confidence or to change the candidate if the customer pivots. " +
-    "The candidate is a SOFT binding for the presentation phase; it does NOT start an application.",
+    "The candidate is a SOFT binding for the presentation phase; it does NOT start an application. " +
+    "Once an application is open the product is frozen — NEVER call this to push a sale forward " +
+    "(accepting an offer goes through accept_quote; identity gaps through collect_customer_field / start_channel_verification).",
   parameters: {
     type: 'object',
     properties: {
       productId: {
         type: 'string',
         description:
-          "The product to set as the candidate: its code (e.g. 'protect') or its id from list_products. NEVER an id you did not read from a tool result in THIS conversation.",
+          "The product to set as the candidate: its code (e.g. 'protect') or its id from list_products. NEVER an application, quote, or conversation id, and never an id you did not read from a tool result in THIS conversation.",
       },
       addonIds: {
         type: 'array',
@@ -771,7 +773,7 @@ registerTool('get_next_question', {
   customerVisible: false,
   statusMessage: null,
   allowedRoles: ALL_ROLES,
-  sideEffects: false,
+  sideEffects: false, // pure read — Task 5.3: the default-true left it in the writing partition, so missing_consequences fired on every call
   kind: 'read',
 }, getNextQuestionInfo)
 
@@ -987,7 +989,7 @@ registerTool('get_quote_info', {
   customerVisible: false,
   statusMessage: null,
   allowedRoles: ALL_ROLES,
-  sideEffects: false,
+  sideEffects: false, // pure read — Task 5.3: the default-true left it in the writing partition, so missing_consequences fired on every call
   kind: 'read',
 }, getQuoteInfo)
 
@@ -1048,7 +1050,7 @@ registerTool('get_payment_status', {
   customerVisible: false,
   statusMessage: null,
   allowedRoles: ALL_ROLES,
-  sideEffects: false,
+  sideEffects: false, // pure read — Task 5.3: the default-true left it in the writing partition, so missing_consequences fired on every call
   kind: 'read',
 }, getPaymentStatus)
 
@@ -1145,12 +1147,14 @@ registerTool('start_channel_verification', {
   description:
     'Send the customer a 6-digit verification code (plus a one-click link) to the email address or phone number THEY provided. ' +
     'Verifying a channel raises the identity tier (needed before accepting a quote). ' +
-    'Never reveals whether the address belongs to an existing account. Re-calling resends a fresh code.',
+    'Never reveals whether the address belongs to an existing account. ' +
+    'While a code is already pending, do NOT call this again for the same address (it would invalidate the code the customer is reading) — pass resend: true ONLY when the customer explicitly asks for a new code.',
   parameters: {
     type: 'object',
     properties: {
-      channel: { type: 'string', enum: ['email', 'sms'], description: 'Which channel to verify.' },
+      channel: { type: 'string', enum: ['email', 'sms'], description: 'Which channel to verify. Only "email" is deliverable today — sms is rejected until an SMS provider is configured.' },
       target: { type: 'string', description: 'The email address or Romanian phone number the customer gave, exactly as provided.' },
+      resend: { type: 'boolean', description: 'Set true ONLY when the customer explicitly asked for a new code while one is already pending.' },
     },
     required: ['channel', 'target'],
     additionalProperties: false,
@@ -1221,7 +1225,7 @@ registerTool('get_policy_info', {
   customerVisible: false,
   statusMessage: null,
   allowedRoles: ALL_ROLES,
-  sideEffects: false,
+  sideEffects: false, // pure read — Task 5.3: the default-true left it in the writing partition, so missing_consequences fired on every call
   kind: 'read',
 }, getPolicyInfo)
 

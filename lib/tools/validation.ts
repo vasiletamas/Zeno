@@ -182,6 +182,9 @@ const escalateToHumanSchema = z.object({
 const startChannelVerificationSchema = z.object({
   channel: z.enum(['email', 'sms']),
   target: z.string().min(3, 'Target contact is required'),
+  // Task 1.1 (D5): the ONLY way to re-issue for the SAME target while a
+  // challenge is pending — the customer must have asked for a new code.
+  resend: z.boolean().optional(),
 }).strict()
 
 const confirmChannelVerificationSchema = z.object({

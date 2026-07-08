@@ -29,6 +29,13 @@ describe('resolveProductRef – tolerant', () => {
     expect(ref).toEqual({ id: 'p-prop', code: 'locuinta', matchedBy: 'code-normalized' })
   })
 
+  it('an id arg that misses falls back to the CODE pipeline — the "Available codes:" error text invites passing the code under productId', async () => {
+    findUniqueSpy.mockResolvedValueOnce(null) // 1. by id → miss
+    findUniqueSpy.mockResolvedValueOnce({ id: 'p1', code: 'protect' }) // 2. same value as exact code
+    const ref = await resolveProductRef({ productId: 'protect' })
+    expect(ref).toEqual({ id: 'p1', code: 'protect', matchedBy: 'code-exact' })
+  })
+
   it('returns null when nothing matches', async () => {
     findUniqueSpy.mockResolvedValueOnce(null)   // 1. exact
     findFirstSpy.mockResolvedValueOnce(null)    // 2. ci
