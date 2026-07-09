@@ -30,6 +30,9 @@ interface ConversationWithRelations {
     cost: number | null
     latencyMs: number | null
     anomalies: unknown
+    inputTokens?: number | null
+    cacheReadTokens?: number | null
+    cacheWriteTokens?: number | null
   }[]
 }
 
@@ -44,7 +47,7 @@ export async function scoreConversations(): Promise<number> {
     },
     include: {
       turnTraces: {
-        select: { cost: true, latencyMs: true, anomalies: true },
+        select: { cost: true, latencyMs: true, anomalies: true, inputTokens: true, cacheReadTokens: true, cacheWriteTokens: true },
       },
     },
   })
@@ -117,6 +120,16 @@ export async function scoreConversations(): Promise<number> {
       logWarn({ layer: 'orchestrator', category: 'scorer_quality', message: 'quality-signal computation failed; scoring with zeros', context: { conversationId: conv.id }, error: err })
     }
 
+    // A1c cache aggregates: hit rate is per LLM-carrying trace; null when the
+    // conversation predates the token telemetry entirely.
+    const llmTraces = conv.turnTraces.filter((t) => (t.inputTokens ?? 0) > 0)
+    const totalPromptTokens = llmTraces.reduce((sum, t) => sum + (t.inputTokens ?? 0), 0)
+    const totalCachedTokens = llmTraces.reduce((sum, t) => sum + (t.cacheReadTokens ?? 0), 0)
+    const avgCacheHitRate =
+      llmTraces.length > 0
+        ? llmTraces.filter((t) => (t.cacheReadTokens ?? 0) > 0).length / llmTraces.length
+        : null
+
     await prisma.conversationScore.create({
       data: {
         conversationId: conv.id,
@@ -132,6 +145,9 @@ export async function scoreConversations(): Promise<number> {
         verificationCompleted,
         mode: conv.mode,
         skillPackSlugs: [], // pack subsystem deleted (A5.2); column kept for history
+        totalPromptTokens,
+        totalCachedTokens,
+        avgCacheHitRate,
       },
     })
 

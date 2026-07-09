@@ -102,3 +102,89 @@ AF: ==== advance-flow: 2/2 trials PASS (advanced into DNT, no confirm-product ce
 ALL CLEAN after the rework — identical verdicts to the baseline, and the
 sections rework did not re-introduce advance-flow stalls (2/2). M13 criteria
 a–d all satisfied.
+
+## 7. E1 — identity-prompt split (2026-07-07, autonomy-skills-cost plan)
+
+MAIN_CHAT_PROMPT (row 1 above; 18,152 chars) split into three homes, seeded
+as `Agent.systemPrompt` (core) + `Agent.promptSections` Json (the other two).
+Combined text after the split: 18,140 chars — the 12-char delta is the two
+cross-reference rewordings marked ⟲ below. Every block of row 1 appears in
+exactly ONE home:
+
+| Block (in original order) | New home | Note |
+|---|---|---|
+| "You are Zeno, a calm and knowledgeable…" intro | CONSTITUTION_CORE | always-on |
+| FIRST-TURN RULES (6 bullets) + reference opening | **FIRST_TURN_RULES** → section `firstTurnRules` | ships while `messageCount <= 2` (detectFirstTurn); ⟲ "see HUMAN HANDOFF section below" → "see the HUMAN HANDOFF section" (handoff now renders above, in the core) |
+| first-turn IMPORTANT block (never "AI"; warm tone) | CONSTITUTION_CORE | MOVED to core: the never-"AI" vocabulary + tone rule is global (customers ask "ești un AI?" at any turn), not first-turn-shaped |
+| HUMAN HANDOFF (reactive, async) | CONSTITUTION_CORE | reactive at any turn |
+| CORE BEHAVIORS | CONSTITUTION_CORE | |
+| CUSTOMER SIGNAL AWARENESS | CONSTITUTION_CORE | |
+| PRODUCT KNOWLEDGE — WHAT WE SELL vs. THE SPECIFICS | **DISCOVERY_CONDUCT** → section `discoveryConduct` | phases DISCOVERY + QUOTE (includeDiscoveryConduct) |
+| TOOL USE IS INVISIBLE INFRASTRUCTURE | CONSTITUTION_CORE | P1-pinned, phase-agnostic |
+| PRODUCT DISCOVERY GUARDRAILS 1–6 + "non-negotiable" close | DISCOVERY_CONDUCT | ⟲ guardrail 2 "(see TOOL USE IS INVISIBLE below)" → "(see TOOL USE IS INVISIBLE)" (that block now renders above) |
+| SINGLE-MATCH CATEGORY | DISCOVERY_CONDUCT | |
+| PACING | DISCOVERY_CONDUCT | |
+| ANSWER FIRST — DON'T DEFLECT | CONSTITUTION_CORE | P2-pinned; deflection is phase-agnostic |
+| ADVANCING TO THE OFFER | CONSTITUTION_CORE | stays until Workstream C (gated on SE-1.3); its removal is C2 cut 1–4 |
+| OFF-TOPIC HANDLING | CONSTITUTION_CORE | P4/OOS-pinned |
+| CRITICAL CONSTRAINTS 1–5 | CONSTITUTION_CORE | |
+| CUSTOMER AUTONOMY | CONSTITUTION_CORE | |
+| "Always prioritize the customer's best interest…" | CONSTITUTION_CORE | |
+| WHAT I CAN DO / WHAT I CANNOT DO | CONSTITUTION_CORE | |
+
+Sizes: CONSTITUTION_CORE 11,382 chars (≤ 12KB budget; drops under 9KB when C
+removes ADVANCING), FIRST_TURN_RULES 1,179, DISCOVERY_CONDUCT 5,579.
+APPLICATION/PAYMENT/POLICY turns shed 6,758 chars (≈ 1.7k tokens) of
+now-out-of-scope prose; DISCOVERY turns past the opener shed 1,179.
+Registry keys: `firstTurnRules` (constitution layer, priority 1.3),
+`discoveryConduct` (stable layer, 1.6) — both scoped by the orchestrator's
+post-gate patch (the dntContext content-nullness pattern), both listed in
+BY_PHASE for DISCOVERY/QUOTE (map documents intent; nullness enforces).
+Gate: assembly tests in `__tests__/lib/chat/identity-split.test.ts` + the
+full pathology suite re-run — verdicts recorded in
+`2026-07-07-prompt-cost-baseline.md` §6.
+
+## 8. B2 — imperative-language sweep (2026-07-07, autonomy-skills-cost plan Task B2)
+
+Method: a deterministic multi-agent sweep (workflow `b2-imperative-sweep`,
+43 agents). Four inventory agents (one per prose surface —
+`formatDerivedBriefing`, `CONSTITUTION_CORE`, `DISCOVERY_CONDUCT`,
+`FIRST_TURN_RULES`) extracted every imperative and classified it
+keep-pinned / rewrite-informative / delete. Each non-keep proposal then
+went to an independent adversarial verifier prompted to REFUTE it — find
+the behavior gate that regresses if the imperative is reworded — and to
+default to keep-pinned when uncertain (the safe direction: a wrong flip
+causes a live pathology regression).
+
+**Result: 126 imperatives inventoried, 39 proposed for change by the
+inventory pass, 0 survived verification.** Every proposed rewrite/delete
+was refuted back to keep-pinned. No prompt content changed, so B2 lands as
+this documentation entry only — no reseed, no pathology re-run (zero
+behavior delta).
+
+Why zero survived — the load-bearing principle B2 confirms: Workstream B's
+rationale is the D5 pathology (the model OBEYS an imperative into a *wrong
+tool call* when the fallible engine hint is wrong). That failure mode
+exists only for an imperative that (a) commands a tool action and (b) is
+driven by mutable engine state. **B1 already flipped the sole such
+imperative — the engine's `nextBestAction` "call X" hint → objective
+facts.** Every residual imperative in the briefing/constitution falls into
+a category that is pure downside to reword:
+
+| Refutation category | Representative imperative (proposed → refuted) | Pin that saved it |
+|---|---|---|
+| Persona/tone — commands no tool action, no engine hint to be "wrong" | "Keep the tone warm and inviting, not clinical or robotic." | brand-voice compliance; sole runtime enforcer of the warm-tone contract |
+| Anti-hallucination — must be OBEYED, not reasoned over (hallucination = absence of any engine wall) | "If you don't know something, say so." / "WHEN IN DOUBT, BE HONEST" | D5 / anti-fabrication NEVER-VIOLATE block |
+| Compound sentence — rewrite silently DROPPED a load-bearing clause | "'Not now' is a valid answer." (dropped "Offer to save progress and return later.") | advance-flow / DNT pause-resume |
+| Signal→action pair — the "action" half is the P2 directive | "If a customer says 'that's a lot'… — address it." | P2 (ANSWER FIRST — DON'T DEFLECT) |
+| Compliance gate — prose is the ONLY enforcer (no engine check) | "The insurer (Allianz-Țiriac…) is NOT mentioned in the first message." | IDD insurer-disclosure; one-question-per-turn; pricing-only-via-quote |
+| P1 tool-invisibility family | "The system handles form display." / "The lookup is invisible." | P1 (fake-forms / tool-narration) |
+| P4 empty-category / OOS redirect | the RO/EN OFF-TOPIC decline templates | P4 (pivot-to-real-product) |
+| Structural anchor (delete proposals) | "These guardrails are non-negotiable." | precedence anchor for the 6 numbered guardrails |
+
+Conclusion: after B1, the briefing and constitution carry no further
+safe imperative→informative rewrites. The next imperative-density
+reduction is not a reword but a REMOVAL — the ADVANCING TO THE OFFER
+choreography (Workstream C, gated on SE-1.3), whose imperatives duplicate
+engine-enforced exposure ordering and therefore CAN leave without losing a
+pin. B2 is complete; C is where the remaining imperative budget comes off.

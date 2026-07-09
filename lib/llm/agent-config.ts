@@ -23,6 +23,8 @@ export interface AgentConfig {
   temperature: number
   maxTokens: number
   systemPrompt: string | null
+  /** E1: phase-/turn-scoped sections keyed by SECTION_REGISTRY key; null = pre-split row. */
+  promptSections: Record<string, string> | null
   constraints: string | null
   isActive: boolean
 }
@@ -76,6 +78,7 @@ export async function getAgentConfig(slug: string): Promise<AgentConfig> {
     temperature: agent.temperature,
     maxTokens: agent.maxTokens,
     systemPrompt: agent.systemPrompt,
+    promptSections: parsePromptSections(agent.promptSections),
     constraints: agent.constraints,
     isActive: agent.isActive,
   }
@@ -83,6 +86,20 @@ export async function getAgentConfig(slug: string): Promise<AgentConfig> {
   cache.set(slug, { config, expiresAt: now + CACHE_TTL_MS })
 
   return config
+}
+
+/**
+ * Defensive parse of the Agent.promptSections Json column: accept only a
+ * flat string→string map; anything else degrades to null (systemPrompt
+ * fallback — the section simply doesn't render).
+ */
+function parsePromptSections(raw: unknown): Record<string, string> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'string' && v.length > 0) out[k] = v
+  }
+  return Object.keys(out).length > 0 ? out : null
 }
 
 /**

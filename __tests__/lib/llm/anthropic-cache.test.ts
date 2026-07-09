@@ -73,4 +73,69 @@ describe('AnthropicProvider cache hint handling', () => {
     expect(result.system[1].cache_control).toBeDefined()
     expect(result.system[2]).not.toHaveProperty('cache_control')
   })
+
+  // D1 (plan 2026-07-06): history breakpoint — a cacheHint on a NON-system
+  // message becomes cache_control on that message's last content block, so
+  // the conversation history reads from cache while the per-turn state rides
+  // the final (uncached) user message.
+  it('user message with cacheHint gets a cache_control text block', () => {
+    const convert = getConverter()
+    const messages: Message[] = [
+      { role: 'system', content: 'Stable' },
+      { role: 'user', content: 'question', cacheHint: { breakpoint: 'ephemeral' } },
+      { role: 'assistant', content: 'answer' },
+      { role: 'user', content: 'next question' },
+    ]
+    const result = convert(messages)
+
+    const first = result.messages[0]
+    expect(first.role).toBe('user')
+    expect(Array.isArray(first.content)).toBe(true)
+    expect((first.content as any[])[0]).toMatchObject({
+      type: 'text',
+      text: 'question',
+      cache_control: { type: 'ephemeral' },
+    })
+    // uncached messages keep plain string content
+    expect(typeof result.messages[1].content).toBe('string')
+  })
+
+  it('assistant message with cacheHint gets a cache_control text block', () => {
+    const convert = getConverter()
+    const messages: Message[] = [
+      { role: 'user', content: 'q' },
+      { role: 'assistant', content: 'a', cacheHint: { breakpoint: 'ephemeral' } },
+      { role: 'user', content: 'q2' },
+    ]
+    const result = convert(messages)
+
+    const assistant = result.messages[1]
+    expect(Array.isArray(assistant.content)).toBe(true)
+    expect((assistant.content as any[])[0]).toMatchObject({
+      type: 'text',
+      text: 'a',
+      cache_control: { type: 'ephemeral' },
+    })
+  })
+
+  it('assistant message with toolCalls and cacheHint puts cache_control on the last block', () => {
+    const convert = getConverter()
+    const messages: Message[] = [
+      { role: 'user', content: 'q' },
+      {
+        role: 'assistant',
+        content: 'calling',
+        toolCalls: [{ id: 't1', name: 'list_products', arguments: {} }],
+        cacheHint: { breakpoint: 'ephemeral' },
+      },
+      { role: 'user', content: 'q2' },
+    ]
+    const result = convert(messages)
+
+    const blocks = result.messages[1].content as any[]
+    expect(blocks[blocks.length - 1]).toMatchObject({
+      type: 'tool_use',
+      cache_control: { type: 'ephemeral' },
+    })
+  })
 })

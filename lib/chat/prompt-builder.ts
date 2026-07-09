@@ -23,6 +23,10 @@
 
 export interface PromptSections {
   agentIdentity: string | null
+  /** E1: opener rules, shipped only while messageCount <= 2 (detectFirstTurn). */
+  firstTurnRules: string | null
+  /** E1: guardrails 1–6 + single-match + product knowledge + pacing; DISCOVERY + QUOTE only. */
+  discoveryConduct: string | null
   capabilityManifest: string | null
   constraints: string | null
   stateGrounding: string | null
@@ -72,6 +76,12 @@ interface SectionConfig {
 const SECTION_REGISTRY: SectionConfig[] = [
   // STABLE PREFIX — rarely changes within a conversation
   { key: 'agentIdentity',       priority: 1,    layer: 'constitution', alwaysInclude: true,  prefix: '' },
+  // E1: split out of the identity; scoped by the orchestrator's post-gate
+  // patch (detectFirstTurn / includeDiscoveryConduct), not alwaysInclude.
+  // Priorities keep the original in-prompt order: identity → first-turn
+  // rules → discovery conduct → constraints.
+  { key: 'firstTurnRules',      priority: 1.3,  layer: 'constitution', alwaysInclude: false, prefix: '' },
+  { key: 'discoveryConduct',    priority: 1.6,  layer: 'stable',      alwaysInclude: false, prefix: '' },
   { key: 'constraints',         priority: 2,    layer: 'constitution', alwaysInclude: true,  prefix: 'CRITICAL CONSTRAINTS:' },
   { key: 'stateGrounding',      priority: 2.5,  layer: 'constitution', alwaysInclude: true,  prefix: '' },
   { key: 'capabilityManifest',  priority: 3,    layer: 'constitution', alwaysInclude: false, prefix: 'WHAT I CAN DO:' },
@@ -119,8 +129,20 @@ export const FAST_PATH_GATE: GateSelection = {
     'customerMemory',
     'agentKnowledge',
     'capabilityManifest',
+    'firstTurnRules',
+    'discoveryConduct',
   ],
   confidence: 1.0,
+}
+
+/**
+ * E1: the first-turn rules ship only while the conversation is at its very
+ * first exchange. messageCount is read AFTER the user message is saved, so
+ * turn 1 sees 1 (no seeded greeting) or 2 (greeting + user message); turn 2
+ * is already at 3+. Deterministic, same pattern as detectFastPath.
+ */
+export function detectFirstTurn(messageCount: number): boolean {
+  return messageCount <= 2
 }
 
 /**

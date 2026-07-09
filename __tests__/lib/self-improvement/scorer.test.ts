@@ -37,8 +37,8 @@ describe('scoreConversations', () => {
         mode: 'SALES',
         activeApplicationId: 'app-1',
         turnTraces: [
-          { cost: 0.05, latencyMs: 2000, anomalies: [] },
-          { cost: 0.03, latencyMs: 1500, anomalies: [{ type: 'latency' }] },
+          { cost: 0.05, latencyMs: 2000, anomalies: [], inputTokens: 4000, cacheReadTokens: 3000, cacheWriteTokens: 0 },
+          { cost: 0.03, latencyMs: 1500, anomalies: [{ type: 'latency' }], inputTokens: 5000, cacheReadTokens: 0, cacheWriteTokens: 3500 },
         ],
       },
     ])
@@ -69,6 +69,34 @@ describe('scoreConversations', () => {
         anomalyCount: 1,
         mode: 'SALES',
         skillPackSlugs: [], // pack subsystem deleted (A5.2)
+        // A1c cache aggregates: 1 of 2 LLM turns read from cache
+        totalPromptTokens: 9000,
+        totalCachedTokens: 3000,
+        avgCacheHitRate: 0.5,
+      }),
+    })
+  })
+
+  it('A1c: avgCacheHitRate is null when no trace carries token telemetry', async () => {
+    mockFindMany.mockResolvedValue([
+      {
+        id: 'conv-old',
+        messageCount: 4,
+        mode: 'SALES',
+        activeApplicationId: null,
+        // pre-A1 rows: no inputTokens/cache fields persisted
+        turnTraces: [{ cost: 0.01, latencyMs: 900, anomalies: [] }],
+      },
+    ])
+    mockCreate.mockResolvedValue({ id: 'score-old' })
+
+    await scoreConversations()
+
+    expect(mockCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        totalPromptTokens: 0,
+        totalCachedTokens: 0,
+        avgCacheHitRate: null,
       }),
     })
   })

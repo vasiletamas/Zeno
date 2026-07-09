@@ -73,14 +73,14 @@ describe('OpenAI streaming usage (P1-9)', () => {
     p['client'] = openAIClientWithTrailingUsage() as never
     const chunks = await collect(await p.chatStream({ messages, model: 'gpt-test' }))
     const done = chunks.find((c) => c.type === 'done')
-    expect(done?.usage).toEqual({ promptTokens: 100, completionTokens: 20, totalTokens: 120 })
+    expect(done?.usage).toMatchObject({ promptTokens: 100, completionTokens: 20, totalTokens: 120 })
   })
   it('chatStreamWithTools: tool_calls still emitted, done carries usage', async () => {
     const p = new OpenAIProvider()
     p['client'] = openAIClientWithTrailingUsage(true) as never
     const chunks = await collect(await p.chatStreamWithTools({ messages, model: 'gpt-test', tools: [] }))
     expect(chunks.some((c) => c.type === 'tool_calls')).toBe(true)
-    expect(chunks.find((c) => c.type === 'done')?.usage).toEqual({ promptTokens: 100, completionTokens: 20, totalTokens: 120 })
+    expect(chunks.find((c) => c.type === 'done')?.usage).toMatchObject({ promptTokens: 100, completionTokens: 20, totalTokens: 120 })
   })
 })
 
@@ -89,13 +89,13 @@ describe('Anthropic streaming usage (P1-9)', () => {
     const p = new AnthropicProvider()
     p['client'] = anthropicClientWithUsage() as never
     const chunks = await collect(await p.chatStream({ messages, model: 'claude-test' }))
-    expect(chunks.find((c) => c.type === 'done')?.usage).toEqual({ promptTokens: 200, completionTokens: 30, totalTokens: 230 })
+    expect(chunks.find((c) => c.type === 'done')?.usage).toMatchObject({ promptTokens: 200, completionTokens: 30, totalTokens: 230 })
   })
   it('chatStreamWithTools: tool_calls still emitted, done carries usage', async () => {
     const p = new AnthropicProvider()
     p['client'] = anthropicClientWithUsage(true) as never
     const chunks = await collect(await p.chatStreamWithTools({ messages, model: 'claude-test', tools: [] }))
     expect(chunks.some((c) => c.type === 'tool_calls')).toBe(true)
-    expect(chunks.find((c) => c.type === 'done')?.usage).toEqual({ promptTokens: 200, completionTokens: 30, totalTokens: 230 })
+    expect(chunks.find((c) => c.type === 'done')?.usage).toMatchObject({ promptTokens: 200, completionTokens: 30, totalTokens: 230 })
   })
 })

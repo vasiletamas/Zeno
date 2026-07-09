@@ -24,8 +24,10 @@ import { executeToolWithPipeline } from '@/lib/tools/pipeline'
 import { buildToolContext } from './context-builder'
 import { createSSEStream, pickStatusMessage, type SSEEvent } from './stream-handler'
 import type { ToolContext, PipelineResult, ToolResult } from '@/lib/tools/types'
-import { buildPrompt, type GateSelection, type PromptSections } from './prompt-builder'
-import { getRequiredSectionsFor, formatDerivedBriefing } from './phase-sections-map'
+import { buildPrompt, detectFirstTurn, type GateSelection, type PromptSections } from './prompt-builder'
+import { accumulateTurnUsage } from './turn-usage'
+import { buildTurnMessages } from './build-turn-messages'
+import { getRequiredSectionsFor, formatDerivedBriefing, includeDiscoveryConduct } from './phase-sections-map'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { deriveAndExpose, engineVersion } from '@/lib/engines/derive-and-expose'
 import type { DeriveAndExposeResult, Phase, AppSubphase } from '@/lib/engines/domain-types'
@@ -139,6 +141,10 @@ interface TurnState {
   savedMessageId: string | null
   totalInputTokens: number
   totalOutputTokens: number
+  totalCacheReadTokens: number
+  totalCacheWriteTokens: number
+  llmCalls: number
+  cacheHitCalls: number
   provider: string | null
   model: string | null
   startMs: number
@@ -180,6 +186,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     savedMessageId: null,
     totalInputTokens: 0,
     totalOutputTokens: 0,
+    totalCacheReadTokens: 0,
+    totalCacheWriteTokens: 0,
+    llmCalls: 0,
+    cacheHitCalls: 0,
     provider: null,
     model: null,
     startMs: Date.now(),
@@ -533,7 +543,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       }
 
       sections = await loadAllSections({
-        agentConfig: { systemPrompt: agentConfig.systemPrompt, constraints: agentConfig.constraints },
+        agentConfig: { systemPrompt: agentConfig.systemPrompt, constraints: agentConfig.constraints, promptSections: agentConfig.promptSections },
         // capabilityManifest is patched after the gate resolves (A3.1 erratum
         // 3): exposure does not exist yet — context assembly deliberately
         // runs in parallel with the gate.
@@ -577,6 +587,8 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       }
       sections = {
         agentIdentity: agentConfig.systemPrompt,
+        firstTurnRules: agentConfig.promptSections?.firstTurnRules ?? null,
+        discoveryConduct: agentConfig.promptSections?.discoveryConduct ?? null,
         capabilityManifest: null,
         constraints: agentConfig.constraints,
         stateGrounding: loadStateGrounding(fallbackStateGroundingInput),
@@ -662,6 +674,13 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       sections.questionnaireContext = null
     }
   }
+
+  // E1: scope the split identity sections (same content-nullness gating as
+  // dntContext above). First-turn rules ship only on the opening exchange;
+  // discovery conduct only where products are presented/priced. On exposure
+  // failure the phase falls back to DISCOVERY (conservative — conduct stays).
+  if (!detectFirstTurn(state.messageCount)) sections.firstTurnRules = null
+  if (!includeDiscoveryConduct(exposure?.state.phase ?? 'DISCOVERY')) sections.discoveryConduct = null
 
   // Pack subsystem deleted (A5.2, M12): gating is owned by the legality
   // engine, prompt content by the sections map.
@@ -758,6 +777,8 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       stablePrefix: buildResult.stablePrefix ?? null,
       dynamicSuffix: buildResult.dynamicSuffix ?? null,
       totalChars: (buildResult.stablePrefix?.length ?? 0) + (buildResult.dynamicSuffix?.length ?? 0),
+      stablePrefixChars: buildResult.stablePrefix?.length ?? 0,
+      dynamicSuffixChars: buildResult.dynamicSuffix?.length ?? 0,
       traceId: state.traceId,
     },
   })
@@ -824,21 +845,16 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'build_messages', timestamp: Date.now() })
   const step6Start = Date.now()
 
-  const messages: Message[] = []
-  if (buildResult.stablePrefix) {
-    messages.push({ role: 'system' as const, content: buildResult.stablePrefix, cacheHint: { breakpoint: 'ephemeral' } })
-  }
-  if (buildResult.dynamicSuffix) {
-    messages.push({ role: 'system' as const, content: buildResult.dynamicSuffix })
-  }
-  if (summaryPrefix) {
-    messages.push({
-      role: 'system' as const,
-      content: `[Previous conversation summary]\n${summaryPrefix}\n[End of summary — recent messages follow]`,
-    })
-  }
-  messages.push(...windowMessages)
-  messages.push({ role: 'user' as const, content: input.message })
+  // D1 (F3): dynamic per-turn state rides the final user message, BEHIND the
+  // history, so provider prefix caching covers system + summary + history.
+  // The persisted user Message row keeps the raw customer text.
+  const messages: Message[] = buildTurnMessages({
+    stablePrefix: buildResult.stablePrefix || null,
+    dynamicSuffix: buildResult.dynamicSuffix || null,
+    summaryPrefix,
+    windowMessages,
+    userMessage: input.message,
+  })
 
   state.phases['step6_build_messages'] = Date.now() - step6Start
   eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'build_messages', durationMs: Date.now() - step6Start })
@@ -991,8 +1007,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         yield { event: 'content', data: { text: chunk.content } }
       }
       if (chunk.type === 'done' && chunk.usage) {
-        state.totalInputTokens += chunk.usage.promptTokens
-        state.totalOutputTokens += chunk.usage.completionTokens
+        accumulateTurnUsage(state, chunk.usage)
       }
     }
   } else {
@@ -1087,8 +1102,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           roundToolCalls = chunk.toolCalls
         }
         if (chunk.type === 'done' && chunk.usage) {
-          state.totalInputTokens += chunk.usage.promptTokens
-          state.totalOutputTokens += chunk.usage.completionTokens
+          accumulateTurnUsage(state, chunk.usage)
         }
       }
 
@@ -1599,6 +1613,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       phases: JSON.parse(JSON.stringify(state.phases)),
       inputTokens: state.totalInputTokens || null,
       outputTokens: state.totalOutputTokens || null,
+      // A1: null (not 0) when no LLM call ran, so pre-A1 and no-call rows
+      // read the same to the aggregators.
+      cacheReadTokens: state.llmCalls > 0 ? state.totalCacheReadTokens : null,
+      cacheWriteTokens: state.llmCalls > 0 ? state.totalCacheWriteTokens : null,
       cost: getTurnCost(state.traceId),
       latencyMs,
       provider: state.provider,
@@ -1636,6 +1654,11 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       cost: getTurnCost(state.traceId),
       latencyMs,
       anomalies: getTurnAnomalies(state.traceId),
+      totalCacheReadTokens: state.totalCacheReadTokens,
+      totalCacheWriteTokens: state.totalCacheWriteTokens,
+      llmCalls: state.llmCalls,
+      cacheHitCalls: state.cacheHitCalls,
+      toolDefChars: JSON.stringify(tools ?? []).length,
     },
   })
 

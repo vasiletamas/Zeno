@@ -1084,6 +1084,10 @@ model Agent {
   maxTokens        Int         @default(4096)
   systemPrompt     String?     @db.Text
   constraints      String?     @db.Text
+  // E1: phase-/turn-scoped prompt sections keyed by SECTION_REGISTRY key
+  // (firstTurnRules, discoveryConduct). One Json column instead of one
+  // migration per section; systemPrompt stays the always-on constitution.
+  promptSections   Json?
   isActive         Boolean     @default(true)
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
@@ -1115,6 +1119,10 @@ model TurnTrace {
   anomalies      Json?
   inputTokens    Int?
   outputTokens   Int?
+  // A1 cache telemetry: prompt tokens served from / written to the provider
+  // prompt cache, summed across the turn's LLM rounds. Null on pre-A1 rows.
+  cacheReadTokens  Int?
+  cacheWriteTokens Int?
   cost           Float?
   latencyMs      Int?
   provider       String?
@@ -1237,6 +1245,11 @@ model ConversationScore {
   verificationCompleted     Boolean @default(false)
   mode                 String
   skillPackSlugs       String[]
+  // A1 cache aggregates from TurnTrace rows; null when the conversation
+  // predates the telemetry (no trace carries token counts).
+  totalPromptTokens    Int?
+  totalCachedTokens    Int?
+  avgCacheHitRate      Float?
   scoredAt             DateTime @default(now())
   createdAt            DateTime @default(now())
 

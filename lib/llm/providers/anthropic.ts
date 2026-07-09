@@ -34,6 +34,7 @@ import type {
   LLMToolDefinition,
   ToolChoice,
 } from './types'
+import { parseCacheUsage } from './types'
 import { logWarn } from '@/lib/errors/logger'
 
 // ==============================================
@@ -135,7 +136,7 @@ export class AnthropicProvider implements LLMProviderInterface {
         if (msg._providerContent && Array.isArray(msg._providerContent)) {
           converted.push({
             role: 'assistant',
-            content: msg._providerContent as ContentBlockParam[],
+            content: this.withMessageCacheControl(msg, msg._providerContent as ContentBlockParam[]),
           })
         } else if (msg.toolCalls && msg.toolCalls.length > 0) {
           // Reconstruct content blocks from text + tool_calls
@@ -154,12 +155,26 @@ export class AnthropicProvider implements LLMProviderInterface {
             } as ToolUseBlockParam)
           }
 
-          converted.push({ role: 'assistant', content: contentBlocks })
+          converted.push({ role: 'assistant', content: this.withMessageCacheControl(msg, contentBlocks) })
+        } else if (msg.cacheHint && msg.content) {
+          // D1 history breakpoint: message-level cacheHint → cache_control on
+          // the text block, so the conversation prefix up to here reads from cache.
+          converted.push({
+            role: 'assistant',
+            content: [{ type: 'text', text: msg.content, cache_control: { type: 'ephemeral' as const } }],
+          })
         } else {
           converted.push({ role: 'assistant', content: msg.content ?? '' })
         }
       } else if (msg.role === 'user') {
-        converted.push({ role: 'user', content: msg.content ?? '' })
+        if (msg.cacheHint && msg.content) {
+          converted.push({
+            role: 'user',
+            content: [{ type: 'text', text: msg.content, cache_control: { type: 'ephemeral' as const } }],
+          })
+        } else {
+          converted.push({ role: 'user', content: msg.content ?? '' })
+        }
       }
     }
 
@@ -204,6 +219,20 @@ export class AnthropicProvider implements LLMProviderInterface {
       return [{ type: 'text', text: content }]
     }
     return content as ContentBlockParam[]
+  }
+
+  /**
+   * D1 history breakpoint: when a non-system message carries a cacheHint,
+   * stamp cache_control on its LAST content block — the cache prefix then
+   * covers everything up to and including this message.
+   */
+  private withMessageCacheControl(msg: Message, blocks: ContentBlockParam[]): ContentBlockParam[] {
+    if (!msg.cacheHint || blocks.length === 0) return blocks
+    const last = blocks[blocks.length - 1]
+    return [
+      ...blocks.slice(0, -1),
+      { ...last, cache_control: { type: 'ephemeral' as const } } as ContentBlockParam,
+    ]
   }
 
   // ==============================================
@@ -275,10 +304,13 @@ export class AnthropicProvider implements LLMProviderInterface {
   }
 
   private extractUsage(usage: { input_tokens: number; output_tokens: number }): TokenUsage {
+    const cache = parseCacheUsage('ANTHROPIC', usage as unknown as Record<string, unknown>)
     return {
       promptTokens: usage.input_tokens,
       completionTokens: usage.output_tokens,
       totalTokens: usage.input_tokens + usage.output_tokens,
+      cacheReadTokens: cache.cacheRead,
+      cacheWriteTokens: cache.cacheWrite,
     }
   }
 
@@ -392,22 +424,41 @@ export class AnthropicProvider implements LLMProviderInterface {
     return this.emitStreamChunks(stream)
   }
 
+  /**
+   * Accumulate usage across the stream's lifecycle events: message_start
+   * carries input_tokens + cache read/write, message_delta carries the
+   * cumulative output_tokens. The done chunk must carry the result — before
+   * A1 these generators emitted `done` with no usage, so on the Anthropic
+   * fallback every turn counted zero tokens.
+   */
+  private static streamUsageAccumulator() {
+    const raw: Record<string, unknown> = { input_tokens: 0, output_tokens: 0 }
+    return {
+      ingest(event: Anthropic.RawMessageStreamEvent): void {
+        if (event.type === 'message_start') {
+          Object.assign(raw, event.message.usage as unknown as Record<string, unknown>)
+        }
+        if (event.type === 'message_delta' && event.usage) {
+          raw.output_tokens = event.usage.output_tokens
+        }
+      },
+      toTokenUsage(extract: (u: { input_tokens: number; output_tokens: number }) => TokenUsage): TokenUsage {
+        return extract(raw as unknown as { input_tokens: number; output_tokens: number })
+      },
+    }
+  }
+
   private async *emitStreamChunks(
     stream: AsyncIterable<Anthropic.RawMessageStreamEvent>,
   ): AsyncIterable<StreamChunk> {
-    // P1-9: message_start carries input_tokens, message_delta the cumulative
-    // output_tokens — previously neither was read and every streamed turn
-    // recorded 0 tokens.
-    let inputTokens = 0
-    let outputTokens = 0
+    // P1-9 / A1a: message_start carries input_tokens (+ cache fields),
+    // message_delta the cumulative output_tokens — previously none were read
+    // and every streamed turn recorded 0 tokens. The accumulator captures the
+    // cache_read/cache_creation fields A1 telemetry needs, which the earlier
+    // input/output-only version dropped.
+    const usage = AnthropicProvider.streamUsageAccumulator()
     for await (const event of stream) {
-      if (event.type === 'message_start') {
-        inputTokens = event.message.usage.input_tokens ?? 0
-        outputTokens = event.message.usage.output_tokens ?? 0
-      }
-      if (event.type === 'message_delta' && event.usage) {
-        outputTokens = event.usage.output_tokens ?? outputTokens
-      }
+      usage.ingest(event)
       if (event.type === 'content_block_delta') {
         const delta = event.delta
         if ('text' in delta && delta.type === 'text_delta') {
@@ -416,7 +467,7 @@ export class AnthropicProvider implements LLMProviderInterface {
       }
 
       if (event.type === 'message_stop') {
-        yield { type: 'done', usage: { promptTokens: inputTokens, completionTokens: outputTokens, totalTokens: inputTokens + outputTokens } }
+        yield { type: 'done', usage: usage.toTokenUsage(this.extractUsage.bind(this)) }
       }
     }
   }
@@ -460,18 +511,11 @@ export class AnthropicProvider implements LLMProviderInterface {
   ): AsyncIterable<StreamChunk> {
     // Accumulate tool use blocks during streaming
     const toolUseAccum: Map<number, { id: string; name: string; jsonChunks: string }> = new Map()
-    // P1-9: usage from message_start (input) + message_delta (output)
-    let inputTokens = 0
-    let outputTokens = 0
+    // P1-9 / A1a: accumulator captures input/output + cache fields (see emitStreamChunks).
+    const usage = AnthropicProvider.streamUsageAccumulator()
 
     for await (const event of stream) {
-      if (event.type === 'message_start') {
-        inputTokens = event.message.usage.input_tokens ?? 0
-        outputTokens = event.message.usage.output_tokens ?? 0
-      }
-      if (event.type === 'message_delta' && event.usage) {
-        outputTokens = event.usage.output_tokens ?? outputTokens
-      }
+      usage.ingest(event)
       // Text content deltas
       if (event.type === 'content_block_delta') {
         const delta = event.delta
@@ -511,7 +555,7 @@ export class AnthropicProvider implements LLMProviderInterface {
           yield { type: 'tool_calls', toolCalls }
         }
 
-        yield { type: 'done', usage: { promptTokens: inputTokens, completionTokens: outputTokens, totalTokens: inputTokens + outputTokens } }
+        yield { type: 'done', usage: usage.toTokenUsage(this.extractUsage.bind(this)) }
       }
     }
   }
