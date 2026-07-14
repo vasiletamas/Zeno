@@ -1,6 +1,59 @@
 # Zeno v3 model-branch analysis — PAUSED session state
 
-Paused 2026-07-06 at the user's request. This file holds everything needed to resume
+Paused 2026-07-14 (second pause; resumed briefly same day). Target: resumable on
+the weekend of 2026-07-18, likely in a FRESH container.
+
+## ⚡ SECOND-PAUSE UPDATE (2026-07-14) — read this first, it supersedes details below
+
+**User's questions to answer in the final report:** (1) which MODEL did best
+(grade on experiment endpoints), (2) which BRANCH is best fitted to become main
+(judge current heads — fable moved on).
+
+**Branch heads:** opus `0e265bb` (unchanged), codex `845e8a6` (unchanged),
+fable endpoint `e4076ba` (= experiment endpoint for model grading), fable LATEST
+`533ddd6` (+30 commits: consolidation merges of sales-excellence PR#5 +
+autonomy/skills/cost PR#6; see
+`docs/superpowers/notes/2026-07-07-fable-branch-consolidation-plan.md` on that
+branch — trial-merge-based conflict playbook, honest notes).
+
+**NEW objective gate (fable latest 533ddd6):** tsc clean, **1453/1453 tests
+green (283 files)** on fresh DB `zeno_test_fable2` (needs `npx prisma generate`
+before tsc/tests — db push alone doesn't regenerate the client; then
+`db push` + `db seed`). Log tail: `analysis/gates/gates-fable-latest-tail.txt`.
+
+**Review-fleet results now COMPLETE except 12 adherence audits + verify pass.**
+All completed structured outputs are in `analysis/workflow/completed-results.json`
+(self-describing `label` field on each entry). Summary of what's in there:
+- QUALITY (0–10): opus arch 9 / tests 9; fable arch 9 / tests 9; codex arch 8.5 / tests 9
+- BUG HUNTS: fable score 7 (4 findings), opus 6 (7 findings), codex 6.5 (11 findings)
+  — findings are UNVERIFIED (the adversarial verify stage was cut short; only
+  a few VERDICT entries exist). Treat finding counts with caution until verified.
+- HEAD-TO-HEAD rankings: A1+A2 spine → [opus, fable, codex]; D2 coupled flip →
+  [fable, codex, opus]; C1+C2 engines → [fable, codex, opus]; F1+F5 verification
+  harness → [opus, fable, codex]
+- ADHERENCE (0–10): block A: opus 9.5, fable 9, codex 9 · block B: fable 9.5,
+  opus 8.5, codex 8 · blocks C/D/E/F: NOT RUN (12 remaining = the main resume work)
+- HYGIENE + 6 block RUBRICS: complete (rubrics for C/D/E/F are in the JSON —
+  reuse them verbatim in the adherence prompts instead of re-extracting).
+
+**Resume procedure (fresh container):**
+1. Rebuild env per "Environment rebuild" below (worktrees pinned: opus 0e265bb,
+   fable e4076ba, codex 845e8a6; DBs only needed if re-running tests — normally NOT).
+2. Do NOT re-run rubrics/quality/bugs/h2h/hygiene — load
+   `analysis/workflow/completed-results.json`.
+3. Run the 12 missing adherence audits (blocks C,D,E,F × 3 branches) using the
+   cached rubrics — the agent prompt template is in
+   `analysis/workflow/zeno-v3-branch-grading.js` (adherence stage).
+4. Adversarially verify the serious (critical/major) bug-hunt findings from the
+   JSON (refuter prompt template also in the script).
+5. Synthesize `analysis/REPORT.md`: per-model grades (adherence, architecture,
+   correctness, tests, hygiene, ops/bootstrap) + overall ranking + the
+   main-switch recommendation (weigh fable-latest 533ddd6's green 1453-test
+   consolidation vs opus/codex endpoints). Push; draft PR #4 already exists.
+
+---
+
+Original first-pause notes (2026-07-06) follow. This file holds everything needed to resume
 the analysis without redoing paid work. Task: compare and grade the three branches
 that each executed the same transformation plan (26 packages / 199 tasks, base
 commit `9a3d7255065371a043b392fc1bdbe186bfa93a33` = the plan commit on `main`).
