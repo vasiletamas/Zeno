@@ -30,12 +30,18 @@ function getStripeClient(): Stripe {
  */
 export function mapStripeEvent(event: Stripe.Event): WebhookEvent {
   const paymentIntent = event.data.object as Stripe.PaymentIntent
+  // P1-6: the captured amount (amount_received on success, else the intent
+  // amount) + currency, uppercased to match Zeno's stored currency codes.
+  const amountMinor = paymentIntent.amount_received ?? paymentIntent.amount ?? null
+  const currency = paymentIntent.currency ? paymentIntent.currency.toUpperCase() : null
   switch (event.type) {
     case 'payment_intent.succeeded':
       return {
         event: 'payment_succeeded',
         eventId: event.id,
         providerPaymentId: paymentIntent.id,
+        amountMinor,
+        currency,
         metadata: (paymentIntent.metadata ?? {}) as Record<string, unknown>,
       }
     case 'payment_intent.payment_failed':
@@ -43,6 +49,8 @@ export function mapStripeEvent(event: Stripe.Event): WebhookEvent {
         event: 'payment_failed',
         eventId: event.id,
         providerPaymentId: paymentIntent.id,
+        amountMinor,
+        currency,
         metadata: (paymentIntent.metadata ?? {}) as Record<string, unknown>,
       }
     default:

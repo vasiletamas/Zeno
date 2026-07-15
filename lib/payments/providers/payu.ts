@@ -245,6 +245,8 @@ export class PayUPaymentProvider implements PaymentProvider {
         orderId: string
         status: string
         extOrderId?: string
+        totalAmount?: string
+        currencyCode?: string
       }
     }
 
@@ -256,12 +258,17 @@ export class PayUPaymentProvider implements PaymentProvider {
     // PayU IPNs carry no event id — the (orderId, status) pair is the
     // stable identity feeding the inbox dedup key.
     const eventId = `${order.orderId}:${order.status}`
+    // P1-6: PayU reports the captured total in minor units as a string.
+    const amountMinor = order.totalAmount != null && order.totalAmount !== '' ? Number(order.totalAmount) : null
+    const currency = order.currencyCode ?? null
 
     if (order.status === 'COMPLETED') {
       return {
         event: 'payment_succeeded',
         eventId,
         providerPaymentId: order.orderId,
+        amountMinor,
+        currency,
         metadata: { extOrderId: order.extOrderId },
       }
     }
@@ -271,6 +278,8 @@ export class PayUPaymentProvider implements PaymentProvider {
         event: 'ignored',
         eventId,
         providerPaymentId: order.orderId,
+        amountMinor,
+        currency,
         metadata: { status: order.status, extOrderId: order.extOrderId },
       }
     }
@@ -279,6 +288,8 @@ export class PayUPaymentProvider implements PaymentProvider {
       event: 'payment_failed',
       eventId,
       providerPaymentId: order.orderId,
+      amountMinor,
+      currency,
       metadata: { status: order.status, extOrderId: order.extOrderId },
     }
   }

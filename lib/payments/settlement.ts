@@ -32,6 +32,11 @@ export interface SettlementEvent {
   event: 'payment_succeeded' | 'payment_failed'
   providerPaymentId: string
   failureReason?: string
+  // P1-6: the PROVIDER-reported captured amount (minor units) + currency,
+  // compared against what Zeno expected. Absent (null/undefined) when the
+  // provider event does not supply them (no cross-check possible then).
+  providerAmountMinor?: number | null
+  providerCurrency?: string | null
 }
 
 export interface SettlementResult {
@@ -50,7 +55,7 @@ type Db = typeof prisma | Prisma.TransactionClient
  * routes call it on signature failures (which never reach the inbox).
  */
 export async function recordPaymentAnomaly(
-  input: { anomaly: 'bad_signature' | 'amount_mismatch' | 'unmatched_payment'; ref: string; reason: string; refs?: Record<string, string> },
+  input: { anomaly: 'bad_signature' | 'amount_mismatch' | 'currency_mismatch' | 'unmatched_payment'; ref: string; reason: string; refs?: Record<string, string> },
   db: Db = prisma,
 ): Promise<void> {
   const anomalyKey = `${input.anomaly}:${input.ref}`
@@ -101,14 +106,34 @@ export async function settlePaymentEvent(e: SettlementEvent): Promise<Settlement
       return { disposition: 'unmatched' as const }
     }
 
-    // D2.ADD-1: the captured amount must match the installment it settles —
-    // drift is flagged (exactly once) but the settlement itself proceeds:
-    // the money moved; the operator reconciles.
+    // P1-6: validate the PROVIDER-reported captured amount + currency against
+    // what Zeno expected for this payment (a provider-side partial / wrong /
+    // foreign-currency capture is invisible if we only compare internal
+    // copies). Drift is flagged exactly once but settlement proceeds — the
+    // money moved; the operator reconciles.
+    if (e.providerAmountMinor != null && e.providerAmountMinor !== payment.amountMinor) {
+      await recordPaymentAnomaly({
+        anomaly: 'amount_mismatch',
+        ref: payment.id,
+        reason: `amount_mismatch: ${e.provider} reported captured ${e.providerAmountMinor} against expected ${payment.amountMinor} for payment ${payment.id}`,
+        refs: { paymentId: payment.id, customerId: payment.customerId },
+      }, tx)
+    }
+    if (e.providerCurrency != null && e.providerCurrency.toUpperCase() !== payment.currency.toUpperCase()) {
+      await recordPaymentAnomaly({
+        anomaly: 'currency_mismatch',
+        ref: payment.id,
+        reason: `currency_mismatch: ${e.provider} reported ${e.providerCurrency} against expected ${payment.currency} for payment ${payment.id}`,
+        refs: { paymentId: payment.id, customerId: payment.customerId },
+      }, tx)
+    }
+    // Belt: an internal drift between the Payment and its Installment is a DB
+    // integrity smell — kept as a secondary flag.
     if (payment.amountMinor !== payment.installment.amountMinor) {
       await recordPaymentAnomaly({
         anomaly: 'amount_mismatch',
         ref: payment.id,
-        reason: `amount_mismatch: payment ${payment.id} captured ${payment.amountMinor} against installment ${payment.installment.id} of ${payment.installment.amountMinor}`,
+        reason: `amount_mismatch: payment ${payment.id} amount ${payment.amountMinor} against installment ${payment.installment.id} of ${payment.installment.amountMinor}`,
         refs: { paymentId: payment.id, customerId: payment.customerId },
       }, tx)
     }

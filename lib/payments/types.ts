@@ -25,6 +25,11 @@ export interface WebhookEvent {
   event: 'payment_succeeded' | 'payment_failed' | 'ignored'
   eventId: string
   providerPaymentId: string
+  // P1-6: the PROVIDER-reported captured amount (minor units) + currency, so
+  // settlement can validate them against what Zeno expected instead of
+  // comparing two internal copies. Null when the event does not carry them.
+  amountMinor?: number | null
+  currency?: string | null
   metadata?: Record<string, unknown>
 }
 

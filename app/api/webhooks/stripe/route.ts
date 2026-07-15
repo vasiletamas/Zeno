@@ -73,6 +73,9 @@ export async function POST(request: Request) {
       event: webhookEvent.event,
       providerPaymentId: webhookEvent.providerPaymentId,
       failureReason: webhookEvent.metadata?.failureReason as string | undefined,
+      // P1-6: the provider-reported captured amount + currency
+      providerAmountMinor: webhookEvent.amountMinor ?? null,
+      providerCurrency: webhookEvent.currency ?? null,
     })
 
     if (result.disposition === 'unmatched') {

@@ -44,6 +44,22 @@ describe('Stripe event mapping (D2.7)', () => {
     expect(mapStripeEvent({ id: 'evt_1', type: 'payment_intent.succeeded', data: { object: { id: 'pi_1', metadata: {} } } } as never))
       .toMatchObject({ event: 'payment_succeeded', eventId: 'evt_1', providerPaymentId: 'pi_1' })
   })
+  // P1-6: the provider-reported captured amount + currency must survive mapping
+  it('payment_intent.succeeded extracts the captured amount_received and currency', () => {
+    expect(mapStripeEvent({ id: 'evt_2', type: 'payment_intent.succeeded', data: { object: { id: 'pi_2', metadata: {}, amount: 19000, amount_received: 19000, currency: 'ron' } } } as never))
+      .toMatchObject({ event: 'payment_succeeded', providerPaymentId: 'pi_2', amountMinor: 19000, currency: 'RON' })
+  })
+})
+
+describe('PayU webhook amount (P1-6)', () => {
+  const provider = new PayUPaymentProvider()
+  beforeAll(() => { process.env.PAYU_MERCHANT_ID = 'm'; process.env.PAYU_SECRET_KEY = 'sk' })
+  it('a COMPLETED IPN carries the order totalAmount + currencyCode', async () => {
+    const payload = JSON.stringify({ order: { orderId: 'o9', status: 'COMPLETED', totalAmount: '19000', currencyCode: 'RON' } })
+    const good = crypto.createHmac('md5', 'sk').update(payload).digest('hex')
+    const evt = await provider.handleWebhook(payload, `signature=${good};algorithm=MD5`)
+    expect(evt).toMatchObject({ event: 'payment_succeeded', providerPaymentId: 'o9', amountMinor: 19000, currency: 'RON' })
+  })
 })
 
 describe('Mock provider ids (D2.7, erratum 9)', () => {
