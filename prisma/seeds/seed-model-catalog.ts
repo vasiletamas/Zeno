@@ -16,7 +16,7 @@ interface ModelDef {
   costPer1kOutputTokens: number
 }
 
-const MODELS: ModelDef[] = [
+export const MODELS: ModelDef[] = [
   {
     provider: 'OPENAI',
     modelId: 'gpt-5.4',
@@ -38,6 +38,33 @@ const MODELS: ModelDef[] = [
     supportsStructuredOutput: true,
     costPer1kInputTokens: 0.0004,
     costPer1kOutputTokens: 0.0016,
+  },
+  {
+    // PLACEHOLDER pricing — replace with real rates (gpt-5.6-sol pricing was
+    // unpublished as of 2026-07-15; values copied from gpt-5.4 so turn costs
+    // stay order-of-magnitude sane rather than zero).
+    provider: 'OPENAI',
+    modelId: 'gpt-5.6-sol',
+    displayName: 'GPT-5.6 Sol',
+    contextWindow: 128_000,
+    supportsStreaming: true,
+    supportsTools: true,
+    supportsStructuredOutput: true,
+    costPer1kInputTokens: 0.003,
+    costPer1kOutputTokens: 0.015,
+  },
+  {
+    // PLACEHOLDER pricing — copied from claude-sonnet-4-6; this is main-chat's
+    // seeded fallbackModel and previously had no catalog row at all.
+    provider: 'ANTHROPIC',
+    modelId: 'claude-sonnet-5',
+    displayName: 'Claude Sonnet 5',
+    contextWindow: 200_000,
+    supportsStreaming: true,
+    supportsTools: true,
+    supportsStructuredOutput: true,
+    costPer1kInputTokens: 0.003,
+    costPer1kOutputTokens: 0.015,
   },
   {
     provider: 'ANTHROPIC',
