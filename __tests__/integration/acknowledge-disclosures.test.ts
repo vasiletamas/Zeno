@@ -21,12 +21,15 @@ describe('acknowledge_disclosures commit (D2.3, T7.D2)', () => {
     expect(rows.every((r) => r.sourceCommitId !== null)).toBe(true)
   })
 
-  it('a second identical call replays the envelope without duplicate rows', async () => {
+  it('a second identical call is an idempotent no-op (state-guarded, not a stored replay — P1-4)', async () => {
     const fx = await buildIssuedQuote()
     const first = await ack(fx)
     const second = await ack(fx)
+    expect(first.outcome).toBe('applied')
     expect(second.outcome).toBe('applied')
-    expect(second.data).toEqual(first.data)
+    // REPLAY_EXEMPT: duplicates are answered by re-running the idempotent
+    // handler (missing-docs computation + @@unique belt), so no duplicate rows
+    // — a version bump between calls would now be acknowledged, not replayed.
     expect(await prisma.disclosureAck.count()).toBe(2)
   })
 

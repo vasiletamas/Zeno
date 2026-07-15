@@ -45,7 +45,7 @@ export interface CommitRequest {
  * material hash: a same-value resubmit replays, a new value is a fresh commit.
  * Every other commit replays only on identical material args.
  */
-const ONE_SHOT = new Set(['sign_dnt', 'accept_quote', 'set_application'])
+const ONE_SHOT = new Set(['sign_dnt', 'accept_quote'])
 
 /**
  * State-guarded commits (B2.5): duplicates are answered by the ENGINE with a
@@ -73,6 +73,18 @@ const REPLAY_EXEMPT = new Set([
   // replayed 'started' envelope would hand back a dead clientSecret and
   // break retry-after-failure.
   'ensure_payment_session',
+  // P1-4: the replay id 'application:none' is constant across re-opens — a
+  // cancel_application/cancel_quote nulls the pointer, so an identical
+  // set_application would REPLAY the first app's applied envelope and create
+  // nothing (the 40x set_application loop, 2026-07-09). Legality state-guards
+  // it: application_already_open while one is open, a fresh create when none.
+  'set_application',
+  // P1-4: zero material args + a per-quote targetRef makes the hash constant,
+  // so a disclosure version published after the first ack would REPLAY the
+  // stale envelope while accept_quote stays blocked on requires_disclosures.
+  // The handler is idempotent (acks only still-missing docs + a @@unique belt),
+  // so duplicates are answered by re-running it, never by a stored replay.
+  'acknowledge_disclosures',
 ])
 
 /**
@@ -87,10 +99,13 @@ export function resolveTargetRef(tool: string, args: Record<string, unknown>, st
   // repeatable commits — addressed entity from ARGS (erratum 4)
   if (tool === 'collect_customer_field') return `field:${String(args.field ?? 'unknown')}`
   if (tool === 'write_dnt_answer') return `dnt_answer:${String(args.questionCode ?? 'unknown')}`
-  // C1.9: the addressed entity is the question CODE (like write_dnt_answer) —
-  // without it, a same-value answer to a DIFFERENT question would replay.
-  if (tool === 'write_question_answer') return `app_answer:${String(args.questionCode ?? 'auto')}`
-  if (tool === 'modify_answer') return `app_answer:${String(args.questionCode ?? 'unknown')}`
+  // C1.9 + P1-4: the addressed entity is (application INSTANCE, question
+  // CODE). Without the application id, a same-value answer to the same
+  // question in a LATER application (same conversation, after cancel+reapply)
+  // would hash identically and replay the first application's stale envelope,
+  // skipping the new write.
+  if (tool === 'write_question_answer') return `app_answer:${state.application?.id ?? 'none'}:${String(args.questionCode ?? 'auto')}`
+  if (tool === 'modify_answer') return `app_answer:${state.application?.id ?? 'none'}:${String(args.questionCode ?? 'unknown')}`
   if (tool === 'withdraw_consent') return `consent:${String(args.kind ?? 'unknown')}`
   // D4.2: policy-scoped operator commits key on the policy from ARGS
   if (OPERATOR_TOOLS.has(tool) && typeof args.policyId === 'string') return `policy:${args.policyId}`
