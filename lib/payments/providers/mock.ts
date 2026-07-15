@@ -46,6 +46,11 @@ export class MockPaymentProvider implements PaymentProvider {
     }
   }
 
+  async retrievePaymentIntent(_providerPaymentId: string): Promise<{ clientSecret: string | null; redirectUrl: string | null; usable: boolean }> {
+    // mock intents never expire — always resumable with the same secret
+    return { clientSecret: 'mock_secret', redirectUrl: null, usable: true }
+  }
+
   async cancelPaymentIntent(_providerPaymentId: string): Promise<void> {
     // mock intents hold no provider state — cancellation is a no-op
   }

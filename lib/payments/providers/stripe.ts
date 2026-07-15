@@ -115,6 +115,14 @@ export class StripePaymentProvider implements PaymentProvider {
     }
   }
 
+  async retrievePaymentIntent(providerPaymentId: string): Promise<{ clientSecret: string | null; redirectUrl: string | null; usable: boolean }> {
+    const pi = await this.stripe.paymentIntents.retrieve(providerPaymentId)
+    // usable while the customer can still complete it; terminal states demand
+    // a fresh intent (P1-5).
+    const usable = ['requires_payment_method', 'requires_confirmation', 'requires_action', 'processing'].includes(pi.status)
+    return { clientSecret: pi.client_secret ?? null, redirectUrl: null, usable }
+  }
+
   async cancelPaymentIntent(providerPaymentId: string): Promise<void> {
     await this.stripe.paymentIntents.cancel(providerPaymentId)
   }

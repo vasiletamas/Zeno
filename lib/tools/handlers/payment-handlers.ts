@@ -113,19 +113,41 @@ export const ensurePaymentSession: ToolHandler = async (
     const provider = getPaymentProvider()
 
     if (pos.openAttempt && !pos.openAttemptStale) {
-      // the canonical open session — resumed, no new capturable intent
-      return {
-        success: true,
-        data: { mode: 'resumed', paymentId: pos.openAttempt.id, amountMinor: pos.nextDue.amountMinor, installmentSequence: pos.nextDue.sequence, totalInstallments: schedule.totalInstallments },
-        message: `Resuming the open payment session for installment ${pos.nextDue.sequence}/${schedule.totalInstallments}.`,
-        uiAction: {
-          type: 'show_payment',
-          payload: { clientSecret: null, redirectUrl: null, amount: pos.nextDue.amountMinor / 100, currency: schedule.currency, providerName: provider.name, paymentId: pos.openAttempt.id, mode: 'resumed' },
-        },
+      // the canonical open session — resume it with a USABLE credential
+      // (P1-5). Re-fetch a live credential from the provider; fall back to the
+      // credential persisted at create time (PayU cannot re-issue its hosted
+      // page URL). A terminally-unusable intent is superseded below.
+      const openRow = await context.db.payment.findUnique({ where: { id: pos.openAttempt.id } })
+      const persisted = (openRow?.metadata ?? {}) as { clientSecret?: string | null; redirectUrl?: string | null }
+      const live = pos.openAttempt.providerPaymentId
+        ? await provider.retrievePaymentIntent(pos.openAttempt.providerPaymentId).catch(() => null)
+        : null
+      const usable = live ? live.usable : true // no-retrieve providers → assume usable
+      const clientSecret = live?.clientSecret ?? persisted.clientSecret ?? null
+      const redirectUrl = live?.redirectUrl ?? persisted.redirectUrl ?? null
+      const hasCredential = provider.name === 'payu' ? redirectUrl !== null : clientSecret !== null
+      if (usable && hasCredential) {
+        return {
+          success: true,
+          data: { mode: 'resumed', paymentId: pos.openAttempt.id, amountMinor: pos.nextDue.amountMinor, installmentSequence: pos.nextDue.sequence, totalInstallments: schedule.totalInstallments },
+          message: `Resuming the open payment session for installment ${pos.nextDue.sequence}/${schedule.totalInstallments}.`,
+          uiAction: {
+            type: 'show_payment',
+            payload: { clientSecret, redirectUrl, amount: pos.nextDue.amountMinor / 100, currency: schedule.currency, providerName: provider.name, paymentId: pos.openAttempt.id, mode: 'resumed' },
+          },
+        }
+      }
+      // unusable or no recoverable credential → supersede and mint a fresh one
+      if (pos.openAttempt.providerPaymentId) {
+        await provider.cancelPaymentIntent(pos.openAttempt.providerPaymentId).catch(() => {})
+        await context.db.payment.updateMany({
+          where: { providerPaymentId: pos.openAttempt.providerPaymentId, status: 'PENDING' },
+          data: { status: 'SUPERSEDED' },
+        })
       }
     }
 
-    if (pos.openAttempt && pos.openAttempt.providerPaymentId) {
+    if (pos.openAttempt && pos.openAttemptStale && pos.openAttempt.providerPaymentId) {
       // stale: supersede — cancel at the provider, mark SUPERSEDED
       await provider.cancelPaymentIntent(pos.openAttempt.providerPaymentId)
       await context.db.payment.updateMany({
@@ -154,6 +176,9 @@ export const ensurePaymentSession: ToolHandler = async (
           provider: provider.name.toUpperCase() as 'STRIPE' | 'PAYU' | 'MOCK',
           providerPaymentId: intent.providerPaymentId,
           status: 'PENDING',
+          // P1-5: persist the create-time credential so a RESUME can re-supply
+          // it (PayU's hosted-page URL cannot be re-fetched from the provider).
+          metadata: { clientSecret: intent.clientSecret ?? null, redirectUrl: intent.redirectUrl ?? null },
         },
       })
       const mode = pos.recoveryMode === 'resumed' ? 'started' : pos.recoveryMode
@@ -181,7 +206,12 @@ export const ensurePaymentSession: ToolHandler = async (
       context: { conversationId: context.conversationId, customerId: context.customerId },
       error,
     })
-    return { success: false, error: `Failed to ensure payment session: ${message}` }
+    // keepWrites (P0-2 audit): a stale/unusable attempt already cancelled at
+    // the provider was marked SUPERSEDED before this failure — that mark must
+    // survive the rollback so the DB matches the provider (no orphan PENDING
+    // pointing at a cancelled intent). The failed fresh create compensates its
+    // own new intent, so nothing capturable leaks.
+    return { success: false, error: `Failed to ensure payment session: ${message}`, keepWrites: true }
   }
 }
 
@@ -215,13 +245,13 @@ export const changePaymentOption: ToolHandler = async (args, context) => {
       return { success: false, error: `invalid_args: the payment plan already uses the ${paymentOption} frequency.` }
     }
 
-    // supersede any open intent — capturable sessions never survive a re-rate
+    // P0-2 audit: do the DB writes FIRST, then the irreversible provider
+    // cancel LAST. If any DB write fails the whole apply tx rolls back with the
+    // provider intent still live (consistent — the re-rate simply didn't
+    // happen); the old order cancelled the intent before the writes, so a
+    // rollback left the DB pointing at a cancelled intent.
     const provider = getPaymentProvider()
     const openAttempt = schedule.installments.flatMap((i) => i.payments).find((p) => p.status === 'PENDING')
-    if (openAttempt?.providerPaymentId) {
-      await provider.cancelPaymentIntent(openAttempt.providerPaymentId)
-      await context.db.payment.updateMany({ where: { providerPaymentId: openAttempt.providerPaymentId, status: 'PENDING' }, data: { status: 'SUPERSEDED' } })
-    }
 
     const rows = buildSchedule({ premiumAnnual: quote.premiumAnnual, frequency: paymentOption, startAt: new Date() })
     const newSchedule = await context.db.paymentSchedule.create({
@@ -239,6 +269,13 @@ export const changePaymentOption: ToolHandler = async (args, context) => {
       where: { id: schedule.id },
       data: { status: 'SUPERSEDED', supersededById: newSchedule.id },
     })
+
+    // capturable sessions never survive a re-rate — supersede the old attempt
+    // in the DB, then cancel it at the provider (last, irreversible).
+    if (openAttempt?.providerPaymentId) {
+      await context.db.payment.updateMany({ where: { providerPaymentId: openAttempt.providerPaymentId, status: 'PENDING' }, data: { status: 'SUPERSEDED' } })
+      await provider.cancelPaymentIntent(openAttempt.providerPaymentId)
+    }
 
     const oldTotalMinor = schedule.installments.reduce((t, i) => t + i.amountMinor, 0)
     const newTotalMinor = newSchedule.installments.reduce((t, i) => t + i.amountMinor, 0)

@@ -172,6 +172,15 @@ export class PayUPaymentProvider implements PaymentProvider {
     }
   }
 
+  async retrievePaymentIntent(providerPaymentId: string): Promise<{ clientSecret: string | null; redirectUrl: string | null; usable: boolean }> {
+    // PayU cannot re-issue the hosted-page redirect URL after order creation —
+    // the caller falls back to the persisted create-time redirectUrl. Here we
+    // only report whether the order is still open (usable) so a terminal one is
+    // superseded (P1-5).
+    const status = await this.getPaymentStatus(providerPaymentId)
+    return { clientSecret: null, redirectUrl: null, usable: status.status === 'pending' }
+  }
+
   async cancelPaymentIntent(providerPaymentId: string): Promise<void> {
     const { merchantId, secretKey } = getPayUConfig()
     const accessToken = await getAccessToken(merchantId, secretKey)

@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { t, type Language } from '@/lib/i18n/translations'
+import { resolvePaymentCardState } from '@/lib/payments/card-state'
 
 /* ── Stripe imports (loaded dynamically) ─────────────── */
 
@@ -252,13 +253,17 @@ export function PaymentCard({
   // the engine emits codes only; localization lives here.
   const modeLabel = t(`payment_mode_${mode}`, language)
 
+  // P1-5: one pure decision — never mount Stripe <Elements> with a null
+  // clientSecret, nor leave a dead disabled PayU button.
+  const cardState = resolvePaymentCardState({ isAnswered, providerName, clientSecret, redirectUrl: redirectUrl ?? null })
+
   const formattedAmount = amount.toLocaleString('ro-RO', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   })
 
   // ─── Answered state (read-only) ────────────────────────
-  if (isAnswered) {
+  if (cardState.kind === 'answered') {
     return (
       <div
         className="rounded-xl p-6 border"
@@ -320,8 +325,23 @@ export function PaymentCard({
     </div>
   )
 
+  // ─── Unavailable: no usable provider credential (P1-5) ──
+  if (cardState.kind === 'unavailable') {
+    return (
+      <div
+        className="rounded-xl p-6 border"
+        style={{ borderColor: BORDER, backgroundColor: '#FFFFFF' }}
+      >
+        <AmountSummary />
+        <p className="text-[14px]" style={{ color: ERROR_COLOR }} role="alert">
+          {c.errorGeneric}
+        </p>
+      </div>
+    )
+  }
+
   // ─── Stripe mode ───────────────────────────────────────
-  if (providerName === 'stripe') {
+  if (cardState.kind === 'stripe_form') {
     return (
       <div
         className="rounded-xl p-6 border"
@@ -332,7 +352,7 @@ export function PaymentCard({
         <Elements
           stripe={getStripePromise()}
           options={{
-            clientSecret,
+            clientSecret: cardState.clientSecret,
             appearance: zenoAppearance,
           }}
         >
@@ -352,11 +372,10 @@ export function PaymentCard({
   }
 
   // ─── PayU mode ─────────────────────────────────────────
-  if (providerName === 'payu') {
+  if (cardState.kind === 'payu_redirect') {
+    const payuRedirectUrl = cardState.redirectUrl
     const handlePayURedirect = () => {
-      if (redirectUrl) {
-        window.location.href = redirectUrl
-      }
+      window.location.href = payuRedirectUrl
     }
 
     return (
@@ -368,7 +387,6 @@ export function PaymentCard({
 
         <button
           onClick={handlePayURedirect}
-          disabled={!redirectUrl}
           className="w-full py-3 px-6 rounded-lg font-medium text-[16px] border transition-opacity disabled:opacity-50"
           style={{
             backgroundColor: 'transparent',
