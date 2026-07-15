@@ -22,7 +22,7 @@ import { TimeoutError, CircuitOpenError } from '@/lib/errors/types'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { deriveAndExpose } from '@/lib/engines/derive-and-expose'
 import { REASON_CODES, type CommitActor, type CommitEffect, type CommitResult, type DerivedStateV3, type ReasonCode } from '@/lib/engines/domain-types'
-import type { ToolContext, ToolResult } from './types'
+import type { ToolContext, ToolHandler, ToolResult } from './types'
 
 type Db = typeof prisma | Prisma.TransactionClient
 
@@ -218,6 +218,26 @@ async function ledgeredReject(db: Db, req: CommitRequest, targetRef: string, arg
   return writeLedger(db, req, targetRef, argsHash, { outcome: 'rejected', reason, effects: [] }, phase, phase)
 }
 
+/**
+ * P0-2 (2026-07-15 hardening, Opus rollback pattern): thrown inside the apply
+ * tx when the handler fails, so Postgres discards any partial handler writes.
+ * Writing the rejected envelope inside the tx and returning normally would
+ * COMMIT those partial writes alongside the rejection row. The outer catch
+ * ledgers the reject in a SEPARATE transaction — exactly one row, after the
+ * rollback. TimeoutError/CircuitOpenError are never wrapped: they keep
+ * flowing to toUnavailable (no ledger row, retryable). Handlers whose failing
+ * writes are deliberate audit facts opt out via ToolResult.keepWrites.
+ */
+class HandlerRejection extends Error {
+  constructor(
+    public readonly envelope: CommitResult,
+    public readonly phaseFrom: string,
+  ) {
+    super(`commit handler rejected: ${envelope.reason}`)
+    this.name = 'HandlerRejection'
+  }
+}
+
 export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
   const def = getToolDefinition(req.tool)
   const handler = getToolHandler(req.tool)
@@ -301,6 +321,20 @@ export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
 
 async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boolean, targetRef: string, argsHash: string, validatedArgs: Record<string, unknown>, confirmed: boolean): Promise<CommitResult> {
   const handler = getToolHandler(req.tool)!
+  try {
+    return await runApplyTransactionInner(req, requiresConfirmation, targetRef, argsHash, validatedArgs, confirmed, handler)
+  } catch (err) {
+    // P0-2: the apply tx rolled back (partial handler writes discarded);
+    // the rejection is ledgered in its OWN transaction so the audit row
+    // survives the rollback — exactly one fresh 'rejected' row per attempt.
+    if (err instanceof HandlerRejection) {
+      return writeLedger(prisma, req, targetRef, argsHash, err.envelope, err.phaseFrom, err.phaseFrom)
+    }
+    throw err
+  }
+}
+
+async function runApplyTransactionInner(req: CommitRequest, requiresConfirmation: boolean, targetRef: string, argsHash: string, validatedArgs: Record<string, unknown>, confirmed: boolean, handler: ToolHandler): Promise<CommitResult> {
   return prisma.$transaction(async (tx) => {
     // ::text cast because pg_advisory_xact_lock returns void, which the
     // client cannot deserialize.
@@ -327,7 +361,19 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
     // C1.5: the ledger row id is minted BEFORE the handler runs so answer
     // revisions written through the consequence applier reference it.
     const commitId = crypto.randomUUID()
-    const handlerResult: ToolResult = await handler(effectiveArgs, { ...req.toolContext, db: tx, confirmed, commitId })
+    let handlerResult: ToolResult
+    try {
+      handlerResult = await handler(effectiveArgs, { ...req.toolContext, db: tx, confirmed, commitId })
+    } catch (err) {
+      // A2.7 boundary: infrastructure failures keep flowing to toUnavailable
+      // (tx rolls back, NO ledger row, retryable). Any other throw is a
+      // handler failure — roll back and ledger the reject outside (P0-2).
+      if (err instanceof TimeoutError || err instanceof CircuitOpenError) throw err
+      throw new HandlerRejection(
+        { outcome: 'rejected', reason: 'handler_rejected', effects: [], data: { error: err instanceof Error ? err.message : String(err) } },
+        lockedPre.state.phase,
+      )
+    }
     // C1.5 conditional confirmation: the handler's consequence plan demands
     // a confirm round-trip and no verified token arrived — mint one against
     // the locked pre-state; the plan preview is what the customer approves.
@@ -347,6 +393,26 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
       }
       return writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, lockedPre.state.phase)
     }
+    if (!handlerResult.success) {
+      // Handlers may speak reason codes: an error message prefixed
+      // '<reason_code>: ...' maps to that code (and its outcome class) instead
+      // of the generic handler_rejected (B2.6 — e.g. requires_consent,
+      // dnt_session_incomplete).
+      const errPrefix = typeof handlerResult.error === 'string' ? handlerResult.error.split(':')[0].trim() : ''
+      const spokenReason = (REASON_CODES as readonly string[]).includes(errPrefix) ? (errPrefix as ReasonCode) : null
+      const handlerNeeds = Array.isArray((handlerResult.data as { needs?: unknown } | undefined)?.needs)
+        ? ((handlerResult.data as { needs: string[] }).needs)
+        : undefined
+      const envelope: CommitResult = { outcome: spokenReason ? outcomeForBlocked(spokenReason) : 'rejected', reason: spokenReason ?? 'handler_rejected', effects: [], needs: handlerNeeds, data: { ...handlerResult.data, error: handlerResult.error } }
+      // T7.D4 escape: deliberate audit writes (generate_quote's quoteDecision)
+      // commit together with the rejection row — the handler opted in.
+      if (handlerResult.keepWrites) {
+        return writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, lockedPre.state.phase)
+      }
+      // P0-2: everything the handler wrote is discarded with the tx; the
+      // outer catch ledgers this envelope in its own transaction.
+      throw new HandlerRejection(envelope, lockedPre.state.phase)
+    }
     let post: ReturnType<typeof deriveAndExpose>
     try {
       post = deriveAndExpose(await loadDomainSnapshot(req.conversationId, tx))
@@ -360,27 +426,16 @@ async function runApplyTransaction(req: CommitRequest, requiresConfirmation: boo
     }
     // handler-declared domain effects (B4) merge with the gateway's own
     // advance_phase delta; C1's planner supersedes handler declarations.
-    const effects: CommitEffect[] = handlerResult.success ? [...(handlerResult.effects ?? [])] : []
+    const effects: CommitEffect[] = [...(handlerResult.effects ?? [])]
     let phaseDelta: CommitResult['phaseDelta']
     if (lockedPre.state.phase !== post.state.phase || lockedPre.state.subphase !== post.state.subphase) {
       effects.push('advance_phase')
       phaseDelta = { from: lockedPre.state.phase, to: post.state.phase }
     }
-    // Handlers may speak reason codes: an error message prefixed
-    // '<reason_code>: ...' maps to that code (and its outcome class) instead
-    // of the generic handler_rejected (B2.6 — e.g. requires_consent,
-    // dnt_session_incomplete).
-    const errPrefix = typeof handlerResult.error === 'string' ? handlerResult.error.split(':')[0].trim() : ''
-    const spokenReason = (REASON_CODES as readonly string[]).includes(errPrefix) ? (errPrefix as ReasonCode) : null
     // D1.4: a referral is an APPLIED state change with its own outcome word
-    const handlerNeeds = Array.isArray((handlerResult.data as { needs?: unknown } | undefined)?.needs)
-      ? ((handlerResult.data as { needs: string[] }).needs)
-      : undefined
-    const envelope: CommitResult = handlerResult.success
-      ? handlerResult.referred
-        ? { outcome: 'referred', reason: handlerResult.referred.reason as ReasonCode, effects, phaseDelta, data: { ...handlerResult.data, _message: handlerResult.message } }
-        : { outcome: 'applied', effects, phaseDelta, data: { ...handlerResult.data, _uiAction: handlerResult.uiAction, _confirmation: handlerResult.confirmation, _message: handlerResult.message } }
-      : { outcome: spokenReason ? outcomeForBlocked(spokenReason) : 'rejected', reason: spokenReason ?? 'handler_rejected', effects: [], needs: handlerNeeds, data: { ...handlerResult.data, error: handlerResult.error } }
-    return writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, post.state.phase, handlerResult.success ? commitId : undefined)
+    const envelope: CommitResult = handlerResult.referred
+      ? { outcome: 'referred', reason: handlerResult.referred.reason as ReasonCode, effects, phaseDelta, data: { ...handlerResult.data, _message: handlerResult.message } }
+      : { outcome: 'applied', effects, phaseDelta, data: { ...handlerResult.data, _uiAction: handlerResult.uiAction, _confirmation: handlerResult.confirmation, _message: handlerResult.message } }
+    return writeLedger(tx, req, targetRef, argsHash, envelope, lockedPre.state.phase, post.state.phase, commitId)
   })
 }

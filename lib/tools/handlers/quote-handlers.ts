@@ -79,13 +79,14 @@ export const generateQuote: ToolHandler = async (_args, context) => {
     const decided = JSON.parse(JSON.stringify({ ...decision, decidedAt: new Date().toISOString() }))
 
     if (decision.outcome === 'requires_identity') {
-      // T7.D4: the decision is an audit fact even when it demands data
+      // T7.D4: the decision is an audit fact even when it demands data —
+      // keepWrites exempts it from the P0-2 rollback-on-rejection.
       await context.db.application.update({ where: { id: application.id }, data: { quoteDecision: decided } })
-      return { success: false, error: 'requires_identity: the quote needs identity facts first.', data: { needs: decision.needs } }
+      return { success: false, error: 'requires_identity: the quote needs identity facts first.', data: { needs: decision.needs }, keepWrites: true }
     }
     if (decision.outcome === 'rejected') {
       await context.db.application.update({ where: { id: application.id }, data: { quoteDecision: decided } })
-      return { success: false, error: `${decision.reason}: the quote decision rejected the application.` }
+      return { success: false, error: `${decision.reason}: the quote decision rejected the application.`, keepWrites: true }
     }
     if (decision.outcome === 'referred') {
       // REFERRED + WorkItem in this same gateway transaction (E2 contract)

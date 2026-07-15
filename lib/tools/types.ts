@@ -122,6 +122,14 @@ export interface ToolResult {
    * with this reason instead of 'applied'.
    */
   referred?: { reason: string }
+  /**
+   * P0-2 escape hatch (T7.D4): a FAILING handler whose writes are deliberate
+   * audit facts (generate_quote's quoteDecision) sets this so the gateway
+   * commits them alongside the rejected ledger row. Without it, every
+   * {success:false} rolls the whole apply transaction back — a failed commit
+   * leaves no partial state.
+   */
+  keepWrites?: boolean
 }
 
 export interface ToolContext {
