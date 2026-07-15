@@ -77,6 +77,7 @@ export const translations: Record<Language, TranslationTable> = {
       medical_declarations_incomplete: 'Mai sunt întrebări medicale fără răspuns — declarația se semnează după ce toate au fost completate.',
       already_escalated: 'Un coleg a fost deja anunțat pentru această conversație — va prelua discuția cu întregul context.',
       value_not_grounded: 'Răspunsul trebuie să vină de la tine — te rugăm să răspunzi la întrebare sau să confirmi valoarea propusă.',
+      customer_intent_required: 'Oferta rămâne valabilă — o poți anula doar dacă ne spui explicit că vrei alta sau că renunți.',
     },
     // Hero section
     hero_headline: 'Dacă mâine primești un diagnostic grav, ai fi pregătit?',
@@ -240,6 +241,7 @@ export const translations: Record<Language, TranslationTable> = {
       medical_declarations_incomplete: 'Some medical questions are still unanswered — the declaration is signed once they are all complete.',
       already_escalated: 'A colleague has already been notified for this conversation — they will take over with full context.',
       value_not_grounded: 'The answer has to come from you — please answer the question or confirm the proposed value.',
+      customer_intent_required: 'Your quote still stands — it can only be cancelled if you tell us you want a different one or wish to drop it.',
     },
     // Hero section
     hero_headline:

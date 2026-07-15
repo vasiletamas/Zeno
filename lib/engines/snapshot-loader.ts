@@ -134,6 +134,11 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   // live (non-CANCELLED) application slice
   const issued = appState && application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'ISSUED' }, orderBy: { createdAt: 'desc' } }) : null
   const accepted = appState && application ? await db.quote.findFirst({ where: { applicationId: application.id, status: 'ACCEPTED' } }) : null
+  // P2-8: did the customer speak after the quote was issued? cancel_quote is
+  // gated on this so the model cannot self-cancel a fresh quote and loop.
+  const customerMessagedSinceQuote = issued
+    ? (await db.message.count({ where: { conversationId, role: 'user', createdAt: { gt: issued.createdAt } } })) > 0
+    : false
   // D4.4 (T9.D6): the policy is CUSTOMER-scoped — it survives the sale
   // conversation, so a returning customer's fresh conversation derives the
   // POLICY phase and its post-sale surface.
@@ -265,6 +270,7 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     pendingConfirmationTools,
     // T7.D5: expiry via the ONE pure predicate — never an inline comparison
     quote: issued ? { id: issued.id, status: issued.status, premiumAnnual: issued.premiumAnnual, validUntil: issued.validUntil.toISOString(), expired: isExpired({ status: issued.status as QuoteStatusV3, validUntil: issued.validUntil }, new Date()), disclosuresRequired: quoteDisclosuresRequired, createdAt: issued.createdAt.toISOString() } : null,
+    customerMessagedSinceQuote,
     acceptedQuote: accepted ? { id: accepted.id, acceptedAt: accepted.updatedAt.toISOString() } : null,
     schedule: scheduleSlice,
     policy: policy ? { id: policy.id, status: policy.status, freeLookEndsAt: policy.freeLookEndsAt?.toISOString() ?? null, createdAt: policy.createdAt.toISOString() } : null,

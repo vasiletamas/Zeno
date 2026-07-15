@@ -14,6 +14,9 @@ describe('cancel_quote commit (D1.5)', () => {
 
   it('first call returns requires_confirmation with a token; confirmed call CAS-cancels and re-opens the recovery path', async () => {
     const fx = await buildIssuedQuote()
+    // P2-8: cancel needs explicit customer intent after the quote was issued
+    const q = await prisma.quote.findUniqueOrThrow({ where: { id: fx.quoteId } })
+    await prisma.message.create({ data: { conversationId: fx.conversationId, role: 'user', content: 'please cancel this quote', createdAt: new Date(q.createdAt.getTime() + 1000) } })
     const first = await cq(fx)
     expect(first.outcome).toBe('requires_confirmation')
     expect(first.confirmToken).toBeTruthy()
