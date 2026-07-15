@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
+import { consumeSSE } from '@/lib/chat/sse-consumer'
 
 // ==============================================
 // TYPES
@@ -37,42 +38,25 @@ export interface UseChatReturn {
 }
 
 // ==============================================
-// SSE PARSER
+// TURN IDENTITY
 // ==============================================
 
-interface ParsedSSEEvent {
-  event: string
-  data: string
+// Two turns started in the same millisecond (double-Enter, a card click
+// racing a send) must never share a message id: the id is how each
+// invocation's closures address ONLY their own bubble.
+let turnSeq = 0
+
+export function nextTurnMessageId(role: 'user' | 'assistant'): string {
+  turnSeq += 1
+  return `${role}_${Date.now()}_${turnSeq}`
 }
 
-function parseSSEEvents(text: string): ParsedSSEEvent[] {
-  const events: ParsedSSEEvent[] = []
-
-  // Split on double newlines to get event blocks
-  const blocks = text.split('\n\n')
-
-  for (const block of blocks) {
-    const trimmed = block.trim()
-    if (!trimmed) continue
-
-    let event = 'message'
-    const dataLines: string[] = []
-
-    const lines = trimmed.split('\n')
-    for (const line of lines) {
-      if (line.startsWith('event:')) {
-        event = line.slice(6).trim()
-      } else if (line.startsWith('data:')) {
-        dataLines.push(line.slice(5).trim())
-      }
-    }
-
-    if (dataLines.length > 0) {
-      events.push({ event, data: dataLines.join('\n') })
-    }
-  }
-
-  return events
+// The in-flight turn, compared by reference: an aborted turn must never
+// release (or tear down) a successor's claim. `kind` lets an action click
+// take over a MESSAGE stream deliberately while a second click during an
+// action turn is treated as a double-click and dropped.
+interface InFlightTurn {
+  kind: 'message' | 'action'
 }
 
 // ==============================================
@@ -99,8 +83,10 @@ export function useChat(
   const [uiActions, setUiActions] = useState<Map<string, { type: string; payload: Record<string, unknown> }>>(new Map())
   const [answeredMessageIds, setAnsweredMessageIds] = useState<Set<string>>(new Set())
 
-  // Use ref to track the current streaming assistant message id
-  const streamingMessageIdRef = useRef<string | null>(null)
+  // Synchronous concurrency guard: checked-and-set before any await. React's
+  // isStreaming STATE is stale within the same tick and must only drive UI
+  // (input disabling), never gate overlapping turns.
+  const inFlightRef = useRef<InFlightTurn | null>(null)
 
   // Abort controller for cancelling requests
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -119,7 +105,13 @@ export function useChat(
 
   const sendMessage = useCallback(
     async (text: string) => {
-      if (isStreaming) return
+      if (inFlightRef.current) return
+      const turn: InFlightTurn = { kind: 'message' }
+      inFlightRef.current = turn
+      // Only the turn that still owns the flight may touch shared state
+      // (isStreaming, toolStatus, error, suggestions); a superseded turn is
+      // confined to its own bubble.
+      const ownsTurn = () => inFlightRef.current === turn
 
       // Clear previous error
       setError(null)
@@ -127,7 +119,7 @@ export function useChat(
 
       // Optimistic user message
       const userMsg: ChatMessage = {
-        id: `user_${Date.now()}`,
+        id: nextTurnMessageId('user'),
         role: 'user',
         content: text,
         isStreaming: false,
@@ -135,16 +127,15 @@ export function useChat(
       }
 
       // Empty assistant message for streaming
-      const assistantMsgId = `assistant_${Date.now()}`
+      const msgId = nextTurnMessageId('assistant')
       const assistantMsg: ChatMessage = {
-        id: assistantMsgId,
+        id: msgId,
         role: 'assistant',
         content: '',
         isStreaming: true,
         createdAt: new Date(),
       }
 
-      streamingMessageIdRef.current = assistantMsgId
       setMessages((prev) => [...prev, userMsg, assistantMsg])
       setIsStreaming(true)
 
@@ -155,6 +146,10 @@ export function useChat(
       const abortController = new AbortController()
       abortControllerRef.current = abortController
 
+      // Set by the done/error handlers; a stream that ends without either
+      // still finalizes below.
+      let settled = false
+
       try {
         const response = await fetch('/api/chat', {
           method: 'POST',
@@ -163,204 +158,135 @@ export function useChat(
           signal: abortController.signal,
         })
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-        }
-
-        if (!response.body) {
-          throw new Error('No response body')
-        }
-
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-
-        while (true) {
-          const { done, value } = await reader.read()
-
-          if (done) break
-
-          buffer += decoder.decode(value, { stream: true })
-
-          // Process complete events (separated by \n\n)
-          // Keep incomplete data in the buffer
-          const lastDoubleNewline = buffer.lastIndexOf('\n\n')
-          if (lastDoubleNewline === -1) continue
-
-          const completeData = buffer.slice(0, lastDoubleNewline + 2)
-          buffer = buffer.slice(lastDoubleNewline + 2)
-
-          const events = parseSSEEvents(completeData)
-
-          for (const sseEvent of events) {
-            let data: Record<string, unknown>
-            try {
-              data = JSON.parse(sseEvent.data)
-            } catch {
-              continue
-            }
-
-            switch (sseEvent.event) {
-              case 'content': {
-                const contentText = (data.text as string) ?? ''
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === streamingMessageIdRef.current
-                      ? { ...m, content: m.content + contentText }
-                      : m
-                  )
-                )
-                break
-              }
-
-              case 'tool_start': {
-                setToolStatus({
-                  tool: (data.tool as string) ?? '',
-                  message: (data.statusMessage as string) ?? '',
-                })
-                break
-              }
-
-              case 'tool_complete': {
-                setToolStatus(null)
-                break
-              }
-
-              case 'ui_action': {
-                const currentMsgId = streamingMessageIdRef.current
-                if (currentMsgId) {
-                  const actionData = data as { type: string; payload: Record<string, unknown> }
-                  setUiActions((prev) => {
-                    const next = new Map(prev)
-                    next.set(currentMsgId, actionData)
-                    return next
-                  })
-                }
-                break
-              }
-
-              case 'error': {
-                // P1-12: the orchestrator's abort guard sends a structured
-                // payload ({ message, retryable, traceId }); transport-level
-                // errors carry { error }.
-                const errorMessage = (data.message as string) ?? (data.error as string) ?? 'Unknown error'
-                setError(errorMessage)
-                lastFailedMessageRef.current = text
-                // Remove the streaming assistant message
-                setMessages((prev) =>
-                  prev.filter((m) => m.id !== streamingMessageIdRef.current)
-                )
-                setIsStreaming(false)
-                setToolStatus(null)
-                streamingMessageIdRef.current = null
-                break
-              }
-
-              case 'done': {
-                // Finalize the message
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === streamingMessageIdRef.current
-                      ? { ...m, isStreaming: false }
-                      : m
-                  )
-                )
-                // Extract suggestions if present
-                if (data.suggestions && Array.isArray(data.suggestions)) {
-                  setSuggestions(data.suggestions as string[])
-                }
-                setIsStreaming(false)
-                setToolStatus(null)
-                streamingMessageIdRef.current = null
-                break
-              }
-
-              default: {
-                if (sseEvent.event.startsWith('debug:') && onDebugEvent) {
-                  onDebugEvent({ event: sseEvent.event, data })
-                }
-                break
-              }
-            }
-          }
-        }
-
-        // Handle any remaining buffer
-        if (buffer.trim()) {
-          const events = parseSSEEvents(buffer)
-          for (const sseEvent of events) {
-            if (sseEvent.event === 'done') {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === streamingMessageIdRef.current
-                    ? { ...m, isStreaming: false }
-                    : m
-                )
+        await consumeSSE(response, {
+          onContent: (contentText) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === msgId ? { ...m, content: m.content + contentText } : m
               )
-              setIsStreaming(false)
-              setToolStatus(null)
-              streamingMessageIdRef.current = null
+            )
+          },
+          onToolStart: (tool, statusMessage) => {
+            if (ownsTurn()) setToolStatus({ tool, message: statusMessage })
+          },
+          onToolComplete: () => {
+            if (ownsTurn()) setToolStatus(null)
+          },
+          onUiAction: (actionData) => {
+            setUiActions((prev) => {
+              const next = new Map(prev)
+              next.set(msgId, actionData)
+              return next
+            })
+          },
+          onError: (data) => {
+            settled = true
+            // Remove the streaming assistant message
+            setMessages((prev) => prev.filter((m) => m.id !== msgId))
+            if (!ownsTurn()) return
+            // P1-12: the orchestrator's abort guard sends a structured
+            // payload ({ message, retryable, traceId }); transport-level
+            // errors carry { error }.
+            const errorMessage = (data.message as string) ?? (data.error as string) ?? 'Unknown error'
+            setError(errorMessage)
+            lastFailedMessageRef.current = text
+            setIsStreaming(false)
+            setToolStatus(null)
+          },
+          onDone: (data) => {
+            settled = true
+            // Finalize the message
+            setMessages((prev) =>
+              prev.map((m) => (m.id === msgId ? { ...m, isStreaming: false } : m))
+            )
+            if (!ownsTurn()) return
+            // Extract suggestions if present
+            if (data.suggestions && Array.isArray(data.suggestions)) {
+              setSuggestions(data.suggestions as string[])
             }
-          }
-        }
+            setIsStreaming(false)
+            setToolStatus(null)
+          },
+          onDebug: (event, data) => onDebugEvent?.({ event, data }),
+        })
 
         // Ensure streaming state is cleared even if no 'done' event
-        if (streamingMessageIdRef.current) {
+        if (!settled) {
           setMessages((prev) =>
-            prev.map((m) =>
-              m.id === streamingMessageIdRef.current
-                ? { ...m, isStreaming: false }
-                : m
-            )
+            prev.map((m) => (m.id === msgId ? { ...m, isStreaming: false } : m))
           )
-          setIsStreaming(false)
-          setToolStatus(null)
-          streamingMessageIdRef.current = null
+          if (ownsTurn()) {
+            setIsStreaming(false)
+            setToolStatus(null)
+          }
         }
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === 'AbortError') {
-          return // Request was cancelled intentionally
+          // A successor turn took over deliberately: settle only this turn's
+          // bubble (keep partial text, drop an empty shell) and leave the
+          // successor's streaming state alone.
+          setMessages((prev) =>
+            prev
+              .map((m) => (m.id === msgId ? { ...m, isStreaming: false } : m))
+              .filter((m) => m.id !== msgId || m.content !== '')
+          )
+          if (ownsTurn()) {
+            setIsStreaming(false)
+            setToolStatus(null)
+          }
+          return
         }
         const errorMessage = err instanceof Error ? err.message : 'Connection failed'
-        setError(errorMessage)
-        lastFailedMessageRef.current = text // P1-12: retryable
         // Remove the streaming assistant message on fetch error
-        setMessages((prev) =>
-          prev.filter((m) => m.id !== streamingMessageIdRef.current)
-        )
-        setIsStreaming(false)
-        setToolStatus(null)
-        streamingMessageIdRef.current = null
+        setMessages((prev) => prev.filter((m) => m.id !== msgId))
+        if (ownsTurn()) {
+          setError(errorMessage)
+          lastFailedMessageRef.current = text // P1-12: retryable
+          setIsStreaming(false)
+          setToolStatus(null)
+        }
+      } finally {
+        if (inFlightRef.current === turn) inFlightRef.current = null
       }
     },
-    [isStreaming, conversationId, customerId, onDebugEvent, extraHeaders]
+    [conversationId, customerId, onDebugEvent, extraHeaders]
   )
 
   const sendAction = useCallback(
     async (action: UIAction) => {
-      if (isStreaming) return
+      // An action click deliberately takes over an in-flight MESSAGE stream;
+      // a second click while an ACTION turn is in flight is a double-click
+      // and is dropped. The abort transfers ownership immediately — the
+      // aborted turn sees it has been superseded and only settles its own
+      // bubble.
+      const inFlight = inFlightRef.current
+      if (inFlight?.kind === 'action') return
+      if (inFlight && abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+      const turn: InFlightTurn = { kind: 'action' }
+      inFlightRef.current = turn
+      const ownsTurn = () => inFlightRef.current === turn
 
       setError(null)
       setSuggestions([])
 
-      const assistantMsgId = `assistant_${Date.now()}`
+      const msgId = nextTurnMessageId('assistant')
       const assistantMsg: ChatMessage = {
-        id: assistantMsgId,
+        id: msgId,
         role: 'assistant',
         content: '',
         isStreaming: true,
         createdAt: new Date(),
       }
 
-      streamingMessageIdRef.current = assistantMsgId
       setMessages((prev) => [...prev, assistantMsg])
       setIsStreaming(true)
 
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort()
-      }
       const abortController = new AbortController()
       abortControllerRef.current = abortController
+
+      let settled = false
 
       try {
         const response = await fetch('/api/chat', {
@@ -370,136 +296,85 @@ export function useChat(
           signal: abortController.signal,
         })
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-        }
-
-        if (!response.body) {
-          throw new Error('No response body')
-        }
-
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          buffer += decoder.decode(value, { stream: true })
-
-          const lastDoubleNewline = buffer.lastIndexOf('\n\n')
-          if (lastDoubleNewline === -1) continue
-
-          const completeData = buffer.slice(0, lastDoubleNewline + 2)
-          buffer = buffer.slice(lastDoubleNewline + 2)
-
-          const events = parseSSEEvents(completeData)
-
-          for (const sseEvent of events) {
-            let data: Record<string, unknown>
-            try {
-              data = JSON.parse(sseEvent.data)
-            } catch {
-              continue
+        await consumeSSE(response, {
+          onContent: (contentText) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === msgId ? { ...m, content: m.content + contentText } : m
+              )
+            )
+          },
+          onToolStart: (tool, statusMessage) => {
+            if (ownsTurn()) setToolStatus({ tool, message: statusMessage })
+          },
+          onToolComplete: () => {
+            if (ownsTurn()) setToolStatus(null)
+          },
+          onUiAction: (actionData) => {
+            setUiActions((prev) => {
+              const next = new Map(prev)
+              next.set(msgId, actionData)
+              return next
+            })
+          },
+          onError: (data) => {
+            settled = true
+            setMessages((prev) => prev.filter((m) => m.id !== msgId))
+            if (!ownsTurn()) return
+            setError((data.error as string) ?? 'Unknown error')
+            setIsStreaming(false)
+            setToolStatus(null)
+          },
+          onDone: (data) => {
+            settled = true
+            setMessages((prev) =>
+              prev.map((m) => (m.id === msgId ? { ...m, isStreaming: false } : m))
+            )
+            if (!ownsTurn()) return
+            if (data.suggestions && Array.isArray(data.suggestions)) {
+              setSuggestions(data.suggestions as string[])
             }
-
-            switch (sseEvent.event) {
-              case 'content': {
-                const contentText = (data.text as string) ?? ''
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === streamingMessageIdRef.current
-                      ? { ...m, content: m.content + contentText }
-                      : m
-                  )
-                )
-                break
-              }
-              case 'tool_start':
-                setToolStatus({
-                  tool: (data.tool as string) ?? '',
-                  message: (data.statusMessage as string) ?? '',
-                })
-                break
-              case 'tool_complete':
-                setToolStatus(null)
-                break
-              case 'ui_action': {
-                const currentMsgId = streamingMessageIdRef.current
-                if (currentMsgId) {
-                  const actionData = data as { type: string; payload: Record<string, unknown> }
-                  setUiActions((prev) => {
-                    const next = new Map(prev)
-                    next.set(currentMsgId, actionData)
-                    return next
-                  })
-                }
-                break
-              }
-              case 'error': {
-                const errorMessage = (data.error as string) ?? 'Unknown error'
-                setError(errorMessage)
-                setMessages((prev) =>
-                  prev.filter((m) => m.id !== streamingMessageIdRef.current)
-                )
-                setIsStreaming(false)
-                setToolStatus(null)
-                streamingMessageIdRef.current = null
-                break
-              }
-              case 'done': {
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === streamingMessageIdRef.current
-                      ? { ...m, isStreaming: false }
-                      : m
-                  )
-                )
-                if (data.suggestions && Array.isArray(data.suggestions)) {
-                  setSuggestions(data.suggestions as string[])
-                }
-                setIsStreaming(false)
-                setToolStatus(null)
-                streamingMessageIdRef.current = null
-                break
-              }
-              default: {
-                if (sseEvent.event.startsWith('debug:') && onDebugEvent) {
-                  onDebugEvent({ event: sseEvent.event, data })
-                }
-                break
-              }
-            }
-          }
-        }
+            setIsStreaming(false)
+            setToolStatus(null)
+          },
+          onDebug: (event, data) => onDebugEvent?.({ event, data }),
+        })
 
         // Ensure streaming state is cleared
-        if (streamingMessageIdRef.current) {
+        if (!settled) {
           setMessages((prev) =>
-            prev.map((m) =>
-              m.id === streamingMessageIdRef.current
-                ? { ...m, isStreaming: false }
-                : m
-            )
+            prev.map((m) => (m.id === msgId ? { ...m, isStreaming: false } : m))
           )
-          setIsStreaming(false)
-          setToolStatus(null)
-          streamingMessageIdRef.current = null
+          if (ownsTurn()) {
+            setIsStreaming(false)
+            setToolStatus(null)
+          }
         }
       } catch (err: unknown) {
-        if (err instanceof DOMException && err.name === 'AbortError') return
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          setMessages((prev) =>
+            prev
+              .map((m) => (m.id === msgId ? { ...m, isStreaming: false } : m))
+              .filter((m) => m.id !== msgId || m.content !== '')
+          )
+          if (ownsTurn()) {
+            setIsStreaming(false)
+            setToolStatus(null)
+          }
+          return
+        }
         const errorMessage = err instanceof Error ? err.message : 'Connection failed'
-        setError(errorMessage)
-        setMessages((prev) =>
-          prev.filter((m) => m.id !== streamingMessageIdRef.current)
-        )
-        setIsStreaming(false)
-        setToolStatus(null)
-        streamingMessageIdRef.current = null
+        setMessages((prev) => prev.filter((m) => m.id !== msgId))
+        if (ownsTurn()) {
+          setError(errorMessage)
+          setIsStreaming(false)
+          setToolStatus(null)
+        }
+      } finally {
+        if (inFlightRef.current === turn) inFlightRef.current = null
       }
     },
-    [isStreaming, conversationId, customerId, onDebugEvent, extraHeaders]
+    [conversationId, customerId, onDebugEvent, extraHeaders]
   )
 
   // P1-12: the retry affordance for an aborted turn — resends the exact
@@ -507,10 +382,10 @@ export function useChat(
   // but the reply never came; a resend is a fresh turn).
   const retryLastMessage = useCallback(() => {
     const failed = lastFailedMessageRef.current
-    if (!failed || isStreaming) return
+    if (!failed || inFlightRef.current) return
     lastFailedMessageRef.current = null
     void sendMessage(failed)
-  }, [isStreaming, sendMessage])
+  }, [sendMessage])
 
   return {
     messages,
