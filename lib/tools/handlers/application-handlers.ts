@@ -536,12 +536,13 @@ export const resumeApplication: ToolHandler = async (args, context) => {
 
     const codes = await appGroupCodesFor(context, application.includesAddon)
     const scope = { kind: 'application' as const, applicationId: application.id }
-    const [next, progress, tier, level] = await Promise.all([
-      getNextQuestion(codes, scope, undefined, context.db),
-      calculateProgress(codes, scope, context.db),
-      application.tierId ? context.db.pricingTier.findUnique({ where: { id: application.tierId } }) : null,
-      application.levelId ? context.db.pricingLevel.findUnique({ where: { id: application.levelId } }) : null,
-    ])
+    // P2-9: sequential, not Promise.all — resume_application runs inside the
+    // gateway transaction, so these four queries share the one tx connection;
+    // running them concurrently is the pg@9 deprecation.
+    const next = await getNextQuestion(codes, scope, undefined, context.db)
+    const progress = await calculateProgress(codes, scope, context.db)
+    const tier = application.tierId ? await context.db.pricingTier.findUnique({ where: { id: application.tierId } }) : null
+    const level = application.levelId ? await context.db.pricingLevel.findUnique({ where: { id: application.levelId } }) : null
 
     const lang = context.language ?? 'ro'
     return {

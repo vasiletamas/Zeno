@@ -51,10 +51,11 @@ export const REPOINTERS: Repointer[] = [
     // canonical stays) and the loser row is deleted. Returns rows MOVED to
     // the canonical customer.
     run: async (tx, d, c) => {
-      const [dupRows, canRows] = await Promise.all([
-        tx.customerInsight.findMany({ where: { customerId: d } }),
-        tx.customerInsight.findMany({ where: { customerId: c } }),
-      ])
+      // P2-9: sequential, not Promise.all — both queries share the one
+      // transaction connection, and concurrent client.query() on it is the
+      // pg@9 deprecation.
+      const dupRows = await tx.customerInsight.findMany({ where: { customerId: d } })
+      const canRows = await tx.customerInsight.findMany({ where: { customerId: c } })
       const canByKey = new Map(canRows.map(r => [r.key, r]))
       let moved = 0
       for (const r of dupRows) {
@@ -115,10 +116,9 @@ async function runMerge(tx: Tx, duplicateId: string, canonicalId: string): Promi
     const repointed: Record<string, number> = {}
     for (const r of REPOINTERS) repointed[r.table] = await r.run(tx, duplicateId, canonicalId)
 
-    const [dupF, canF] = await Promise.all([
-      tx.customerProfileField.findMany({ where: { customerId: duplicateId } }),
-      tx.customerProfileField.findMany({ where: { customerId: canonicalId } }),
-    ])
+    // P2-9: sequential on the shared transaction connection (see above).
+    const dupF = await tx.customerProfileField.findMany({ where: { customerId: duplicateId } })
+    const canF = await tx.customerProfileField.findMany({ where: { customerId: canonicalId } })
     const canByField = new Map(canF.map(f => [f.field, f]))
     const conflicts: string[] = []
     for (const f of dupF) {
