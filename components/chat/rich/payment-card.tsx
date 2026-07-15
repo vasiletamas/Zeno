@@ -204,6 +204,28 @@ function StripeCheckoutForm({
   )
 }
 
+/* ── Amount summary (module-level: not re-created per render) ── */
+
+function AmountSummary({
+  policyLabel, policyDescription, premiumLabel, modeLabel, formattedAmount, currency,
+}: {
+  policyLabel: string; policyDescription: string; premiumLabel: string
+  modeLabel: string; formattedAmount: string; currency: string
+}) {
+  return (
+    <div className="mb-4">
+      <div className="flex justify-between items-center mb-1">
+        <span className="text-[14px]" style={{ color: '#8A8680' }}>{policyLabel}</span>
+        <span className="text-[14px] font-medium" style={{ color: FOREST }}>{policyDescription}</span>
+      </div>
+      <div className="flex justify-between items-center">
+        <span className="text-[14px]" style={{ color: '#8A8680' }}>{premiumLabel} · {modeLabel}</span>
+        <span className="text-[20px] font-semibold" style={{ color: FOREST }}>{formattedAmount} {currency}</span>
+      </div>
+    </div>
+  )
+}
+
 /* ── Loading Spinner ─────────────────────────────────── */
 
 function LoadingSpinner() {
@@ -304,25 +326,15 @@ export function PaymentCard({
   }
 
   // ─── Amount summary card ───────────────────────────────
-  const AmountSummary = () => (
-    <div className="mb-4">
-      <div className="flex justify-between items-center mb-1">
-        <span className="text-[14px]" style={{ color: '#8A8680' }}>
-          {c.policyLabel}
-        </span>
-        <span className="text-[14px] font-medium" style={{ color: FOREST }}>
-          {policyDescription}
-        </span>
-      </div>
-      <div className="flex justify-between items-center">
-        <span className="text-[14px]" style={{ color: '#8A8680' }}>
-          {c.premiumLabel} · {modeLabel}
-        </span>
-        <span className="text-[20px] font-semibold" style={{ color: FOREST }}>
-          {formattedAmount} {currency}
-        </span>
-      </div>
-    </div>
+  const amountSummary = (
+    <AmountSummary
+      policyLabel={c.policyLabel}
+      policyDescription={policyDescription}
+      premiumLabel={c.premiumLabel}
+      modeLabel={modeLabel}
+      formattedAmount={formattedAmount}
+      currency={currency}
+    />
   )
 
   // ─── Unavailable: no usable provider credential (P1-5) ──
@@ -332,7 +344,7 @@ export function PaymentCard({
         className="rounded-xl p-6 border"
         style={{ borderColor: BORDER, backgroundColor: '#FFFFFF' }}
       >
-        <AmountSummary />
+        {amountSummary}
         <p className="text-[14px]" style={{ color: ERROR_COLOR }} role="alert">
           {c.errorGeneric}
         </p>
@@ -347,7 +359,7 @@ export function PaymentCard({
         className="rounded-xl p-6 border"
         style={{ borderColor: BORDER, backgroundColor: '#FFFFFF' }}
       >
-        <AmountSummary />
+        {amountSummary}
 
         <Elements
           stripe={getStripePromise()}
@@ -383,7 +395,7 @@ export function PaymentCard({
         className="rounded-xl p-6 border"
         style={{ borderColor: BORDER, backgroundColor: '#FFFFFF' }}
       >
-        <AmountSummary />
+        {amountSummary}
 
         <button
           onClick={handlePayURedirect}
@@ -424,7 +436,7 @@ export function PaymentCard({
       className="rounded-xl p-6 border"
       style={{ borderColor: BORDER, backgroundColor: '#FFFFFF' }}
     >
-      <AmountSummary />
+      {amountSummary}
 
       {error && (
         <p
