@@ -254,7 +254,10 @@ export const AGENTS: AgentDef[] = [
     name: 'Main Chat Agent',
     role: 'main-chat',
     provider: 'OPENAI',
-    model: 'gpt-5.4',
+    // T3 (2026-07-15): gpt-5.6-sol was selected deliberately during the live
+    // sales test — reseeds must keep it. Provider quirk: tool-bearing calls
+    // force reasoning_effort:'none' (lib/llm/providers/openai.ts).
+    model: 'gpt-5.6-sol',
     fallbackProvider: 'ANTHROPIC',
     fallbackModel: 'claude-sonnet-5', // P1-8: claude-sonnet-4-20250514 retired 2026-06-15 — failover 404ed and the turn died
     temperature: 0.7,
