@@ -28,6 +28,14 @@ export type ConfirmResult =
   | { ok: false; reason: 'no_active_challenge' | 'code_mismatch' | 'attempts_exhausted' | 'expired_or_consumed'; attemptsRemaining?: number }
 
 /**
+ * P0-1: ONE normalization for every verification-target write and lookup —
+ * ownership matching must never depend on letter case or spacing. Applied at
+ * issue time (stored targets are normalized) and defensively at claim time.
+ */
+export const normalizeVerificationTarget = (channel: 'email' | 'sms', target: string): string =>
+  channel === 'email' ? target.trim().toLowerCase() : target.replace(/[\s-]/g, '')
+
+/**
  * One mask for every surface that speaks a verification target (the OTP
  * handler's envelope, the situational briefing) — raw targets never reach
  * the model or the transcript.
@@ -48,12 +56,15 @@ export const maskVerificationTarget = (channel: 'email' | 'sms', target: string)
 export async function issueChallenge(
   customerId: string,
   channel: 'email' | 'sms',
-  target: string,
+  rawTarget: string,
   conversationId: string | null,
   db: Db = prisma,
   provider: EmailProvider = getEmailProvider(),
   ttlMs: number = CHALLENGE_TTL_MS,
 ): Promise<{ challengeId: string; code: string; linkToken: string }> {
+  // stored targets are normalized so consumed rows are a canonical
+  // ownership registry (P0-1) — lookups never fight letter case.
+  const target = normalizeVerificationTarget(channel, rawTarget)
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0')
   const linkToken = randomUUID()
 
@@ -132,9 +143,17 @@ export async function confirmByLinkToken(linkToken: string, db: Db = prisma): Pr
 
 /**
  * Verified claim (T4.D4), shared by the OTP commit and the magic-link route
- * so the two paths cannot diverge: if the just-verified target belongs to
- * another customer, THIS verification proves ownership — the shell merges
- * INTO the owner and the caller continues on the canonical customerId.
+ * so the two paths cannot diverge.
+ *
+ * P0-1: OWNERSHIP is proven only by CONSUMED verification evidence — the
+ * canonical owner is another customer who ALSO verified this exact channel +
+ * normalized target (a consumed VerificationChallenge). A merely DECLARED
+ * Customer.email/phone mirror can NEVER be the owner — otherwise an attacker
+ * who pre-declares the victim's address would absorb the victim's records the
+ * moment the victim verifies. When no verified owner exists, the just-proven
+ * shell TAKES the mirror: any customer still holding it only declared it, so
+ * it is cleared from them and set on the verifier.
+ *
  * Inside a gateway commit pass the tx client (claimAndMerge otherwise opens
  * its own transaction).
  */
@@ -142,13 +161,42 @@ export async function applyVerifiedClaim(
   r: Extract<ConfirmResult, { ok: true }>,
   db: Db = prisma,
 ): Promise<{ customerId: string; merged: boolean }> {
-  const ownerWhere = r.channel === 'email' ? { email: r.target } : { phone: r.target }
-  const owner = await db.customer.findFirst({
-    where: { ...ownerWhere, id: { not: r.customerId }, mergedIntoId: null },
-  })
-  if (!owner) return { customerId: r.customerId, merged: false }
-  await claimAndMerge(r.customerId, owner.id, db === prisma ? undefined : (db as Parameters<typeof claimAndMerge>[2]))
-  return { customerId: owner.id, merged: true }
+  const target = normalizeVerificationTarget(r.channel, r.target)
+  const mirrorField = r.channel === 'email' ? 'email' : 'phone'
+
+  const run = async (tx: Parameters<typeof claimAndMerge>[2] & Db): Promise<{ customerId: string; merged: boolean }> => {
+    // The canonical owner is the EARLIEST customer (INCLUDING the verifier)
+    // holding CONSUMED evidence for this exact channel + normalized target,
+    // restricted to non-tombstoned customers — verified ownership, never a
+    // mirror. Including self is the deterministic tie-break that stops two
+    // concurrent verifiers from each treating the other as owner and merging
+    // into each other.
+    const proofs = await tx.verificationChallenge.findMany({
+      where: { channel: r.channel, target, consumedAt: { not: null }, customer: { mergedIntoId: null } },
+      orderBy: [{ consumedAt: 'asc' }, { createdAt: 'asc' }],
+      select: { customerId: true },
+    })
+    const ownerId = proofs.length ? proofs[0].customerId : r.customerId
+    if (ownerId !== r.customerId) {
+      await claimAndMerge(r.customerId, ownerId, tx)
+      return { customerId: ownerId, merged: true }
+    }
+    // The verifier IS the canonical owner. Release the mirror from any
+    // customer that only DECLARED it (they never proved control) and set it on
+    // the verifier so the @unique mirror is held by the party that owns it.
+    const declaredHolders = await tx.customer.findMany({
+      where: { [mirrorField]: target, id: { not: r.customerId }, mergedIntoId: null },
+      select: { id: true },
+    })
+    for (const h of declaredHolders) {
+      await tx.customer.update({ where: { id: h.id }, data: { [mirrorField]: null } })
+    }
+    await tx.customer.update({ where: { id: r.customerId }, data: { [mirrorField]: target } })
+    return { customerId: r.customerId, merged: false }
+  }
+
+  if (db === prisma) return prisma.$transaction((tx) => run(tx as Parameters<typeof claimAndMerge>[2] & Db))
+  return run(db as Parameters<typeof claimAndMerge>[2] & Db)
 }
 
 /** Channels this customer has verified — consumed challenges only. */

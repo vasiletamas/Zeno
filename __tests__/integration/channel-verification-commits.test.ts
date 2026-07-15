@@ -29,26 +29,40 @@ it('start issues a challenge without disclosing whether the target matches an ex
   expect(JSON.stringify(r.data)).not.toMatch(/exists|found|match/i)
 })
 
-it('confirm verifies the channel; when the target belongs to another customer it claim-and-merges the anonymous shell INTO the verified owner', async () => {
-  const owner = await createCustomer({ email: 'ana@example.ro', isAnonymous: false })
-  await setDeclaredField(owner.id, 'email', 'ana@example.ro', 'seed')
+it('confirm merges into an owner who VERIFIED the target (consumed evidence), but NEVER into one who merely declared it (P0-1)', async () => {
+  // Owner establishes ownership by verifying the address themselves.
+  const owner = await createCustomer({ isAnonymous: false })
+  const ownerConv = await prisma.conversation.create({ data: { customerId: owner.id } })
+  await executeCommit({
+    tool: 'start_channel_verification', actor: 'agent', customerId: owner.id, conversationId: ownerConv.id,
+    args: { channel: 'email', target: 'ana@example.ro' }, toolContext: ctx(owner.id, ownerConv.id),
+  })
+  await executeCommit({
+    tool: 'confirm_channel_verification', actor: 'gui', customerId: owner.id, conversationId: ownerConv.id,
+    args: { code: lastIssuedCode() }, toolContext: ctx(owner.id, ownerConv.id),
+  })
+
+  // Attacker only DECLARES the same address — must not gain ownership.
+  const attacker = await createCustomer()
+  await setDeclaredField(attacker.id, 'email', 'ana@example.ro', 'collect_customer_field')
+
   const shell = await createCustomer()
   const conv = await prisma.conversation.create({ data: { customerId: shell.id } })
   await executeCommit({
     tool: 'start_channel_verification', actor: 'agent', customerId: shell.id, conversationId: conv.id,
     args: { channel: 'email', target: 'ana@example.ro' }, toolContext: ctx(shell.id, conv.id),
   })
-  const ch = await prisma.verificationChallenge.findFirstOrThrow({ where: { customerId: shell.id } })
-  const code = lastIssuedCode()
   const r = await executeCommit({
     tool: 'confirm_channel_verification', actor: 'gui', customerId: shell.id, conversationId: conv.id,
-    args: { code }, toolContext: ctx(shell.id, conv.id),
+    args: { code: lastIssuedCode() }, toolContext: ctx(shell.id, conv.id),
   })
   expect(r.outcome).toBe('applied')
-  expect((r.data as { customerId: string }).customerId).toBe(owner.id) // session rebinds to the canonical customer
+  // rebinds to the VERIFIED owner, not the declared attacker
+  expect((r.data as { customerId: string }).customerId).toBe(owner.id)
   expect((await prisma.conversation.findUniqueOrThrow({ where: { id: conv.id } })).customerId).toBe(owner.id)
   expect((await prisma.customer.findUniqueOrThrow({ where: { id: shell.id } })).mergedIntoId).toBe(owner.id)
-  expect(ch.conversationId).toBe(conv.id)
+  // the declared attacker was never made canonical
+  expect((await prisma.customer.findUniqueOrThrow({ where: { id: attacker.id } })).mergedIntoId).toBeNull()
 })
 
 it('NEGATIVE: sms verification is rejected with a redirect while the transport is unimplemented (a standing sms challenge is an unfulfillable dead end)', async () => {

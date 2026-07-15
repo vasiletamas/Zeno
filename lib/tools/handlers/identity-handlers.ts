@@ -71,10 +71,14 @@ export const confirmChannelVerification: ToolHandler = async (args, context) => 
       // Task 1.1 (D5): the envelope carries the live attempt budget so the
       // agent can tell the customer how many tries are left instead of
       // silently re-sending a fresh code.
+      // keepWrites (P0-2): a wrong code DECREMENTS attemptsRemaining — a
+      // security rate-limit fact that MUST survive this rejection, or the
+      // rollback would hand the attacker unlimited guesses.
       return {
         success: false,
         error: `${r.reason}: ${prose[r.reason]}`,
         data: r.attemptsRemaining !== undefined ? { attemptsRemaining: r.attemptsRemaining } : undefined,
+        keepWrites: true,
       }
     }
 

@@ -84,6 +84,8 @@
 - Modify: `components/chat/rich/payment-card.tsx` (guard null credentials via resolver)
 - Test: `__tests__/integration/payment-resume.test.ts`, `__tests__/lib/payments/card-state.test.ts`, `__tests__/lib/payments/providers.test.ts` (extend)
 
+**Also fold in (from the Task-1 write-then-fail audit):** ensure_payment_session's stale-attempt SUPERSEDED mark (payment-handlers.ts:131) pairs with an irreversible `provider.cancelPaymentIntent` at :130; under the new rollback a later throw discards the mark while the provider cancel stands. change_payment_option:222-223 has the same shape entangled with new-schedule writes. Fix both by REORDERING: do all DB writes first, then the irreversible provider cancel last (or `keepWrites` the pure supersede mark where it stands alone) — no external/DB divergence after rollback.
+
 - [ ] Write failing tests: backend — resume of a fresh open attempt returns non-null clientSecret in `uiAction.payload` (mock provider); unusable open attempt (provider says not usable) → superseded + fresh intent; frontend — `resolvePaymentCardState` returns 'unavailable' for stripe+null secret and payu+null redirect, provider forms otherwise (new/resumed/expired/unusable session shapes).
 - [ ] Run → FAIL.
 - [ ] Implement provider interface + three providers (stripe: paymentIntents.retrieve, usable = requires_payment_method|requires_confirmation|requires_action|processing; payu: order status + metadata fallback for redirect; mock: always usable). Handler: metadata `{clientSecret, redirectUrl}` persisted at create; resume branch calls retrieve, falls back to metadata, supersedes when unusable. Component renders explicit error/retry state on 'unavailable' instead of mounting `<Elements>`.
