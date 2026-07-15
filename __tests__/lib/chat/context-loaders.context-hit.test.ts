@@ -1,11 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+// P0-7 rebuild (2026-07-06): loadQuestionnaireContext derives the current
+// question through the ENGINE (getNextQuestion) from the active application —
+// these tests pin the CONTEXT-HIT rendering, so the engine is mocked.
 vi.mock('@/lib/db', () => ({
   prisma: {
-    question: { findMany: vi.fn() },
-    answer: { findMany: vi.fn() },
+    question: { findUnique: vi.fn() },
     customerInsight: { findUnique: vi.fn() },
+    conversation: { findUnique: vi.fn().mockResolvedValue({ activeApplicationId: 'app-1' }) },
+    application: {
+      findUnique: vi.fn().mockResolvedValue({ id: 'app-1', productId: 'p1', includesAddon: true, status: 'OPEN', frozenAt: null }),
+    },
   },
+}))
+vi.mock('@/lib/engines/question-groups', () => ({
+  resolveGroupCodes: vi.fn().mockResolvedValue(['application', 'bd_medical']),
+}))
+vi.mock('@/lib/engines/questionnaire-engine', () => ({
+  getNextQuestion: vi.fn(),
+  calculateProgress: vi.fn().mockResolvedValue({ answered: 1, total: 1 }),
 }))
 vi.mock('@/lib/errors/logger', () => ({
   logWarn: vi.fn(),
@@ -14,27 +27,34 @@ vi.mock('@/lib/errors/logger', () => ({
 
 const { prisma } = await import('@/lib/db')
 const { logInfo } = await import('@/lib/errors/logger')
+const { getNextQuestion } = await import('@/lib/engines/questionnaire-engine')
 const { loadQuestionnaireContext } = await import('@/lib/chat/context-loaders')
 
+// engine QuestionData shape (groupCode flat, no insightKey — fetched separately)
 const APP_QUESTION = {
   id: 'q1',
   code: 'PACKAGE_CHOICE',
+  groupId: 'g1',
+  groupCode: 'application',
   text: { en: 'Which package?', ro: 'Ce pachet?' },
+  helpText: null,
   type: 'DROPDOWN',
   options: [
     { value: 'Standard', label: { en: 'Standard', ro: 'Standard' } },
     { value: 'Optim', label: { en: 'Optim', ro: 'Optim' } },
   ],
-  insightKey: 'selectedTier',
+  validationRules: null,
   orderIndex: 1,
-  group: { code: 'application', orderIndex: 6 },
+  isRequired: true,
 }
 
 describe('loadQuestionnaireContext — CONTEXT HIT', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(prisma.question.findMany).mockResolvedValue([APP_QUESTION] as never)
-    vi.mocked(prisma.answer.findMany).mockResolvedValue([])
+    vi.mocked(prisma.conversation.findUnique).mockResolvedValue({ activeApplicationId: 'app-1' } as never)
+    vi.mocked(prisma.application.findUnique).mockResolvedValue({ id: 'app-1', productId: 'p1', includesAddon: true, status: 'OPEN', frozenAt: null } as never)
+    vi.mocked(getNextQuestion).mockResolvedValue({ question: APP_QUESTION, progress: { answered: 0, total: 1 } } as never)
+    vi.mocked(prisma.question.findUnique).mockResolvedValue({ insightKey: 'selectedTier' } as never)
   })
 
   it('appends CONTEXT HIT block when matching insight exists', async () => {
@@ -45,7 +65,7 @@ describe('loadQuestionnaireContext — CONTEXT HIT', () => {
       lastConfirmedAt: new Date(), createdAt: new Date(), updatedAt: new Date(),
     } as never)
 
-    const result = await loadQuestionnaireContext('conv-1', 'cust-1', 'application_fill', 'ro')
+    const result = await loadQuestionnaireContext('conv-1', 'cust-1', 'ro')
 
     expect(result).toContain('[CONTEXT HIT for current question]')
     expect(result).toContain('field: selectedTier')
@@ -57,34 +77,28 @@ describe('loadQuestionnaireContext — CONTEXT HIT', () => {
   it('does NOT append CONTEXT HIT when no insight', async () => {
     vi.mocked(prisma.customerInsight.findUnique).mockResolvedValue(null)
 
-    const result = await loadQuestionnaireContext('conv-1', 'cust-1', 'application_fill', 'ro')
+    const result = await loadQuestionnaireContext('conv-1', 'cust-1', 'ro')
 
     expect(result).not.toContain('CONTEXT HIT')
     expect(result).toContain('[ACTIVE QUESTIONNAIRE')
+    expect(result).toContain('code PACKAGE_CHOICE')
   })
 
   it('does NOT append CONTEXT HIT when question.insightKey is null', async () => {
-    vi.mocked(prisma.question.findMany).mockResolvedValue([
-      { ...APP_QUESTION, insightKey: null },
-    ] as never)
+    vi.mocked(prisma.question.findUnique).mockResolvedValue({ insightKey: null } as never)
 
-    const result = await loadQuestionnaireContext('conv-1', 'cust-1', 'application_fill', 'ro')
+    const result = await loadQuestionnaireContext('conv-1', 'cust-1', 'ro')
 
     expect(result).not.toContain('CONTEXT HIT')
     expect(prisma.customerInsight.findUnique).not.toHaveBeenCalled()
   })
 
   it('injects explicit-DA phrasing for bd_medical RISK_FACTOR hits and logs compliance audit', async () => {
-    const medQuestion = {
-      ...APP_QUESTION,
-      id: 'q2',
-      code: 'BD_SMOKING',
-      type: 'BOOLEAN',
-      options: null,
-      insightKey: 'smokingStatus',
-      group: { code: 'bd_medical', orderIndex: 7 },
-    }
-    vi.mocked(prisma.question.findMany).mockResolvedValue([medQuestion] as never)
+    vi.mocked(getNextQuestion).mockResolvedValue({
+      question: { ...APP_QUESTION, id: 'q2', code: 'BD_SMOKING', type: 'BOOLEAN', options: null, groupCode: 'bd_medical' },
+      progress: { answered: 3, total: 7 },
+    } as never)
+    vi.mocked(prisma.question.findUnique).mockResolvedValue({ insightKey: 'smokingStatus' } as never)
     vi.mocked(prisma.customerInsight.findUnique).mockResolvedValue({
       id: 'i2', customerId: 'cust-1', productId: null,
       category: 'RISK_FACTOR', key: 'smokingStatus', value: 'non_smoker',
@@ -92,12 +106,17 @@ describe('loadQuestionnaireContext — CONTEXT HIT', () => {
       lastConfirmedAt: new Date(), createdAt: new Date(), updatedAt: new Date(),
     } as never)
 
-    const result = await loadQuestionnaireContext('conv-1', 'cust-1', 'bd_questionnaire', 'ro')
+    const result = await loadQuestionnaireContext('conv-1', 'cust-1', 'ro')
 
     expect(result).toContain('Pentru declarația medicală oficială')
     expect(result).toContain('DA sau NU')
     expect(logInfo).toHaveBeenCalledWith(
       expect.objectContaining({ category: 'context_hit_medical' }),
     )
+  })
+
+  it('returns null once the application froze (post-quote: questionnaire mutation is engine-illegal)', async () => {
+    vi.mocked(prisma.application.findUnique).mockResolvedValue({ id: 'app-1', productId: 'p1', includesAddon: true, status: 'OPEN', frozenAt: new Date() } as never)
+    expect(await loadQuestionnaireContext('conv-1', 'cust-1', 'ro')).toBeNull()
   })
 })

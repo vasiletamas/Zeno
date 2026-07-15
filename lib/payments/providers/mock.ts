@@ -20,10 +20,12 @@ export class MockPaymentProvider implements PaymentProvider {
     amount: number
     currency: string
     customerId: string
-    policyId: string
+    referenceId: string
     description: string
   }): Promise<PaymentIntent> {
-    const providerPaymentId = `mock_pay_${Date.now()}`
+    // D2.7 (erratum 9): Payment.providerPaymentId is @unique — Date.now()
+    // collides for two intents in the same millisecond.
+    const providerPaymentId = `mock_pay_${crypto.randomUUID()}`
 
     return {
       clientSecret: 'mock_secret',
@@ -44,6 +46,19 @@ export class MockPaymentProvider implements PaymentProvider {
     }
   }
 
+  async retrievePaymentIntent(_providerPaymentId: string): Promise<{ clientSecret: string | null; redirectUrl: string | null; usable: boolean }> {
+    // mock intents never expire — always resumable with the same secret
+    return { clientSecret: 'mock_secret', redirectUrl: null, usable: true }
+  }
+
+  async cancelPaymentIntent(_providerPaymentId: string): Promise<void> {
+    // mock intents hold no provider state — cancellation is a no-op
+  }
+
+  async refundPayment(providerPaymentId: string, _amountMinor: number): Promise<{ providerRefundId: string }> {
+    return { providerRefundId: `refund_${providerPaymentId}` }
+  }
+
   async handleWebhook(
     payload: unknown,
     signature: string,
@@ -52,10 +67,11 @@ export class MockPaymentProvider implements PaymentProvider {
       typeof payload === 'string' ? JSON.parse(payload) : payload
     ) as { providerPaymentId?: string }
 
+    const providerPaymentId = body.providerPaymentId ?? `mock_pay_${crypto.randomUUID()}`
     return {
       event: 'payment_succeeded',
-      providerPaymentId:
-        body.providerPaymentId ?? `mock_pay_${Date.now()}`,
+      eventId: `mock_${providerPaymentId}`,
+      providerPaymentId,
     }
   }
 }

@@ -19,8 +19,17 @@ export interface PaymentStatus {
 }
 
 export interface WebhookEvent {
-  event: 'payment_succeeded' | 'payment_failed'
+  // D2.7: 'ignored' is EXPLICIT — verified-but-irrelevant events never
+  // masquerade as payment outcomes; eventId is the provider's event identity
+  // feeding the settlement inbox's exactly-once key (T8.D3).
+  event: 'payment_succeeded' | 'payment_failed' | 'ignored'
+  eventId: string
   providerPaymentId: string
+  // P1-6: the PROVIDER-reported captured amount (minor units) + currency, so
+  // settlement can validate them against what Zeno expected instead of
+  // comparing two internal copies. Null when the event does not carry them.
+  amountMinor?: number | null
+  currency?: string | null
   metadata?: Record<string, unknown>
 }
 
@@ -31,11 +40,29 @@ export interface PaymentProvider {
     amount: number // in smallest currency unit (RON bani = amount * 100)
     currency: string // 'RON'
     customerId: string
-    policyId: string
+    referenceId: string // D3.3: the schedule id (was policyId — no policy exists pre-capture)
     description: string
   }): Promise<PaymentIntent>
 
   getPaymentStatus(providerPaymentId: string): Promise<PaymentStatus>
+
+  /**
+   * P1-5: re-fetch a live credential for RESUMING an open attempt, plus whether
+   * the intent is still usable. clientSecret/redirectUrl are null when the
+   * provider cannot re-supply them (PayU cannot re-issue its hosted-page URL —
+   * the caller falls back to the persisted create-time credential). usable is
+   * false when the intent has moved to a terminal state and a fresh one is
+   * needed.
+   */
+  retrievePaymentIntent(providerPaymentId: string): Promise<{ clientSecret: string | null; redirectUrl: string | null; usable: boolean }>
+
+  /** D3.3 (T8.D4): cancel an open intent so superseding never stacks
+   *  capturable sessions — the single-open-attempt invariant. */
+  cancelPaymentIntent(providerPaymentId: string): Promise<void>
+
+  /** D4.5: refund a captured payment — the payment-module system effect
+   *  behind free-look cancellation and pre-activation rejection (#5). */
+  refundPayment(providerPaymentId: string, amountMinor: number): Promise<{ providerRefundId: string }>
 
   handleWebhook(payload: unknown, signature: string): Promise<WebhookEvent>
 }

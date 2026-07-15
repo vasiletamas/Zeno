@@ -14,7 +14,6 @@ const conv = await prisma.conversation.findUnique({
   include: {
     messages: { orderBy: { createdAt: 'asc' }, select: { role: true, content: true } },
     product: { select: { name: true, code: true } },
-    workflowSession: { select: { currentStep: { select: { code: true, name: true } } } },
   },
 })
 
@@ -23,7 +22,6 @@ if (!conv) {
   process.exit(1)
 }
 
-console.log(`STATE: product=${conv.product?.name ?? 'none'} (${conv.product?.code ?? '-'}) · mode=${conv.mode} · step=${conv.workflowSession?.currentStep?.code ?? '-'}`)
 console.log('')
 console.log(`MESSAGES (${conv.messages.length}):`)
 conv.messages.forEach((m, i) => {

@@ -8,6 +8,28 @@
 
 import type { DebugTurn } from './reducer'
 
+/**
+ * F2.5 (M8 pin 2): the export is a versioned contract. v2 adds the commit
+ * ledger — the ground truth lib/testing/conversation-assertions.ts joins
+ * turns against (via post_commit legality commitLedgerId, erratum 2).
+ */
+export const EXPORT_SCHEMA_VERSION = 2 as const
+
+/** Typed mirror of the CommitLedger row (envelope/argsHash omitted). */
+export interface CommitLedgerExportRow {
+  id: string
+  tool: string
+  actor: string
+  outcome: string
+  effects: string[]
+  reasonCode: string | null
+  phaseFrom: string | null
+  phaseTo: string | null
+  idempotencyDisposition: string
+  targetRef: string | null
+  createdAt: string
+}
+
 export interface ConversationExportMeta {
   id: string
   customerId: string
@@ -16,8 +38,6 @@ export interface ConversationExportMeta {
   status: string
   language: string
   mode: string
-  dntSignedAt: string | null
-  dntValidUntil: string | null
   startedAt: string
   createdAt: string
 }
@@ -39,6 +59,7 @@ export interface ConversationExportSummary {
 }
 
 export interface ConversationExport {
+  schemaVersion: typeof EXPORT_SCHEMA_VERSION
   exportedAt: string
   conversationId: string
   conversation: ConversationExportMeta
@@ -46,6 +67,8 @@ export interface ConversationExport {
   messages: ConversationExportMessage[]
   /** Chronological (messageIndex ascending) — replay order. */
   turns: DebugTurn[]
+  /** Every CommitLedger row for the conversation, createdAt ascending. */
+  ledger: CommitLedgerExportRow[]
 }
 
 export function buildConversationExport(input: {
@@ -53,12 +76,15 @@ export function buildConversationExport(input: {
   conversation: ConversationExportMeta
   messages: ConversationExportMessage[]
   turns: DebugTurn[]
+  ledger?: CommitLedgerExportRow[]
 }): ConversationExport {
   const turns = [...input.turns].sort((a, b) => a.messageIndex - b.messageIndex)
   const toolCalls = turns.reduce((n, t) => n + t.toolCalls.length, 0)
   const toolsUsed = [...new Set(turns.flatMap((t) => t.toolCalls.map((c) => c.name)))].sort()
+  const ledger = [...(input.ledger ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
 
   return {
+    schemaVersion: EXPORT_SCHEMA_VERSION,
     exportedAt: input.exportedAt,
     conversationId: input.conversation.id,
     conversation: input.conversation,
@@ -70,5 +96,6 @@ export function buildConversationExport(input: {
     },
     messages: input.messages,
     turns,
+    ledger,
   }
 }

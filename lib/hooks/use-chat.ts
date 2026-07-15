@@ -28,6 +28,8 @@ export interface UseChatReturn {
   customerId: string | null
   sendMessage: (text: string) => void
   sendAction: (action: UIAction) => void
+  /** P1-12: resend the message whose turn aborted (no-op when none failed) */
+  retryLastMessage: () => void
   suggestions: string[]
   uiActions: Map<string, { type: string; payload: Record<string, unknown> }>
   answeredMessageIds: Set<string>
@@ -102,6 +104,10 @@ export function useChat(
 
   // Abort controller for cancelling requests
   const abortControllerRef = useRef<AbortController | null>(null)
+
+  // P1-12: the last message whose turn ABORTED — the retry affordance
+  // resends exactly this text
+  const lastFailedMessageRef = useRef<string | null>(null)
 
   const markAnswered = useCallback((messageId: string) => {
     setAnsweredMessageIds((prev) => {
@@ -234,8 +240,12 @@ export function useChat(
               }
 
               case 'error': {
-                const errorMessage = (data.error as string) ?? 'Unknown error'
+                // P1-12: the orchestrator's abort guard sends a structured
+                // payload ({ message, retryable, traceId }); transport-level
+                // errors carry { error }.
+                const errorMessage = (data.message as string) ?? (data.error as string) ?? 'Unknown error'
                 setError(errorMessage)
+                lastFailedMessageRef.current = text
                 // Remove the streaming assistant message
                 setMessages((prev) =>
                   prev.filter((m) => m.id !== streamingMessageIdRef.current)
@@ -313,6 +323,7 @@ export function useChat(
         }
         const errorMessage = err instanceof Error ? err.message : 'Connection failed'
         setError(errorMessage)
+        lastFailedMessageRef.current = text // P1-12: retryable
         // Remove the streaming assistant message on fetch error
         setMessages((prev) =>
           prev.filter((m) => m.id !== streamingMessageIdRef.current)
@@ -491,6 +502,16 @@ export function useChat(
     [isStreaming, conversationId, customerId, onDebugEvent, extraHeaders]
   )
 
+  // P1-12: the retry affordance for an aborted turn — resends the exact
+  // message whose turn died (the server saved the original user message,
+  // but the reply never came; a resend is a fresh turn).
+  const retryLastMessage = useCallback(() => {
+    const failed = lastFailedMessageRef.current
+    if (!failed || isStreaming) return
+    lastFailedMessageRef.current = null
+    void sendMessage(failed)
+  }, [isStreaming, sendMessage])
+
   return {
     messages,
     isStreaming,
@@ -500,6 +521,7 @@ export function useChat(
     customerId,
     sendMessage,
     sendAction,
+    retryLastMessage,
     suggestions,
     uiActions,
     answeredMessageIds,

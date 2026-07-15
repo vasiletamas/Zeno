@@ -10,8 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getEmailProvider } from '@/lib/email'
-import { magicLinkEmail } from '@/lib/email/templates/magic-link'
+import { issueChallenge } from '@/lib/customer/verification-service'
 
 export async function POST(request: NextRequest) {
   try {
@@ -35,10 +34,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ sent: true })
     }
 
-    // Generate token and set expiry (30 minutes)
-    const token = crypto.randomUUID()
-    const expiresAt = new Date(Date.now() + 30 * 60 * 1000)
-
     // Find or create User linked to this customer
     await prisma.user.upsert({
       where: { customerId: customer.id },
@@ -50,31 +45,10 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Update customer with magic link token
-    await prisma.customer.update({
-      where: { id: customer.id },
-      data: {
-        magicLinkToken: token,
-        magicLinkExpiresAt: expiresAt,
-      },
-    })
-
-    // Send magic link email
-    const appUrl = process.env.APP_URL || 'http://localhost:3001'
-    const magicLink = `${appUrl}/api/auth/verify?token=${token}`
-
-    const emailContent = magicLinkEmail({
-      customerName: customer.name || 'Client',
-      magicLink,
-      language: (customer.language as 'ro' | 'en') || 'ro',
-    })
-
-    const emailProvider = getEmailProvider()
-    await emailProvider.send({
-      to: customer.email!,
-      subject: emailContent.subject,
-      html: emailContent.html,
-    })
+    // B3.6: the link is the B3.4 challenge primitive (code + link in one
+    // email, 30-minute expiry). Dashboard-initiated → no conversation
+    // binding; /api/auth/verify redirects to /dashboard.
+    await issueChallenge(customer.id, 'email', customer.email!, null, prisma, undefined, 30 * 60 * 1000)
 
     return NextResponse.json({ sent: true })
   } catch {

@@ -1,17 +1,21 @@
 /**
- * DELETE /api/gdpr/delete-data
+ * DELETE /api/gdpr/delete-data (E3.4 — aligned under the retention table)
  *
- * GDPR Right to Erasure — anonymize customer PII, retain business records.
- * Auth: CUSTOMER (own data only) or ADMIN (any customer).
- *
- * Retained (legal/financial requirement): Policies, Payments, TurnTraces,
- * Conversation records (anonymized), assistant Messages.
+ * GDPR Right to Erasure. This route MUTATES NOTHING inline — the erasure
+ * executor owns every mutation under the retention policy (M3):
+ *  - CUSTOMER (own data only): creates a GDPR_ERASURE WorkItem → 202
+ *    { workItemId, status: 'pending_operator_approval' }.
+ *  - ADMIN: creates the WorkItem and approves it immediately through the
+ *    commit gateway (approve_erasure, actor=operator) → 200 with the
+ *    per-class report; the decision is ledger-recorded like any operator's.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken, COOKIE_NAME } from '@/lib/auth/jwt'
 import { prisma } from '@/lib/db'
-import { Prisma } from '@/lib/generated/prisma/client'
+import { createWorkItem } from '@/lib/work-items/service'
+import { executeCommit } from '@/lib/tools/gateway'
+import type { ToolContext } from '@/lib/tools/types'
 
 export async function DELETE(request: NextRequest) {
   try {
@@ -51,7 +55,7 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    // For CUSTOMER role, verify they can only delete own data
+    // For CUSTOMER role, verify they can only request erasure of own data
     if (payload.role === 'CUSTOMER') {
       const user = await prisma.user.findUnique({
         where: { id: payload.userId },
@@ -62,15 +66,7 @@ export async function DELETE(request: NextRequest) {
       }
     }
 
-    // Verify customer exists
-    const customer = await prisma.customer.findUnique({
-      where: { id: customerId },
-      include: {
-        conversations: { select: { id: true } },
-        user: { select: { id: true } },
-      },
-    })
-
+    const customer = await prisma.customer.findUnique({ where: { id: customerId }, select: { id: true } })
     if (!customer) {
       return NextResponse.json(
         { error: 'Customer not found' },
@@ -78,89 +74,40 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    const conversationIds = customer.conversations.map((c) => c.id)
-    const deletedFields: string[] = []
-    const retainedRecords: string[] = []
-
-    // 1. Anonymize Customer — set all PII fields to null
-    await prisma.customer.update({
-      where: { id: customerId },
-      data: {
-        name: null,
-        email: null,
-        phone: null,
-        cnpEncrypted: null,
-        cnpIv: null,
-        cnpTag: null,
-        address: Prisma.DbNull,
-        extractedProfile: Prisma.DbNull,
-        dateOfBirth: null,
-        isAnonymous: true,
-        magicLinkToken: null,
-        magicLinkExpiresAt: null,
-      },
+    const item = await createWorkItem({
+      kind: 'GDPR_ERASURE',
+      priority: 'HIGH',
+      reason: 'erasure_requested_via_dashboard',
+      refs: { customerId },
+      createdBy: `${payload.role}:${payload.userId}`,
     })
-    deletedFields.push(
-      'name',
-      'email',
-      'phone',
-      'cnp (encrypted)',
-      'address',
-      'extractedProfile',
-      'dateOfBirth',
-      'magicLinkToken',
-    )
 
-    // 2. Delete Answers for customer's conversations
-    if (conversationIds.length > 0) {
-      const deleteResult = await prisma.answer.deleteMany({
-        where: { conversationId: { in: conversationIds } },
-      })
-      deletedFields.push(`answers (${deleteResult.count} records)`)
+    if (payload.role !== 'ADMIN') {
+      return NextResponse.json({ workItemId: item.id, status: 'pending_operator_approval' }, { status: 202 })
     }
 
-    // 3. Anonymize user Messages — replace content
-    if (conversationIds.length > 0) {
-      const msgResult = await prisma.message.updateMany({
-        where: {
-          conversationId: { in: conversationIds },
-          role: 'user',
-        },
-        data: { content: '[Deleted per GDPR request]' },
-      })
-      deletedFields.push(`user messages anonymized (${msgResult.count} records)`)
+    // ADMIN approves immediately — through the SAME gateway commit an
+    // operator would use from the queue; the commit needs a conversation
+    // for its lock/snapshot, so use the customer's latest (or a service one).
+    const conversation =
+      (await prisma.conversation.findFirst({ where: { customerId }, orderBy: { createdAt: 'desc' }, select: { id: true } })) ??
+      (await prisma.conversation.create({ data: { customerId, channel: 'system' }, select: { id: true } }))
+    const ctx = { customerId, conversationId: conversation.id, language: 'ro', db: prisma } as unknown as ToolContext
+    const result = await executeCommit({
+      tool: 'approve_erasure',
+      actor: 'operator',
+      conversationId: conversation.id,
+      customerId,
+      args: { workItemId: item.id },
+      toolContext: ctx,
+    })
+    if (result.outcome !== 'applied') {
+      return NextResponse.json({ error: result.reason ?? 'rejected', workItemId: item.id }, { status: 409 })
     }
-
-    // 4. Deactivate User account
-    if (customer.user) {
-      await prisma.user.update({
-        where: { id: customer.user.id },
-        data: { isActive: false },
-      })
-      deletedFields.push('user account deactivated')
-    }
-
-    // Record retained items
-    retainedRecords.push(
-      'conversations (audit trail, anonymized)',
-      'policies (legal obligation)',
-      'payments (financial records)',
-      'turnTraces (operational, no PII)',
-      'assistant messages (agent responses)',
-    )
-
-    // Log the deletion
-    console.log(
-      `[GDPR Deletion] Completed for customer=${customerId}, ` +
-        `requestedBy=${payload.userId} (${payload.role}), ` +
-        `deletedFields=[${deletedFields.join(', ')}], ` +
-        `timestamp=${new Date().toISOString()}`,
-    )
-
     return NextResponse.json({
       success: true,
-      deletedFields,
-      retainedRecords,
+      workItemId: item.id,
+      classResults: (result.data as { classResults?: unknown[] })?.classResults ?? [],
     })
   } catch (error) {
     console.error('[GDPR Deletion] Error:', error)

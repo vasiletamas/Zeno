@@ -1,14 +1,23 @@
 /**
  * Quote Handlers
  *
- * generate_quote, get_quote_details, accept_quote, modify_quote
+ * generate_quote, get_quote_info, accept_quote, cancel_quote
  */
 
-import { prisma } from '@/lib/db'
 import { calculateQuote } from '@/lib/engines/quote-engine'
 import type { QuoteInput } from '@/lib/engines/quote-engine'
-import { getNextQuestion } from '@/lib/engines/questionnaire-engine'
-import { verifyConsents } from '@/lib/compliance/consent-check'
+import { decideQuoteIssue } from '@/lib/engines/quote-decision'
+import { canQuoteTransition, effectiveQuoteStatus, type QuoteStatusV3 } from '@/lib/engines/quote-lifecycle'
+import { disclosuresRequired, type DisclosureRef } from '@/lib/engines/disclosures'
+import { buildSchedule, type PaymentFrequency } from '@/lib/engines/payment-schedule'
+import { getProductDisclosureDocuments } from '@/lib/documents/registry'
+import { evaluateEligibility } from '@/lib/engines/eligibility'
+import { deriveSuitability } from '@/lib/engines/derive-and-expose'
+import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
+import { getAge } from '@/lib/customer/profile-service'
+import { createReferralWorkItem } from '@/lib/work-items/referral'
+import { generateSuitabilityReport } from '@/lib/compliance/suitability-report'
+import { loadActiveApplication } from './application-handlers'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackQuoteGenerated, trackQuoteAccepted } from '@/lib/analytics/events'
 
@@ -18,69 +27,100 @@ import { trackQuoteGenerated, trackQuoteAccepted } from '@/lib/analytics/events'
 
 export const generateQuote: ToolHandler = async (_args, context) => {
   try {
-    // Verify GDPR consents before generating quote
-    const consents = await verifyConsents(context.conversationId)
-    if (!consents.valid) {
-      return {
-        success: false,
-        error: `GDPR consents required: missing ${consents.missing.join(', ')}`,
-      }
-    }
-
-    // Load application (must be COMPLETED)
-    const application = await prisma.application.findUnique({
-      where: { conversationId: context.conversationId },
-    })
-
+    const application = await loadActiveApplication(context)
     if (!application) {
-      return { success: false, error: 'No application found.' }
+      return { success: false, error: 'no_open_application: no application found.' }
     }
-    if (application.status !== 'COMPLETED') {
-      return {
-        success: false,
-        error: `Application is not complete (status: ${application.status}). Please finish the questionnaire first.`,
-      }
+    // T7.D1 belt (legality is the wall): a Quote row in ANY state — or a
+    // set frozenAt — freezes the application; recovery is cancel_quote + a
+    // new application, never a re-issue.
+    const quoteCount = await context.db.quote.count({ where: { applicationId: application.id } })
+    if (quoteCount > 0 || application.frozenAt !== null) {
+      return { success: false, error: 'application_frozen: the application froze when its quote was issued — cancel the quote and open a new application to change anything.' }
     }
-
-    // Need tierId + levelId
+    if (application.status !== 'OPEN') {
+      return { success: false, error: `illegal_status_transition: a ${application.status} application is not quotable.` }
+    }
     if (!application.tierId || !application.levelId) {
+      return { success: false, error: 'selection_incomplete: choose the package and level first (select_coverage).' }
+    }
+
+    // ── the typed decision (D1.3): identity → compliance → eligibility →
+    // suitability → referral — every input engine-derived, nothing guessed
+    const snapshot = await loadDomainSnapshot(context.conversationId, context.db)
+    const age = await getAge(application.customerId, new Date(), context.db as Parameters<typeof getAge>[2])
+    const eligibilityRules = snapshot.product?.eligibilityRules ?? null
+    const eligFacts = {
+      ...snapshot.eligibilityFacts,
+      ...Object.fromEntries(Object.entries(snapshot.answers).map(([c, v]) => [`answer:${c}`, v])),
+    }
+    const productElig = eligibilityRules ? evaluateEligibility(eligibilityRules, eligFacts, 'product') : { verdict: 'eligible' as const, failedRules: [], missingFacts: [] }
+    const addonElig = eligibilityRules && application.includesAddon ? evaluateEligibility(eligibilityRules, eligFacts, 'addon') : null
+    const mergedElig = {
+      verdict: (productElig.verdict === 'ineligible' || addonElig?.verdict === 'ineligible')
+        ? 'ineligible' as const
+        : (productElig.verdict === 'unknown' || addonElig?.verdict === 'unknown') ? 'unknown' as const : 'eligible' as const,
+      failedRules: [...productElig.failedRules, ...(addonElig?.failedRules ?? [])].map((f) => ({ rule: f.rule.id, reason: f.reason })),
+      missingFacts: [...new Set([...productElig.missingFacts, ...(addonElig?.missingFacts ?? [])])],
+    }
+    const suitabilityRules = snapshot.product?.suitabilityRules ?? null
+    const suitability = deriveSuitability(snapshot) ?? { verdict: 'suitable' as const, mismatches: [] }
+    const flags = (application.flagsForReview as Array<{ questionCode?: string; reason?: string; action?: string }> | null) ?? []
+    const decision = decideQuoteIssue({
+      eligibility: mergedElig,
+      suitability: { verdict: suitability.verdict, mismatches: suitability.mismatches.map((m) => ({ rule: m.rule.id, reason: m.reason })) },
+      suitabilityWarningAcked: suitabilityRules !== null && snapshot.suitabilityAcks.some((a) => a.ruleSetVersion === suitabilityRules.version),
+      suitabilityPolicy: suitabilityRules?.mode ?? 'warn_and_allow',
+      consents: { gdprProcessing: snapshot.consents.gdprProcessing },
+      dnt: { validForProductType: snapshot.dnt.valid && (snapshot.product ? snapshot.dnt.coversProductTypes.includes(snapshot.product.insuranceType) : false) },
+      identity: { hasDobOrCnp: age !== null },
+      escalationFlags: flags.filter((f) => f.action === 'escalate').map((f) => f.questionCode ?? f.reason ?? 'flag'), // erratum 9 mapping
+    })
+    const decided = JSON.parse(JSON.stringify({ ...decision, decidedAt: new Date().toISOString() }))
+
+    if (decision.outcome === 'requires_identity') {
+      // T7.D4: the decision is an audit fact even when it demands data —
+      // keepWrites exempts it from the P0-2 rollback-on-rejection.
+      await context.db.application.update({ where: { id: application.id }, data: { quoteDecision: decided } })
+      return { success: false, error: 'requires_identity: the quote needs identity facts first.', data: { needs: decision.needs }, keepWrites: true }
+    }
+    if (decision.outcome === 'rejected') {
+      await context.db.application.update({ where: { id: application.id }, data: { quoteDecision: decided } })
+      return { success: false, error: `${decision.reason}: the quote decision rejected the application.`, keepWrites: true }
+    }
+    if (decision.outcome === 'referred') {
+      // REFERRED + WorkItem in this same gateway transaction (E2 contract)
+      await context.db.application.update({ where: { id: application.id }, data: { status: 'REFERRED', quoteDecision: decided } })
+      await createReferralWorkItem({
+        applicationId: application.id,
+        customerId: application.customerId,
+        conversationId: context.conversationId,
+        reason: `manual_underwriting: ${flags.filter((f) => f.action === 'escalate').map((f) => f.reason ?? f.questionCode).join('; ') || 'escalation flags present'}`,
+      }, context.db as Parameters<typeof createReferralWorkItem>[1])
       return {
-        success: false,
-        error: 'Application is missing package or premium level selection.',
+        success: true,
+        referred: { reason: 'manual_underwriting' },
+        effects: ['eligibility_recheck'],
+        data: { referred: true, applicationId: application.id },
+        message: 'The application was referred for manual underwriting — an operator will review it. The customer will be notified of the outcome.',
       }
     }
 
-    // Load PricingLevel with PricingTier
-    const pricingLevel = await prisma.pricingLevel.findUnique({
+    // ── issued: price with the DERIVED age (the 30-fallback is dead — the
+    // decision above guarantees age is known), create the ISSUED quote and
+    // FREEZE the application in this same transaction (T7.D1)
+    const customerAge = age! // decision guarantees non-null
+    const pricingLevel = await context.db.pricingLevel.findUnique({
       where: { id: application.levelId },
       include: { tier: true },
     })
     if (!pricingLevel) {
       return { success: false, error: 'Pricing level not found.' }
     }
-
-    // Calculate customer age from Customer.dateOfBirth
-    let customerAge = 30 // fallback
-    const customer = await prisma.customer.findUnique({
-      where: { id: application.customerId },
-    })
-    if (customer?.dateOfBirth) {
-      const today = new Date()
-      const dob = customer.dateOfBirth
-      customerAge = today.getFullYear() - dob.getFullYear()
-      const monthDiff = today.getMonth() - dob.getMonth()
-      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
-        customerAge--
-      }
-    }
-
-    // Load base CoverageAmounts for this pricing level
-    const baseCoverageAmounts = await prisma.coverageAmount.findMany({
+    const baseCoverageAmounts = await context.db.coverageAmount.findMany({
       where: { pricingLevelId: pricingLevel.id },
       include: { coverageType: true },
     })
-
-    // Filter age-based coverages
     const baseCoverages = baseCoverageAmounts
       .filter(ca => {
         if (ca.isAgeBased) {
@@ -98,35 +138,16 @@ export const generateQuote: ToolHandler = async (_args, context) => {
         currency: ca.currency,
       }))
 
-    // Load addon pricing if applicable
     let addonPricingRule: { premiumAnnual: number } | null = null
-    let addonCoverages: {
-      code: string
-      name: { en: string; ro: string }
-      amount: number
-      currency: string
-    }[] = []
-
+    let addonCoverages: { code: string; name: { en: string; ro: string }; amount: number; currency: string }[] = []
     if (application.includesAddon) {
-      // Find addon for this product
-      const addon = await prisma.addon.findFirst({
+      const addon = await context.db.addon.findFirst({
         where: { productId: application.productId, isActive: true },
-        include: {
-          pricingRules: true,
-          coverageAmounts: { include: { coverageType: true } },
-        },
+        include: { pricingRules: true, coverageAmounts: { include: { coverageType: true } } },
       })
-
       if (addon) {
-        // Find pricing rule matching customer age
-        const matchingRule = addon.pricingRules.find(
-          r => customerAge >= r.minAge && customerAge <= r.maxAge,
-        )
-        if (matchingRule) {
-          addonPricingRule = { premiumAnnual: matchingRule.premiumAnnual }
-        }
-
-        // Addon coverages
+        const matchingRule = addon.pricingRules.find(r => customerAge >= r.minAge && customerAge <= r.maxAge)
+        if (matchingRule) addonPricingRule = { premiumAnnual: matchingRule.premiumAnnual }
         addonCoverages = addon.coverageAmounts.map(ca => ({
           code: ca.coverageType.code,
           name: ca.coverageType.name as { en: string; ro: string },
@@ -136,57 +157,23 @@ export const generateQuote: ToolHandler = async (_args, context) => {
       }
     }
 
-    // Detect payment frequency from application answers
-    let paymentFrequency: 'annual' | 'semi_annual' | 'quarterly' = 'annual'
-    const paymentQuestion = await prisma.question.findFirst({
-      where: { code: 'PAYMENT_FREQUENCY' },
-    })
-    if (paymentQuestion) {
-      const paymentAnswer = await prisma.answer.findUnique({
-        where: {
-          questionId_conversationId: {
-            questionId: paymentQuestion.id,
-            conversationId: context.conversationId,
-          },
-        },
-      })
-      if (paymentAnswer) {
-        const val = paymentAnswer.value as string
-        if (val === 'semi_annual' || val === 'quarterly') {
-          paymentFrequency = val
-        }
-      }
-    }
-
-    // Load product for quoteValidityDays
-    const product = await prisma.product.findUnique({
-      where: { id: application.productId },
-    })
-
-    // Build QuoteInput
+    const product = await context.db.product.findUnique({ where: { id: application.productId } })
     const quoteInput: QuoteInput = {
       tierCode: pricingLevel.tier.code,
       levelCode: pricingLevel.code,
       customerAge,
       includesAddon: application.includesAddon,
-      paymentFrequency,
-      pricingLevel: {
-        premiumAnnual: pricingLevel.premiumAnnual,
-        name: pricingLevel.name as { en: string; ro: string },
-      },
-      pricingTier: {
-        name: pricingLevel.tier.name as { en: string; ro: string },
-      },
+      paymentFrequency: 'annual', // display default; the CONTRACT frequency is elected at accept (T7.D3)
+      pricingLevel: { premiumAnnual: pricingLevel.premiumAnnual, name: pricingLevel.name as { en: string; ro: string } },
+      pricingTier: { name: pricingLevel.tier.name as { en: string; ro: string } },
       baseCoverages,
       addonPricingRule,
       addonCoverages,
       quoteValidityDays: product?.quoteValidityDays ?? 30,
     }
-
     const result = calculateQuote(quoteInput)
 
-    // Create Quote record
-    const quote = await prisma.quote.create({
+    const quote = await context.db.quote.create({
       data: {
         applicationId: application.id,
         productId: application.productId,
@@ -195,7 +182,7 @@ export const generateQuote: ToolHandler = async (_args, context) => {
         premiumMonthly: result.premiumMonthly,
         premiumSemiAnnual: result.premiumSemiAnnual,
         premiumQuarterly: result.premiumQuarterly,
-        paymentFrequency,
+        paymentFrequency: null, // elected at accept_quote, never at issue (T7.D3)
         currency: 'RON',
         coverages: JSON.parse(JSON.stringify({
           baseCoverages: result.baseCoverages,
@@ -208,10 +195,22 @@ export const generateQuote: ToolHandler = async (_args, context) => {
         addonsSelected: application.includesAddon
           ? JSON.parse(JSON.stringify({ included: true, addonPremiumAnnual: result.addonPremiumAnnual }))
           : undefined,
-        status: 'DRAFT',
+        status: 'ISSUED' as const,
         validUntil: result.validUntil,
       },
     })
+    await context.db.application.update({
+      where: { id: application.id },
+      data: { status: 'COMPLETED', completedAt: new Date(), frozenAt: new Date(), quoteDecision: decided },
+    })
+
+    // M7/IDD timing (C3.6 flip): the suitability report registers AT
+    // issuance, inside this transaction; the post-payment path died with it.
+    try {
+      await generateSuitabilityReport(quote.id, context.db as Parameters<typeof generateSuitabilityReport>[1])
+    } catch (e) {
+      console.error('[generate_quote] suitability report generation failed (quote stands):', e)
+    }
 
     trackQuoteGenerated(application.customerId, result.premiumAnnual)
 
@@ -224,7 +223,6 @@ export const generateQuote: ToolHandler = async (_args, context) => {
         premiumMonthly: result.premiumMonthly,
         premiumSemiAnnual: result.premiumSemiAnnual,
         premiumQuarterly: result.premiumQuarterly,
-        paymentFrequency,
         basePremiumAnnual: result.basePremiumAnnual,
         addonPremiumAnnual: result.addonPremiumAnnual,
         baseCoverages: result.baseCoverages as unknown as Record<string, unknown>[],
@@ -232,8 +230,9 @@ export const generateQuote: ToolHandler = async (_args, context) => {
         pricingTierLabel: result.pricingTierLabel as unknown as Record<string, unknown>,
         pricingLevelLabel: result.pricingLevelLabel as unknown as Record<string, unknown>,
         validUntil: result.validUntil.toISOString(),
+        applicationFrozen: true,
       },
-      message: `Quote generated: ${result.premiumAnnual} RON/year (${result.premiumMonthly} RON/month). Valid until ${result.validUntil.toISOString().split('T')[0]}.`,
+      message: `Quote issued: ${result.premiumAnnual} RON/year (${result.premiumMonthly} RON/month), valid until ${result.validUntil.toISOString().split('T')[0]}. The application is now frozen — changes require cancelling the quote and re-applying.`,
       uiAction: {
         type: 'show_quote',
         payload: {
@@ -255,26 +254,24 @@ export const generateQuote: ToolHandler = async (_args, context) => {
 }
 
 // ─────────────────────────────────────────────
-// get_quote_details
+// get_quote_info (D1.6 — get_quote_details renamed)
 // ─────────────────────────────────────────────
 
-export const getQuoteDetails: ToolHandler = async (args, context) => {
+export const getQuoteInfo: ToolHandler = async (args, context) => {
   try {
     const quoteId = args.quoteId as string | undefined
 
     let quote
 
     if (quoteId) {
-      quote = await prisma.quote.findUnique({
+      quote = await context.db.quote.findUnique({
         where: { id: quoteId },
       })
     } else {
-      // Find quote via application for this conversation
-      const application = await prisma.application.findUnique({
-        where: { conversationId: context.conversationId },
-      })
+      // Find quote via the conversation's active application (B4)
+      const application = await loadActiveApplication(context)
       if (application) {
-        quote = await prisma.quote.findUnique({
+        quote = await context.db.quote.findUnique({
           where: { applicationId: application.id },
         })
       }
@@ -284,8 +281,35 @@ export const getQuoteDetails: ToolHandler = async (args, context) => {
       return { success: false, error: 'No quote found.' }
     }
 
+    // T7.D5: reads speak the EFFECTIVE status through the one pure predicate
+    // and never write — opportunistic EXPIRED persistence is the gateway's.
+    const status = effectiveQuoteStatus({ status: quote.status as QuoteStatusV3, validUntil: quote.validUntil }, new Date())
+
+    // T7.D3: the contract frequency is elected at accept_quote — until then
+    // the read bundles the product's offered options against the quote's
+    // priced variants (no monthly: it is a display figure, not an offer).
+    const product = await context.db.product.findUnique({ where: { id: quote.productId } })
+    const freqOptions = product?.paymentFrequencyOptions as Record<string, unknown> | null
+    const variant: Record<string, number | null> = {
+      annual: quote.premiumAnnual,
+      semi_annual: quote.premiumSemiAnnual,
+      quarterly: quote.premiumQuarterly,
+    }
+    const payment_options = Object.keys(freqOptions ?? {})
+      .filter((opt) => variant[opt] != null)
+      .map((opt) => ({ option: opt, amount: variant[opt]!, currency: quote.currency }))
+
     const coverages = quote.coverages as Record<string, unknown>
     const addonsSelected = quote.addonsSelected as Record<string, unknown> | null
+
+    // D2.3 (T7.D2): the disclosure gate — which current documents still lack
+    // an ack bound to their exact (kind, version, language) identity
+    const disclosureDocs = await getProductDisclosureDocuments(quote.productId, context.language ?? 'ro', context.db)
+    const ackRows = await context.db.disclosureAck.findMany({ where: { quoteId: quote.id } })
+    const disclosures_required = disclosuresRequired(
+      disclosureDocs.map((d) => ({ kind: d.kind as DisclosureRef['kind'], version: d.version, language: d.language })),
+      ackRows.map((a) => ({ kind: a.kind as DisclosureRef['kind'], version: a.version, language: a.language })),
+    )
 
     return {
       success: true,
@@ -297,12 +321,15 @@ export const getQuoteDetails: ToolHandler = async (args, context) => {
         premiumQuarterly: quote.premiumQuarterly,
         paymentFrequency: quote.paymentFrequency,
         currency: quote.currency,
-        status: quote.status,
+        status,
         validUntil: quote.validUntil.toISOString(),
         coverages,
         addonsSelected,
+        payment_options,
+        disclosures_required,
+        documents: disclosureDocs.map((d) => ({ kind: d.kind, version: d.version, language: d.language, url: `/api/documents/${d.id}` })),
       },
-      message: `Quote details: ${quote.premiumAnnual} RON/year. Status: ${quote.status}.`,
+      message: `Quote info: ${quote.premiumAnnual} RON/year. Status: ${status}.`,
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -313,127 +340,79 @@ export const getQuoteDetails: ToolHandler = async (args, context) => {
 // accept_quote
 // ─────────────────────────────────────────────
 
+/**
+ * D2.5 (T7.D6): NARROW accept — CAS ISSUED→ACCEPTED with the immutable
+ * acceptance evidence (paymentFrequency + acceptedAt, written HERE and never
+ * again) and the transactional schedule (contradiction #3: integer minor
+ * units, the live money truth from this moment). NO Policy (it is created
+ * at first successful settlement — contradiction #5) and NO conversation
+ * close (contradiction #11). Legality (expiry/transition/identity/
+ * disclosures) lives in the pure acceptQuoteLegality consumed by
+ * deriveAndExpose — never re-decided here (erratum 1).
+ */
 export const acceptQuote: ToolHandler = async (args, context) => {
-  const confirmAcceptance = args.confirmAcceptance as boolean
-
   try {
-    if (!confirmAcceptance) {
-      return { success: false, error: 'Confirmation is required to accept the quote.' }
-    }
-
-    // Find quote via application for this conversation
-    const application = await prisma.application.findUnique({
-      where: { conversationId: context.conversationId },
-    })
+    const paymentOption = args.paymentOption as PaymentFrequency
+    const application = await loadActiveApplication(context)
     if (!application) {
-      return { success: false, error: 'No application found.' }
+      return { success: false, error: 'no_open_application: no application found.' }
     }
-
-    const quote = await prisma.quote.findUnique({
-      where: { applicationId: application.id },
+    const quote = await context.db.quote.findFirst({
+      where: { applicationId: application.id, status: 'ISSUED' },
+      orderBy: { createdAt: 'desc' },
     })
     if (!quote) {
-      return { success: false, error: 'No quote found.' }
+      return { success: false, error: 'no_issued_quote: there is no issued quote to accept.' }
+    }
+    // the elected frequency must be one the PRODUCT offers (T7.D3)
+    const product = await context.db.product.findUnique({ where: { id: quote.productId }, select: { paymentFrequencyOptions: true } })
+    const offered = Object.keys((product?.paymentFrequencyOptions as Record<string, unknown> | null) ?? {})
+    if (!offered.includes(paymentOption)) {
+      return { success: false, error: `invalid_args: payment option "${paymentOption}" is not offered for this product (${offered.join(', ')}).` }
     }
 
-    if (quote.status !== 'DRAFT') {
-      return { success: false, error: `Quote is not in DRAFT status (current: ${quote.status}).` }
-    }
-
-    // Check expiry
-    if (new Date() > quote.validUntil) {
-      await prisma.quote.update({
-        where: { id: quote.id },
-        data: { status: 'EXPIRED' },
-      })
-      return { success: false, error: 'Quote has expired. Please generate a new quote.' }
-    }
-
-    // Update Quote status -> ACCEPTED
-    await prisma.quote.update({
-      where: { id: quote.id },
-      data: { status: 'ACCEPTED' },
+    const now = new Date()
+    const cas = await context.db.quote.updateMany({
+      where: { id: quote.id, status: 'ISSUED' },
+      data: { status: 'ACCEPTED', paymentFrequency: paymentOption, acceptedAt: now },
     })
-
-    // Create Policy (PENDING_SUBMISSION)
-    const policy = await prisma.policy.create({
+    if (cas.count === 0) {
+      return { success: false, error: 'illegal_status_transition: the quote left ISSUED between legality and apply.' }
+    }
+    const rows = buildSchedule({ premiumAnnual: quote.premiumAnnual, frequency: paymentOption, startAt: now })
+    const schedule = await context.db.paymentSchedule.create({
       data: {
         quoteId: quote.id,
         customerId: quote.customerId,
-        productId: quote.productId,
-        status: 'PENDING_SUBMISSION',
-        premiumAnnual: quote.premiumAnnual,
-        premiumMonthly: quote.premiumMonthly,
+        frequency: paymentOption,
+        totalInstallments: rows.length,
         currency: quote.currency,
-        coverageSummary: JSON.parse(JSON.stringify(quote.coverages)),
-        issuedAt: new Date(),
+        installments: { create: rows },
       },
+      include: { installments: { orderBy: { sequence: 'asc' } } },
     })
 
     trackQuoteAccepted(quote.customerId, quote.premiumAnnual)
 
-    // Update Conversation status -> COMPLETED
-    await prisma.conversation.update({
-      where: { id: context.conversationId },
-      data: {
-        status: 'COMPLETED',
-        completedAt: new Date(),
-      },
-    })
-
-    // Load tier/level names for uiAction payload
-    const appWithPricing = await prisma.application.findUnique({
-      where: { id: application.id },
-      include: {
-        tier: { select: { name: true } },
-        level: { select: { name: true } },
-      },
-    })
-
-    const tierName = (appWithPricing?.tier?.name ?? { en: 'Standard', ro: 'Standard' }) as { en: string; ro: string }
-    const levelName = (appWithPricing?.level?.name ?? { en: 'Level', ro: 'Nivel' }) as { en: string; ro: string }
-    const includesAddon = appWithPricing?.includesAddon ?? false
-
-    // Calculate total coverage from coverages data
-    const coveragesData = quote.coverages as Record<string, unknown>
-    const baseCovs = (coveragesData?.baseCoverages ?? []) as Array<{ amount: number; currency: string }>
-    const addonCovs = (coveragesData?.addonCoverages ?? []) as Array<{ amount: number; currency: string }>
-    const allCovs = [...baseCovs, ...addonCovs]
-
-    // Group by currency and sum
-    const totals = new Map<string, number>()
-    for (const c of allCovs) {
-      totals.set(c.currency, (totals.get(c.currency) ?? 0) + c.amount)
-    }
-    const totalParts = Array.from(totals.entries()).map(([cur, amt]) => {
-      const formatted = amt >= 1_000_000
-        ? `${(amt / 1_000_000).toLocaleString('ro-RO')} M ${cur}`
-        : `${amt.toLocaleString('ro-RO')} ${cur}`
-      return formatted
-    })
-    const totalCoverage = totalParts.join(' + ') || `${quote.premiumAnnual} RON`
-
+    const first = schedule.installments[0]
     return {
       success: true,
       data: {
-        policyCreated: true,
-        policyId: policy.id,
-        policyStatus: 'PENDING_SUBMISSION',
         quoteId: quote.id,
-        premiumAnnual: quote.premiumAnnual,
-        premiumMonthly: quote.premiumMonthly,
+        paymentOption,
+        acceptedAt: now.toISOString(),
+        scheduleId: schedule.id,
+        totalInstallments: schedule.totalInstallments,
+        firstInstallment: { amountMinor: first.amountMinor, dueAt: first.dueAt.toISOString() },
       },
       message:
-        'Quote accepted! Your policy has been created and is pending submission to Allianz. An operator will process it shortly.',
+        `Quote accepted with ${paymentOption} payment: ${schedule.totalInstallments} installment(s), first ${(first.amountMinor / 100).toFixed(2)} RON due now. Payment follows — the policy is issued at the first successful payment.`,
       uiAction: {
-        type: 'show_policy_issued',
+        type: 'show_quote_accepted',
         payload: {
-          policyId: policy.id,
-          tierName,
-          levelName,
-          includesAddon,
-          premiumMonthly: quote.premiumMonthly,
-          totalCoverage,
+          quoteId: quote.id,
+          paymentOption,
+          firstInstallment: { amountMinor: first.amountMinor, dueAt: first.dueAt.toISOString() },
         } as unknown as Record<string, unknown>,
       },
     }
@@ -443,88 +422,105 @@ export const acceptQuote: ToolHandler = async (args, context) => {
 }
 
 // ─────────────────────────────────────────────
-// modify_quote
+// acknowledge_disclosures (D2.3, T7.D2)
 // ─────────────────────────────────────────────
 
-export const modifyQuote: ToolHandler = async (_args, context) => {
+export const acknowledgeDisclosures: ToolHandler = async (_args, context) => {
   try {
-    // Find application and current quote
-    const application = await prisma.application.findUnique({
-      where: { conversationId: context.conversationId },
-    })
+    const application = await loadActiveApplication(context)
     if (!application) {
-      return { success: false, error: 'No application found.' }
+      return { success: false, error: 'no_open_application: no application found.' }
     }
-
-    const quote = await prisma.quote.findUnique({
-      where: { applicationId: application.id },
+    const quote = await context.db.quote.findFirst({
+      where: { applicationId: application.id, status: 'ISSUED' },
+      orderBy: { createdAt: 'desc' },
     })
     if (!quote) {
-      return { success: false, error: 'No quote found to modify.' }
+      return { success: false, error: 'no_issued_quote: there is no issued quote to acknowledge disclosures for.' }
     }
-
-    // Expire current quote
-    await prisma.quote.update({
-      where: { id: quote.id },
-      data: { status: 'EXPIRED' },
-    })
-
-    // Reset Application for re-selection
-    await prisma.application.update({
-      where: { id: application.id },
-      data: {
-        tierId: null,
-        levelId: null,
-        currentQuestionIndex: 0,
-        status: 'OPEN',
-        completedAt: null,
-      },
-    })
-
-    // Delete the selection answers (PACKAGE_CHOICE, PREMIUM_LEVEL, BD_ADDON_INTEREST, PAYMENT_FREQUENCY)
-    // so the customer can re-answer them
-    const specialCodes = ['PACKAGE_CHOICE', 'PREMIUM_LEVEL', 'BD_ADDON_INTEREST', 'PAYMENT_FREQUENCY']
-    const specialQuestions = await prisma.question.findMany({
-      where: { code: { in: specialCodes } },
-    })
-    if (specialQuestions.length > 0) {
-      await prisma.answer.deleteMany({
-        where: {
-          conversationId: context.conversationId,
-          questionId: { in: specialQuestions.map(q => q.id) },
+    const language = context.language ?? 'ro'
+    const docs = await getProductDisclosureDocuments(quote.productId, language, context.db)
+    const acks = await context.db.disclosureAck.findMany({ where: { quoteId: quote.id } })
+    // one row per still-missing document, inside the gateway tx; duplicates
+    // are answered by the ledger replay (identical args on the same quote)
+    // plus the @@unique([quoteId, kind, version, language]) belt
+    const missing = disclosuresRequired(
+      docs.map((d) => ({ kind: d.kind as DisclosureRef['kind'], version: d.version, language: d.language, documentId: d.id })),
+      acks.map((a) => ({ kind: a.kind as DisclosureRef['kind'], version: a.version, language: a.language })),
+    )
+    for (const doc of missing) {
+      await context.db.disclosureAck.create({
+        data: {
+          quoteId: quote.id,
+          customerId: quote.customerId,
+          documentId: doc.documentId,
+          kind: doc.kind,
+          version: doc.version,
+          language: doc.language,
+          actor: String(context.actor ?? 'agent'),
+          sourceCommitId: context.commitId ?? null,
         },
       })
     }
-
-    // Get next question
-    const nextResult = await getNextQuestion(['application'], context.conversationId)
-
-    const lang = context.language ?? 'ro'
-    let nextQuestionData: Record<string, unknown> | null = null
-    if (nextResult) {
-      const nq = nextResult.question
-      const nqText = nq.text as { en: string; ro: string }
-      nextQuestionData = {
-        id: nq.id,
-        code: nq.code,
-        text: nqText[lang],
-        type: nq.type,
-        options: nq.options,
-      }
-    }
-
     return {
       success: true,
-      data: {
-        modificationStarted: true,
-        oldQuoteId: quote.id,
-        applicationId: application.id,
-        nextQuestion: nextQuestionData,
-      },
-      message:
-        'Quote expired. Application reopened for package/level re-selection. Please answer the questions to generate an updated quote.',
+      data: { acknowledged: missing.map(({ kind, version, language: lang }) => ({ kind, version, language: lang })) },
+      message: missing.length > 0
+        ? `Disclosure documents acknowledged: ${missing.map((m) => `${m.kind} v${m.version}`).join(', ')}.`
+        : 'All disclosure documents were already acknowledged.',
     }
   } catch (error) {
     return { success: false, error: String(error) }
   }
 }
+
+// ─────────────────────────────────────────────
+// cancel_quote (D1.5)
+// ─────────────────────────────────────────────
+
+export const cancelQuote: ToolHandler = async (_args, context) => {
+  try {
+    const application = await loadActiveApplication(context)
+    if (!application) {
+      return { success: false, error: 'no_open_application: no application found.' }
+    }
+    const quote = await context.db.quote.findFirst({
+      where: { applicationId: application.id, status: 'ISSUED' },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!quote) {
+      return { success: false, error: 'no_issued_quote: there is no issued quote to cancel.' }
+    }
+    // The transition table is the SSOT; expiry never lives here — the
+    // gateway persists EXPIRED pre-legality (erratum 1), so an expired quote
+    // is rejected before this handler runs.
+    if (!canQuoteTransition(quote.status as QuoteStatusV3, 'CANCELLED')) {
+      return { success: false, error: `illegal_status_transition: a ${quote.status} quote cannot be cancelled.` }
+    }
+    const cas = await context.db.quote.updateMany({
+      where: { id: quote.id, status: 'ISSUED' },
+      data: { status: 'CANCELLED' },
+    })
+    if (cas.count === 0) {
+      return { success: false, error: 'illegal_status_transition: the quote left ISSUED between legality and apply.' }
+    }
+    // T13.D2 recovery: release the conversation pointer. The frozen
+    // application stays as the audit record of what was priced — the only
+    // change path is a NEW application, prefilled via B4 proposals.
+    await context.db.conversation.update({
+      where: { id: context.conversationId },
+      data: { activeApplicationId: null },
+    })
+    return {
+      success: true,
+      effects: ['terminal'],
+      data: { cancelledQuoteId: quote.id, applicationId: application.id },
+      message: 'Quote cancelled. The application stays frozen for the record — to get a different quote, start a new application (previous answers are offered as prefill).',
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
+
+// modify_quote died at D1.7 (T13.D2): the quote is the immutable priced
+// artifact — the only change path is cancel_quote + a new application.

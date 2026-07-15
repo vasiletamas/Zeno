@@ -71,6 +71,8 @@ async function main() {
   }
   console.log(`\n==== ${pass}/${trials} trials clean (pivots to Protect, no invented categories) ====`)
   await prisma.$disconnect()
+  // live handles keep the loop alive - exit explicitly for battery runners
+  process.exit(pass === trials ? 0 : 1)
 }
 
 main().catch((e) => { console.error(e); process.exit(1) })

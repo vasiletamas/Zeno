@@ -24,18 +24,22 @@ import { executeToolWithPipeline } from '@/lib/tools/pipeline'
 import { buildToolContext } from './context-builder'
 import { createSSEStream, pickStatusMessage, type SSEEvent } from './stream-handler'
 import type { ToolContext, PipelineResult, ToolResult } from '@/lib/tools/types'
-import { buildPrompt, type GateSelection, type PromptSections } from './prompt-builder'
-import { getRequiredSectionsForPhase, formatDerivedBriefing } from './phase-sections-map'
-import { deriveState, type DerivedState } from './derive-state'
+import { buildPrompt, detectFirstTurn, type GateSelection, type PromptSections } from './prompt-builder'
+import { accumulateTurnUsage } from './turn-usage'
+import { buildTurnMessages } from './build-turn-messages'
+import { getRequiredSectionsFor, formatDerivedBriefing, includeDiscoveryConduct } from './phase-sections-map'
+import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
+import { deriveAndExpose, engineVersion } from '@/lib/engines/derive-and-expose'
+import type { DeriveAndExposeResult, Phase, AppSubphase } from '@/lib/engines/domain-types'
 import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
-import { loadAllSections, loadStateGrounding, loadCustomerInsights, type WorkflowSessionData, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
-import { withDefaultDiscoveryTools } from './default-tools'
-import { loadTurnContext, type TurnContext } from './turn-context'
-import { getConversationPhase } from './phase'
+import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, loadDntContext, loadPaymentContext, loadPolicyContext, loadQuestionnaireContextForState, getLastInjectedProductContentVersions, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
+import { buildTurnTools, DEGRADED_FLOOR } from './turn-tools'
+import { shouldRefreshExposure, formatRoundRefreshMessage } from './round-refresh'
+import { evaluateTurnInvariants, recommendedActionsFromBriefing } from '@/lib/monitors/turn-invariants'
+import { loadTurnContext, reactivateIfArchived, type TurnContext } from './turn-context'
 import { inferCandidate, hasAnyCategoryKeyword } from './candidate-inference'
 import { resolveAgent } from './agent-resolver'
-import { getActiveSkillPacks, mergeSkillPackSections, computeAllowedTools } from '@/lib/skills/skill-pack-loader'
-import { executeComplianceCheck, type ComplianceCheckResult } from './compliance-checker'
+import { executeComplianceCheck, shouldRunComplianceCheck, COMPLIANCE_RELEVANT_BY_PHASE, type ComplianceCheckResult } from './compliance-checker'
 import { trackChatStarted } from '@/lib/analytics/events'
 import { estimateTokens, calculateMessageBudget } from '@/lib/chat/token-budget'
 import { compactMessages } from '@/lib/chat/compaction'
@@ -43,11 +47,10 @@ import { isContextLengthError, parseTokenDeficit } from '@/lib/llm/errors'
 import { logError, logWarn, logFatal } from '@/lib/errors/logger'
 import { extractAndPersistInsights } from '@/lib/insights/extractor'
 import { CircuitOpenError, TimeoutError } from '@/lib/errors/types'
-import { eventBus, initObservability, getTurnCost, getTurnAnomalies, getTurnToolHistory } from '@/lib/events'
+import { eventBus, initObservability, getTurnCost, getTurnAnomalies, getTurnToolHistory, recordTurnAnomaly } from '@/lib/events'
 import { validateSideEffectClaims } from './side-effect-validator'
 import { detectToolNarration, type ToolNarrationResult } from './tool-narration-detector'
-import { applyABTestVariant } from '@/lib/self-improvement/ab-test-assigner'
-import { debugYield, isDev, buildIdentityPayload, recordDebugEvent, type DebugEvent } from './debug'
+import { debugYield, isDev, buildIdentityPayload, buildLegalityPayload, recordDebugEvent, type DebugEvent, type DebugGatePayload } from './debug'
 import { serializeToolResultForModel } from './tool-result-serializer'
 import { persistTurnDebug } from './turn-debug-persistence'
 
@@ -127,19 +130,27 @@ interface TurnState {
   customerId: string
   language: 'en' | 'ro'
   messageCount: number
+  /**
+   * Task 5.1 (D9): the 0-based index of the USER message that started this
+   * turn — the value TurnDebug/TurnTrace persist. messageCount keeps
+   * incrementing with each save (user, assistant), so persisting IT at
+   * turn end sat +2 off the message array and misattributed every turn.
+   */
+  userMessageIndex: number
   productId: string | null
-  workflowSessionId: string | null
-  workflowStepCode: string | null
   savedMessageId: string | null
   totalInputTokens: number
   totalOutputTokens: number
+  totalCacheReadTokens: number
+  totalCacheWriteTokens: number
+  llmCalls: number
+  cacheHitCalls: number
   provider: string | null
   model: string | null
   startMs: number
   traceId: string
   phases: Record<string, unknown>
   conversationMode: string
-  activeSkillPacks: string[]
   complianceResult: ComplianceCheckResult | null
   debugEvents: DebugEvent[]
 }
@@ -170,19 +181,21 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     customerId: input.customerId ?? '',
     language: input.language ?? 'ro',
     messageCount: 0,
+    userMessageIndex: 0,
     productId: null,
-    workflowSessionId: null,
-    workflowStepCode: null,
     savedMessageId: null,
     totalInputTokens: 0,
     totalOutputTokens: 0,
+    totalCacheReadTokens: 0,
+    totalCacheWriteTokens: 0,
+    llmCalls: 0,
+    cacheHitCalls: 0,
     provider: null,
     model: null,
     startMs: Date.now(),
     traceId: crypto.randomUUID(),
     phases: {},
     conversationMode: 'SALES',
-    activeSkillPacks: [],
     complianceResult: null,
     debugEvents: [],
   }
@@ -213,6 +226,63 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       language: state.language,
     },
   })
+
+  // P1-12: a mid-pipeline crash used to abort this generator SILENTLY — the
+  // user message was saved, no reply came, and NO TurnDebug row existed
+  // (13 minutes of recorded dead air with zero diagnostics). Every fatal
+  // error now records the abort, persists the debug events collected so far
+  // (AWAITED — the turn is over anyway), and hands the GUI a structured,
+  // retryable error. The pipeline body below is unchanged.
+  try {
+    yield* pipeline()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const errorId = logFatal({
+      layer: 'orchestrator',
+      category: 'turn_aborted',
+      message: 'Turn aborted mid-pipeline',
+      context: { conversationId: state.conversationId, traceId: state.traceId },
+      error: err,
+    })
+    recordTurnAnomaly(state.traceId, { type: 'error_pattern', severity: 'critical', message: `turn_aborted: ${message}`, metadata: { errorId } })
+    recordDebugEvent(state, {
+      event: 'debug:turn_end',
+      data: {
+        traceId: state.traceId,
+        phases: state.phases,
+        totalInputTokens: state.totalInputTokens,
+        totalOutputTokens: state.totalOutputTokens,
+        cost: getTurnCost(state.traceId),
+        latencyMs: Date.now() - state.startMs,
+        anomalies: getTurnAnomalies(state.traceId),
+      },
+    })
+    eventBus.emit({
+      type: 'turn:end',
+      traceId: state.traceId,
+      conversationId: state.conversationId,
+      cost: getTurnCost(state.traceId),
+      latencyMs: Date.now() - state.startMs,
+      anomalies: getTurnAnomalies(state.traceId),
+    })
+    if (state.conversationId) {
+      await persistTurnDebug({
+        conversationId: state.conversationId,
+        messageIndex: state.messageCount,
+        traceId: state.traceId,
+        events: state.debugEvents,
+      })
+    }
+    yield {
+      event: 'error',
+      data: { errorId, type: 'internal', message: 'Service temporarily unavailable', retryable: true, traceId: state.traceId },
+    }
+  }
+  return
+
+  // eslint-disable-next-line no-inner-declarations -- hoisted so the guard
+  // above wraps the entire unchanged pipeline without re-indenting it
+  async function* pipeline(): AsyncGenerator<SSEEvent> {
 
   // =============================================
   // STEP 1 — Resolve conversation
@@ -271,7 +341,8 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // only runs on turns whose message contains a category keyword.
   // Best-effort: a failure here must not break the turn.
   // See docs/superpowers/specs/2026-05-26-zeno-phase-model-design.md.
-  const interests = (turnCtx.customer.extractedProfile as { interests?: string[] } | null)?.interests ?? null
+  // B0 dropped the extractedProfile divergence store; interest hints with it.
+  const interests: string[] | null = null
   if (
     turnCtx.conversation.candidateProductId === null &&
     turnCtx.conversation.productId === null &&
@@ -288,12 +359,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           where: { id: state.conversationId },
           data: {
             candidateProductId: guess.productId,
-            candidateConfidence: guess.confidence,
             candidateSetAt: new Date(),
           },
         })
         turnCtx.conversation.candidateProductId = guess.productId
-        turnCtx.conversation.candidateConfidence = guess.confidence
         turnCtx.conversation.candidateSetAt = new Date()
       }
     } catch (err) {
@@ -324,13 +393,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         customerId: state.customerId,
         customer: turnCtx.customer,
         conversation: {
-          mode: turnCtx.conversation.mode,
           productId: turnCtx.conversation.productId,
           product: turnCtx.conversation.product,
           candidateProductId: turnCtx.conversation.candidateProductId,
-          candidateConfidence: turnCtx.conversation.candidateConfidence,
           candidateSetAt: turnCtx.conversation.candidateSetAt,
-          application: turnCtx.conversation.application,
         },
         insights: preloadedInsights,
         now: new Date(),
@@ -347,10 +413,9 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     preloadedInsights = undefined
   }
 
-  // Guard: conversation must be active
-  if (turnCtx.conversation.status === 'COMPLETED' || turnCtx.conversation.status === 'ABANDONED') {
-    throw new Error(`Conversation ${state.conversationId} is ${turnCtx.conversation.status}`)
-  }
+  // D2.9 (contradiction #11): no terminal-conversation guard — a
+  // conversation is a channel; a turn on an ARCHIVED one reactivates it.
+  await reactivateIfArchived(state.conversationId)
 
   // Guard: must have content
   if (!input.message && !input.syntheticToolCall) {
@@ -358,11 +423,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   }
 
   state.messageCount = turnCtx.conversation.messageCount
+  // messageCount BEFORE this turn's saves = the new user message's 0-based index
+  state.userMessageIndex = turnCtx.conversation.messageCount
   state.productId = turnCtx.conversation.productId
-  state.workflowSessionId = turnCtx.conversation.workflowSession?.id ?? null
-  state.workflowStepCode = turnCtx.conversation.workflowSession?.currentStep.code ?? null
   state.conversationMode = turnCtx.conversation.mode ?? 'SALES'
-  state.activeSkillPacks = turnCtx.conversation.activeSkillPacks ?? []
   state.phases['step1_resolve'] = Date.now() - step1Start
   eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'resolve', durationMs: Date.now() - step1Start })
 
@@ -410,43 +474,40 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // STEPS 3+4 — Reasoning gate + Context assembly (parallel)
   // =============================================
 
-  // Determine allowed tools for this step (hoisted for use in gate + skill pack scoping).
-  // DEFAULT_DISCOVERY_TOOLS are merged in as a baseline so the agent always has
-  // catalog tools during the pre-workflow discovery phase. See
-  // docs/superpowers/specs/2026-05-20-zeno-discovery-toolset-design.md.
-  const stepAllowedTools = withDefaultDiscoveryTools(
-    turnCtx.conversation.workflowSession?.currentStep.allowedTools ?? [],
-  )
-
   // --- gatePromise: Step 3 — Deterministic state derivation (replaces the
-  // reasoning-gate LLM pre-pass). deriveState() is a cheap DB read (no LLM), so
-  // it always runs; the phase it returns drives section selection + the
-  // situational briefing. The event phase label stays 'reasoning_gate' so
-  // existing observability/perf tests keep their span name.
+  // reasoning-gate LLM pre-pass). loadDomainSnapshot() is a cheap DB read (no
+  // LLM) and deriveAndExpose() is pure, so this always runs; the (phase,
+  // subphase) it returns drives section selection + the situational briefing.
+  // The event phase label stays 'reasoning_gate' so existing observability/
+  // perf tests keep their span name.
   const gatePromise = (async (): Promise<{
-    derived: DerivedState | null
+    exposure: DeriveAndExposeResult | null
     gateSelection: GateSelection
-    gateDebug: { skipped: boolean; derivedPhase?: string; error?: boolean; durationMs: number; derivedState?: DerivedState | null }
+    gateDebug: Omit<DebugGatePayload, 'traceId'>
+    snapshot: unknown
   }> => {
     eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'reasoning_gate', timestamp: Date.now() })
     const start = Date.now()
-    let derived: DerivedState | null = null
+    let exposure: DeriveAndExposeResult | null = null
     let gateSelection: GateSelection
-    let gateDebug: { skipped: boolean; derivedPhase?: string; error?: boolean; durationMs: number; derivedState?: DerivedState | null }
+    let gateDebug: Omit<DebugGatePayload, 'traceId'>
+    let snapshot: unknown = null
     try {
-      derived = await deriveState(state.conversationId)
-      gateSelection = { requiredSections: getRequiredSectionsForPhase(derived.phase), excludedSections: [], confidence: 1 }
-      state.phases['reasoningGate'] = { durationMs: Date.now() - start, derivedPhase: derived.phase }
-      gateDebug = { skipped: false, derivedPhase: derived.phase, derivedState: derived, durationMs: Date.now() - start }
+      const snap = await loadDomainSnapshot(state.conversationId)
+      snapshot = snap
+      exposure = deriveAndExpose(snap)
+      gateSelection = { requiredSections: getRequiredSectionsFor(exposure.state.phase, exposure.state.subphase), excludedSections: [], confidence: 1 }
+      state.phases['reasoningGate'] = { durationMs: Date.now() - start, derivedPhase: exposure.state.phase }
+      gateDebug = { skipped: false, derivedPhase: exposure.state.phase, derivedState: exposure.state, actions: exposure.actions, engineVersion, durationMs: Date.now() - start }
     } catch (err: unknown) {
-      logWarn({ layer: 'orchestrator', category: 'derive_state', message: 'deriveState failed, using DISCOVERY', context: { conversationId: state.conversationId }, error: err })
-      gateSelection = { requiredSections: getRequiredSectionsForPhase('DISCOVERY'), excludedSections: [], confidence: 1 }
+      logWarn({ layer: 'orchestrator', category: 'derive_state', message: 'deriveAndExpose failed, using DISCOVERY sections', context: { conversationId: state.conversationId }, error: err })
+      gateSelection = { requiredSections: getRequiredSectionsFor('DISCOVERY', null), excludedSections: [], confidence: 1 }
       state.phases['reasoningGate'] = { durationMs: Date.now() - start, error: true }
-      gateDebug = { skipped: false, error: true, derivedState: null, durationMs: Date.now() - start }
+      gateDebug = { skipped: false, error: true, derivedState: null, engineVersion, durationMs: Date.now() - start }
     }
     state.phases['step3_reasoning_gate'] = Date.now() - start
     eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'reasoning_gate', durationMs: Date.now() - start })
-    return { derived, gateSelection, gateDebug }
+    return { exposure, gateSelection, gateDebug, snapshot }
   })()
 
   // --- contextPromise: Step 4 — Context assembly (without situationalBriefing, patched after gate) ---
@@ -459,30 +520,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
     let sections: Awaited<ReturnType<typeof loadAllSections>>
     try {
-      // Build WorkflowSessionData from turnCtx
-      const workflowSessionData: WorkflowSessionData | null = turnCtx.conversation.workflowSession
-        ? {
-            currentStepCode: turnCtx.conversation.workflowSession.currentStep.code,
-            currentStepName: turnCtx.conversation.workflowSession.currentStep.name,
-            agentInstructions: turnCtx.conversation.workflowSession.currentStep.agentInstructions,
-            allowedTools: turnCtx.conversation.workflowSession.currentStep.allowedTools,
-            data: turnCtx.conversation.workflowSession.data,
-          }
-        : null
-
       // Build StateGroundingInput from turnCtx — feeds the "=== CURRENT SYSTEM STATE ==="
       // section so the agent has explicit ✓/✗ facts about the current world.
       // See docs/superpowers/specs/2026-05-20-zeno-state-grounding-design.md.
       const stateGroundingInput: StateGroundingInput = {
-        workflowSession: turnCtx.conversation.workflowSession
-          ? {
-              currentStep: {
-                code: turnCtx.conversation.workflowSession.currentStep.code,
-                name: turnCtx.conversation.workflowSession.currentStep.name,
-              },
-              status: 'ACTIVE',
-            }
-          : null,
         application: turnCtx.conversation.application
           ? {
               id: 'application',
@@ -502,13 +543,14 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       }
 
       sections = await loadAllSections({
-        agentConfig: { systemPrompt: agentConfig.systemPrompt, constraints: agentConfig.constraints },
-        allowedTools: stepAllowedTools,
+        agentConfig: { systemPrompt: agentConfig.systemPrompt, constraints: agentConfig.constraints, promptSections: agentConfig.promptSections },
+        // capabilityManifest is patched after the gate resolves (A3.1 erratum
+        // 3): exposure does not exist yet — context assembly deliberately
+        // runs in parallel with the gate.
+        allowedTools: [],
         productId: state.productId,
         conversationId: state.conversationId,
         customerId: state.customerId,
-        workflowSession: workflowSessionData,
-        workflowStepCode: state.workflowStepCode,
         situationalBriefing: null, // patched after gate completes
         language: state.language,
         prefetchedCustomer: turnCtx.customer,
@@ -526,15 +568,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       // Minimal fallback — identity, constraints, and state grounding only
       // (state grounding is alwaysInclude: true, so it must be present even on fallback)
       const fallbackStateGroundingInput: StateGroundingInput = {
-        workflowSession: turnCtx.conversation.workflowSession
-          ? {
-              currentStep: {
-                code: turnCtx.conversation.workflowSession.currentStep.code,
-                name: turnCtx.conversation.workflowSession.currentStep.name,
-              },
-              status: 'ACTIVE',
-            }
-          : null,
         application: turnCtx.conversation.application
           ? {
               id: 'application',
@@ -554,6 +587,8 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       }
       sections = {
         agentIdentity: agentConfig.systemPrompt,
+        firstTurnRules: agentConfig.promptSections?.firstTurnRules ?? null,
+        discoveryConduct: agentConfig.promptSections?.discoveryConduct ?? null,
         capabilityManifest: null,
         constraints: agentConfig.constraints,
         stateGrounding: loadStateGrounding(fallbackStateGroundingInput),
@@ -564,10 +599,12 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         customerContext: null,
         coachingBriefing: null,
         domainGuidance: null,
-        workflowInstructions: null,
         questionnaireContext: null,
         productContext: null,
         catalogOverview: null,
+        dntContext: null,
+        paymentContext: null,
+        policyContext: null,
       }
     }
 
@@ -580,7 +617,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // --- Await both in parallel ---
   const [gateResult, contextResult] = await Promise.all([gatePromise, contextPromise])
 
-  const { derived, gateSelection } = gateResult
+  const { exposure, gateSelection } = gateResult
   const { agentSlug, agentConfig, sections } = contextResult
 
   yield* recordAndYield({
@@ -588,56 +625,94 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     data: { ...gateResult.gateDebug, traceId: state.traceId },
   })
 
-  // Patch situationalBriefing from the derived state (phase + next best action)
-  sections.situationalBriefing = derived ? formatDerivedBriefing(derived) : null
-
-  // --- Skill pack loading and merging ---
-  // Gate-driven skill-pack recommendations are gone; workflow/pack-driven packs
-  // still flow through the existing activation path below.
-  const recommendedSlugs: string[] = []
-  const activePacks = recommendedSlugs.length > 0
-    ? await getActiveSkillPacks(recommendedSlugs)
-    : []
-
-  state.activeSkillPacks = activePacks.map((p) => p.slug)
-
-  if (state.activeSkillPacks.length > 0) {
-    eventBus.emit({
-      type: 'skillpack:activated',
-      traceId: state.traceId,
-      slugs: state.activeSkillPacks,
-      conversationId: state.conversationId,
+  // F2.2 (T14.D2): the per-turn legality snapshot — deriveAndExpose INPUT
+  // (redacted) + OUTPUT + version stamps. contentVersions reflect the last
+  // productContext load (fresh for this turn when a product is in focus).
+  if (exposure && gateResult.snapshot) {
+    yield* recordAndYield({
+      event: 'debug:legality',
+      data: buildLegalityPayload({
+        traceId: state.traceId,
+        point: 'turn_start',
+        contentVersions: getLastInjectedProductContentVersions(),
+        snapshot: gateResult.snapshot,
+        state: exposure.state,
+        actions: exposure.actions,
+      }),
     })
   }
 
-  // A/B test variant assignment — may swap skill pack slugs
-  let effectivePacks = activePacks
-  if (state.activeSkillPacks.length > 0) {
-    const originalSlugs = state.activeSkillPacks
-    state.activeSkillPacks = await applyABTestVariant(
-      state.activeSkillPacks,
-      state.conversationId,
-    )
-    // Reload packs if A/B test swapped any slugs
-    const slugsChanged = originalSlugs.length !== state.activeSkillPacks.length ||
-      originalSlugs.some((s, i) => s !== state.activeSkillPacks[i])
-    if (slugsChanged) {
-      effectivePacks = await getActiveSkillPacks(state.activeSkillPacks)
+  // Patch situationalBriefing from the derived state (phase/subphase + next best action)
+  sections.situationalBriefing = exposure ? formatDerivedBriefing(exposure.state, exposure.actions) : null
+
+  // Patch capabilityManifest from the exposure set (A3.1 erratum 3 — same
+  // patch-after-gate pattern as the briefing, keeping gate ∥ context intact).
+  sections.capabilityManifest = loadCapabilityManifest(exposure?.actions.available ?? [...DEGRADED_FLOOR])
+
+  // Per-(phase,subphase) sections rendered from the derived state (A4.2).
+  sections.dntContext = exposure ? loadDntContext(exposure.state) : null
+  sections.paymentContext = exposure ? loadPaymentContext(exposure.state) : null
+  sections.policyContext = exposure ? loadPolicyContext(exposure.state) : null
+
+  // Task 1.2 (D2): questionnaireContext keys on the derived (phase, subphase)
+  // — loadAllSections cannot know the step (it runs parallel to the gate), so
+  // the orchestrator patches it here; a loader failure degrades to no section,
+  // never a dead turn.
+  if (exposure) {
+    try {
+      sections.questionnaireContext = await loadQuestionnaireContextForState(
+        exposure.state, state.conversationId, state.customerId, state.language,
+      )
+    } catch (err) {
+      logWarn({
+        layer: 'orchestrator',
+        category: 'db_error',
+        message: 'questionnaireContext load failed; continuing without the section',
+        context: { conversationId: state.conversationId },
+        error: err,
+      })
+      sections.questionnaireContext = null
     }
   }
 
-  // Merge skill pack sections into base sections
-  const mergedSections: PromptSections = effectivePacks.length > 0
-    ? mergeSkillPackSections(sections as unknown as Record<string, string | null>, effectivePacks) as unknown as PromptSections
-    : sections
+  // E1: scope the split identity sections (same content-nullness gating as
+  // dntContext above). First-turn rules ship only on the opening exchange;
+  // discovery conduct only where products are presented/priced. On exposure
+  // failure the phase falls back to DISCOVERY (conservative — conduct stays).
+  if (!detectFirstTurn(state.messageCount)) sections.firstTurnRules = null
+  if (!includeDiscoveryConduct(exposure?.state.phase ?? 'DISCOVERY')) sections.discoveryConduct = null
+
+  // Pack subsystem deleted (A5.2, M12): gating is owned by the legality
+  // engine, prompt content by the sections map.
+  const mergedSections: PromptSections = sections
 
   // --- Conditional compliance check ---
-  // Compliance is now triggered deterministically by the derived phase rather
-  // than by the LLM gate's complianceRelevant flag.
-  const complianceRelevant = derived
-    ? ['CONSENT', 'QUESTIONNAIRE', 'QUOTE', 'CLOSING'].includes(derived.phase)
+  // Compliance is triggered deterministically by the pinned derived Phase via
+  // the typed COMPLIANCE_RELEVANT_BY_PHASE record (exhaustive over Phase), not
+  // by the LLM gate's complianceRelevant flag or any second phase vocabulary.
+  const complianceRelevant = exposure
+    ? COMPLIANCE_RELEVANT_BY_PHASE[exposure.state.phase]
     : false
-  if (complianceRelevant) {
+  // Task 5.2 (D10) cadence: the judge runs at (phase, subphase) TRANSITIONS,
+  // not per turn — a stable QUESTIONNAIRE stretch pays zero judge latency.
+  // The previous turn's derived state comes from its TurnDebug row; a missing
+  // row (first turn, racing persist) fails open toward checking.
+  let complianceDue = complianceRelevant
+  if (exposure && complianceRelevant) {
+    try {
+      const prevRow = await prisma.turnDebug.findFirst({
+        where: { conversationId: state.conversationId },
+        orderBy: { createdAt: 'desc' },
+        select: { payload: true },
+      })
+      const prevLegality = (prevRow?.payload as { legality?: { point: string; state: { phase: Phase; subphase: AppSubphase | null } }[] } | null)?.legality?.find((l) => l.point === 'turn_start')
+      complianceDue = shouldRunComplianceCheck(
+        prevLegality ? { phase: prevLegality.state.phase, subphase: prevLegality.state.subphase ?? null } : null,
+        { phase: exposure.state.phase, subphase: exposure.state.subphase },
+      )
+    } catch { /* fail open toward checking */ }
+  }
+  if (exposure && complianceRelevant && complianceDue) {
     // Use recent messages from turnCtx instead of querying DB again
     const complianceMessages: Message[] = turnCtx.recentMessages
       .slice(-10)
@@ -646,9 +721,16 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     try {
       const complianceResult = await executeComplianceCheck({
         messages: complianceMessages,
-        workflowStepCode: state.workflowStepCode,
         customerProfile: null,
-        phase: getConversationPhase(turnCtx.conversation),
+        phase: exposure.state.phase,
+        language: state.language,
+        // Task 5.2 (D10): ground the judge in the ledger-verified facts
+        recordedFacts: {
+          gdprProcessing: exposure.state.consents.gdprProcessing,
+          aiDisclosure: exposure.state.consents.aiDisclosure,
+          dntSigned: exposure.state.dnt.signed && exposure.state.dnt.valid,
+          dntValidUntil: exposure.state.dnt.validUntil,
+        },
       })
       state.complianceResult = complianceResult
       if (!complianceResult.passed && complianceResult.gaps.length > 0) {
@@ -695,6 +777,8 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       stablePrefix: buildResult.stablePrefix ?? null,
       dynamicSuffix: buildResult.dynamicSuffix ?? null,
       totalChars: (buildResult.stablePrefix?.length ?? 0) + (buildResult.dynamicSuffix?.length ?? 0),
+      stablePrefixChars: buildResult.stablePrefix?.length ?? 0,
+      dynamicSuffixChars: buildResult.dynamicSuffix?.length ?? 0,
       traceId: state.traceId,
     },
   })
@@ -761,21 +845,16 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   eventBus.emit({ type: 'phase:start', traceId: state.traceId, phase: 'build_messages', timestamp: Date.now() })
   const step6Start = Date.now()
 
-  const messages: Message[] = []
-  if (buildResult.stablePrefix) {
-    messages.push({ role: 'system' as const, content: buildResult.stablePrefix, cacheHint: { breakpoint: 'ephemeral' } })
-  }
-  if (buildResult.dynamicSuffix) {
-    messages.push({ role: 'system' as const, content: buildResult.dynamicSuffix })
-  }
-  if (summaryPrefix) {
-    messages.push({
-      role: 'system' as const,
-      content: `[Previous conversation summary]\n${summaryPrefix}\n[End of summary — recent messages follow]`,
-    })
-  }
-  messages.push(...windowMessages)
-  messages.push({ role: 'user' as const, content: input.message })
+  // D1 (F3): dynamic per-turn state rides the final user message, BEHIND the
+  // history, so provider prefix caching covers system + summary + history.
+  // The persisted user Message row keeps the raw customer text.
+  const messages: Message[] = buildTurnMessages({
+    stablePrefix: buildResult.stablePrefix || null,
+    dynamicSuffix: buildResult.dynamicSuffix || null,
+    summaryPrefix,
+    windowMessages,
+    userMessage: input.message,
+  })
 
   state.phases['step6_build_messages'] = Date.now() - step6Start
   eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'build_messages', durationMs: Date.now() - step6Start })
@@ -787,12 +866,20 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const step7Start = Date.now()
 
   let toolContext = await buildToolContext(state.customerId, state.conversationId, state.language)
-  toolContext.activeSkillPacks = state.activeSkillPacks
-  const effectiveTools = effectivePacks.length > 0
-    ? computeAllowedTools(stepAllowedTools, effectivePacks)
-    : stepAllowedTools
-  const tools: LLMToolDefinition[] = getToolsForLLM(effectiveTools.length > 0 ? effectiveTools : undefined)
+  // Server-resolved commit actor (A2.9): every LLM tool-loop call is the
+  // agent's; the synthetic branch below overrides per-call with 'gui'.
+  toolContext.actor = 'agent'
+  // Executor exposure wall (A3.2): same set as the LLM tool list; on derive
+  // failure both fall back to the ONE degraded floor (erratum 4).
+  toolContext.exposedTools = exposure?.actions.available ?? [...DEGRADED_FLOOR]
+  // The per-turn tool list IS the exposure set (A3.1). On derive failure the
+  // model gets the explicit degraded floor — reads + escape hatch.
+  let tools: LLMToolDefinition[] = exposure ? buildTurnTools(exposure.actions) : getToolsForLLM([...DEGRADED_FLOOR])
   let finalContent = ''
+  // F2.4: per-turn facts for the runtime invariant monitors
+  const turnEnvelopes: import('@/lib/engines/domain-types').CommitResult[] = []
+  const turnWritingResults: { tool: string; hasEnvelope: boolean }[] = []
+  const turnExecutorRejections: { tool: string; reason: string }[] = []
   let lastStatusMessage: string | undefined
 
   if (input.syntheticToolCall) {
@@ -833,14 +920,9 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     const pipelineResult = await executeToolWithPipeline(
       tc.name,
       tc.arguments,
-      toolContext,
-      toolContext.workflowSession
-        ? {
-            id: toolContext.workflowSession.id,
-            currentStepId: toolContext.workflowSession.currentStepId,
-            workflowId: toolContext.workflowSession.workflowId,
-          }
-        : null,
+      // GUI-originated commit: the customer clicked, the server resolved the
+      // actor — never the model (A2.9).
+      { ...toolContext, actor: 'gui' },
       state.traceId,
     )
 
@@ -854,7 +936,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         data: pipelineResult.toolResult.data,
         error: pipelineResult.toolResult.error,
         uiAction: pipelineResult.toolResult.uiAction as unknown as Record<string, unknown> | undefined,
-        transition: pipelineResult.transition as unknown as Record<string, unknown> | undefined,
         confirmation: pipelineResult.toolResult.confirmation,
         traceId: state.traceId,
       },
@@ -877,6 +958,28 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       }
     }
 
+    // Gateway parity (A3.5/M4): a requires_confirmation envelope becomes a
+    // confirm_required ui_action carrying the token, so the GUI renders the
+    // confirm dialog that round-trips the SAME commit + token the agent would.
+    if (pipelineResult.toolResult.envelope?.outcome === 'requires_confirmation') {
+      // D2.5: the confirm token is bound to the MATERIAL args hash, so the
+      // original args (minus any stale token) ride the card and return with
+      // the confirm click — e.g. accept_quote's paymentOption.
+      const { confirmToken: _staleToken, ...materialArgs } = (tc.arguments ?? {}) as Record<string, unknown>
+      yield {
+        event: 'ui_action',
+        data: {
+          type: 'confirm_required',
+          payload: {
+            tool: tc.name,
+            confirmToken: pipelineResult.toolResult.envelope.confirmToken,
+            args: materialArgs,
+            preview: pipelineResult.toolResult.envelope.data,
+          },
+        },
+      }
+    }
+
     // Build tool result message for LLM
     const toolResultMessage: Message = {
       role: 'tool',
@@ -892,22 +995,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     }
     messages.push(syntheticAssistantMsg, toolResultMessage)
 
-    // If transition occurred, inject context
-    if (pipelineResult.transition) {
-      const trParts = [
-        `[Workflow Transition]`,
-        `Previous step: "${pipelineResult.transition.previousStepCode}"`,
-        `New step: "${pipelineResult.transition.newStepName}"`,
-      ]
-      if (pipelineResult.transition.newStepInstructions) {
-        trParts.push(`\nNew step instructions:\n${pipelineResult.transition.newStepInstructions}`)
-      }
-      if (pipelineResult.transition.newStepAutoTool) {
-        trParts.push(`\nYou should now call: ${pipelineResult.transition.newStepAutoTool}`)
-      }
-      messages.push({ role: 'system', content: trParts.join('\n') })
-    }
-
     // Stream a natural language response
     const responseStream = await gateway.stream(agentSlug, {
       messages,
@@ -920,12 +1007,12 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
         yield { event: 'content', data: { text: chunk.content } }
       }
       if (chunk.type === 'done' && chunk.usage) {
-        state.totalInputTokens += chunk.usage.promptTokens
-        state.totalOutputTokens += chunk.usage.completionTokens
+        accumulateTurnUsage(state, chunk.usage)
       }
     }
   } else {
     // ----- Standard chat path with tool loop -----
+    // F2.4: per-turn facts for the runtime invariant monitors
     let round = 0
 
     while (round <= MAX_TOOL_ROUNDS) {
@@ -1015,8 +1102,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           roundToolCalls = chunk.toolCalls
         }
         if (chunk.type === 'done' && chunk.usage) {
-          state.totalInputTokens += chunk.usage.promptTokens
-          state.totalOutputTokens += chunk.usage.completionTokens
+          accumulateTurnUsage(state, chunk.usage)
         }
       }
 
@@ -1061,13 +1147,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           tc.name,
           tc.arguments,
           toolContext,
-          toolContext.workflowSession
-            ? {
-                id: toolContext.workflowSession.id,
-                currentStepId: toolContext.workflowSession.currentStepId,
-                workflowId: toolContext.workflowSession.workflowId,
-              }
-            : null,
           state.traceId,
         ).catch((err: unknown) => logError({
           layer: 'orchestrator',
@@ -1129,13 +1208,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
                 tc.name,
                 tc.arguments,
                 toolContext,
-                toolContext.workflowSession
-                  ? {
-                      id: toolContext.workflowSession.id,
-                      currentStepId: toolContext.workflowSession.currentStepId,
-                      workflowId: toolContext.workflowSession.workflowId,
-                    }
-                  : null,
                 state.traceId,
               )
             } catch (err: unknown) {
@@ -1161,8 +1233,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
               data: pipelineResult.toolResult.data,
               error: pipelineResult.toolResult.error,
               uiAction: pipelineResult.toolResult.uiAction as unknown as Record<string, unknown> | undefined,
-              transition: pipelineResult.transition as unknown as Record<string, unknown> | undefined,
-              confirmation: pipelineResult.toolResult.confirmation,
+                    confirmation: pipelineResult.toolResult.confirmation,
               traceId: state.traceId,
             },
           })
@@ -1177,8 +1248,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       }
 
       // --- Phase 2: Execute writing tools sequentially ---
-      let transitionOccurred = false
-
       for (const tc of writing) {
         const def = getToolDefinition(tc.name)
         const isBlocking = def?.executionMode === 'blocking'
@@ -1211,13 +1280,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
             tc.name,
             tc.arguments,
             toolContext,
-            toolContext.workflowSession
-              ? {
-                  id: toolContext.workflowSession.id,
-                  currentStepId: toolContext.workflowSession.currentStepId,
-                  workflowId: toolContext.workflowSession.workflowId,
-                }
-              : null,
             state.traceId,
           )
         } catch (err: unknown) {
@@ -1239,8 +1301,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
             data: pipelineResult.toolResult.data,
             error: pipelineResult.toolResult.error,
             uiAction: pipelineResult.toolResult.uiAction as unknown as Record<string, unknown> | undefined,
-            transition: pipelineResult.transition as unknown as Record<string, unknown> | undefined,
-            confirmation: pipelineResult.toolResult.confirmation,
+                confirmation: pipelineResult.toolResult.confirmation,
             traceId: state.traceId,
           },
         })
@@ -1250,10 +1311,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
             event: 'tool_complete',
             data: { tool: tc.name, success: pipelineResult.toolResult.success },
           }
-        }
-
-        if (pipelineResult.transition) {
-          transitionOccurred = true
         }
       }
 
@@ -1271,34 +1328,83 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           }
         }
 
+        // Gateway parity (A3.5/M4): LLM-initiated commits emit the SAME
+        // confirm_required card as GUI-initiated ones. Previously only the
+        // synthetic path did, so chat-initiated sign_dnt deadlocked — the
+        // model told the customer to confirm a card that never rendered
+        // (2026-07-06 sign_dnt 80-turn loop).
+        if (pipelineResult.toolResult.envelope?.outcome === 'requires_confirmation') {
+          const { confirmToken: _staleToken, ...materialArgs } = (tc.arguments ?? {}) as Record<string, unknown>
+          yield {
+            event: 'ui_action',
+            data: {
+              type: 'confirm_required',
+              payload: {
+                tool: tc.name,
+                confirmToken: pipelineResult.toolResult.envelope.confirmToken,
+                args: materialArgs,
+                preview: pipelineResult.toolResult.envelope.data,
+              },
+            },
+          }
+        }
+
         messages.push({
           role: 'tool',
           content: serializeToolResultForModel(pipelineResult.toolResult),
           toolCallId: tc.id,
         })
 
-        if (pipelineResult.transition) {
-          const trParts = [
-            `[Workflow Transition]`,
-            `Previous step: "${pipelineResult.transition.previousStepCode}"`,
-            `New step: "${pipelineResult.transition.newStepName}"`,
-          ]
-          if (pipelineResult.transition.newStepInstructions) {
-            trParts.push(`\nNew step instructions:\n${pipelineResult.transition.newStepInstructions}`)
-          }
-          if (pipelineResult.transition.newStepAutoTool) {
-            trParts.push(`\nYou should now call: ${pipelineResult.transition.newStepAutoTool}`)
-          } else {
-            trParts.push(`\nThis is an interactive step — follow the instructions above.`)
-          }
-          messages.push({ role: 'system', content: trParts.join('\n') })
-        }
       }
 
-      // Refresh tool context after tool executions (state may have changed)
-      if (transitionOccurred) {
-        toolContext = await buildToolContext(state.customerId, state.conversationId, state.language)
-        toolContext.activeSkillPacks = state.activeSkillPacks
+      // Re-derive exposure after every applied commit round (A3.4, T1.D5):
+      // the tool list, the executor wall, and a compact state message all
+      // refresh so a same-turn commit chain stays legal end-to-end.
+      const roundEnvelopes = roundToolCalls
+        .map((tc) => resultMap.get(tc.id)?.pipelineResult.toolResult.envelope)
+        .filter((e): e is NonNullable<typeof e> => e !== undefined)
+      turnEnvelopes.push(...roundEnvelopes)
+      for (const tc of roundToolCalls) {
+        const entry = resultMap.get(tc.id)
+        if (!entry) continue
+        if (getToolDefinition(tc.name)?.kind === 'commit') {
+          turnWritingResults.push({ tool: tc.name, hasEnvelope: entry.pipelineResult.toolResult.envelope !== undefined })
+        }
+        const env = entry.pipelineResult.toolResult.envelope
+        if (env?.outcome === 'rejected' && env.reason === 'not_exposed') {
+          turnExecutorRejections.push({ tool: tc.name, reason: 'not_exposed' })
+        }
+      }
+      if (shouldRefreshExposure(roundEnvelopes)) {
+        try {
+          const refreshSnap = await loadDomainSnapshot(state.conversationId)
+          const refreshed = deriveAndExpose(refreshSnap)
+          tools = buildTurnTools(refreshed.actions)
+          toolContext = await buildToolContext(state.customerId, state.conversationId, state.language)
+          toolContext.actor = 'agent'
+          toolContext.exposedTools = refreshed.actions.available
+          messages.push({ role: 'system', content: formatRoundRefreshMessage(refreshed.state, refreshed.actions) })
+          // F2.2: one post_commit legality entry per APPLIED envelope this
+          // round, joined to its ledger row by the stamped ledgerId
+          // (erratum 2); state/actions are the post-round recompute.
+          for (const env of roundEnvelopes.filter((e) => e.outcome === 'applied')) {
+            yield* recordAndYield({
+              event: 'debug:legality',
+              data: buildLegalityPayload({
+                traceId: state.traceId,
+                point: 'post_commit',
+                round,
+                commitLedgerId: env.ledgerId,
+                contentVersions: getLastInjectedProductContentVersions(),
+                snapshot: refreshSnap,
+                state: refreshed.state,
+                actions: refreshed.actions,
+              }),
+            })
+          }
+        } catch (err: unknown) {
+          logWarn({ layer: 'orchestrator', category: 'derive_state', message: 'post-round re-derivation failed — keeping previous exposure', context: { conversationId: state.conversationId }, error: err })
+        }
       }
 
       round++
@@ -1460,12 +1566,6 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   state.phases['step9_background'] = Date.now() - step9Start
   eventBus.emit({ type: 'phase:end', traceId: state.traceId, phase: 'background', durationMs: Date.now() - step9Start })
 
-  // Persist active skill packs on conversation
-  await prisma.conversation.update({
-    where: { id: state.conversationId },
-    data: { activeSkillPacks: state.activeSkillPacks },
-  })
-
   // =============================================
   // STEP 10 — Turn trace (fire-and-forget)
   // =============================================
@@ -1475,7 +1575,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   state.phases['promptAssembly'] = {
     sectionSizes: buildResult.sectionSizes,
     gateActive: buildResult.gateActive,
-    derivedPhase: derived?.phase ?? null,
+    derivedPhase: exposure?.state.phase ?? null,
     fastPath: false,
     includedSections: buildResult.includedSections,
     excludedSections: buildResult.excludedSections,
@@ -1483,18 +1583,40 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
   // Agent extensibility trace metadata
   state.phases['agentExtensibility'] = {
-    activeSkillPacks: state.activeSkillPacks,
     conversationMode: state.conversationMode,
     complianceResult: state.complianceResult,
+  }
+
+  // F2.4 (T14.D3): mechanical invariant monitors — findings become turn
+  // anomalies, flowing into TurnTrace, the turn:end event, TurnDebug and
+  // the drawer badge below.
+  try {
+    const findings = evaluateTurnInvariants({
+      briefingRecommendedActions: recommendedActionsFromBriefing(exposure?.state.nextBestAction),
+      availableActions: exposure?.actions.available ?? [],
+      executorRejections: turnExecutorRejections,
+      writingToolResults: turnWritingResults,
+      ledgerDispositions: turnEnvelopes.map((e) => e.disposition).filter((d): d is 'fresh' | 'replay' => d !== undefined),
+      confirmTokenReissues: turnEnvelopes.filter((e) => e.outcome === 'requires_confirmation').length,
+    })
+    for (const f of findings) {
+      recordTurnAnomaly(state.traceId, { type: 'behavioral', severity: f.severity, message: f.code, metadata: f.detail })
+    }
+  } catch (err) {
+    logWarn({ layer: 'orchestrator', category: 'invariant_monitor', message: 'invariant evaluation failed', context: { conversationId: state.conversationId }, error: err })
   }
 
   void prisma.turnTrace.create({
     data: {
       conversationId: state.conversationId,
-      messageIndex: state.messageCount,
+      messageIndex: state.userMessageIndex,
       phases: JSON.parse(JSON.stringify(state.phases)),
       inputTokens: state.totalInputTokens || null,
       outputTokens: state.totalOutputTokens || null,
+      // A1: null (not 0) when no LLM call ran, so pre-A1 and no-call rows
+      // read the same to the aggregators.
+      cacheReadTokens: state.llmCalls > 0 ? state.totalCacheReadTokens : null,
+      cacheWriteTokens: state.llmCalls > 0 ? state.totalCacheWriteTokens : null,
       cost: getTurnCost(state.traceId),
       latencyMs,
       provider: state.provider,
@@ -1532,6 +1654,11 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       cost: getTurnCost(state.traceId),
       latencyMs,
       anomalies: getTurnAnomalies(state.traceId),
+      totalCacheReadTokens: state.totalCacheReadTokens,
+      totalCacheWriteTokens: state.totalCacheWriteTokens,
+      llmCalls: state.llmCalls,
+      cacheHitCalls: state.cacheHitCalls,
+      toolDefChars: JSON.stringify(tools ?? []).length,
     },
   })
 
@@ -1539,7 +1666,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // fire-and-forget, errors swallowed inside persistTurnDebug.
   void persistTurnDebug({
     conversationId: state.conversationId,
-    messageIndex: state.messageCount,
+    messageIndex: state.userMessageIndex,
     traceId: state.traceId,
     events: state.debugEvents,
   })
@@ -1560,6 +1687,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       latencyMs,
     },
   }
+  } // end pipeline() (P1-12 guard wrapper)
 }
 
 // ==============================================

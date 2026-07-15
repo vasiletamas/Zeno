@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import type { Language } from '@/lib/i18n/translations'
+import { t, type Language } from '@/lib/i18n/translations'
+import { resolvePaymentCardState } from '@/lib/payments/card-state'
 
 /* ── Stripe imports (loaded dynamically) ─────────────── */
 
@@ -103,6 +104,9 @@ interface PaymentCardProps {
   paymentId: string
   policyDescription: string
   redirectUrl?: string | null
+  /** D3.5 (M4): engine-determined session mode — keys the card's action
+   *  label (payment_mode_* translations); codes only, localized here (M6). */
+  mode?: 'started' | 'resumed' | 'retried'
   onPaymentComplete: (paymentId: string) => void
   language: Language
   isAnswered: boolean
@@ -200,6 +204,28 @@ function StripeCheckoutForm({
   )
 }
 
+/* ── Amount summary (module-level: not re-created per render) ── */
+
+function AmountSummary({
+  policyLabel, policyDescription, premiumLabel, modeLabel, formattedAmount, currency,
+}: {
+  policyLabel: string; policyDescription: string; premiumLabel: string
+  modeLabel: string; formattedAmount: string; currency: string
+}) {
+  return (
+    <div className="mb-4">
+      <div className="flex justify-between items-center mb-1">
+        <span className="text-[14px]" style={{ color: '#8A8680' }}>{policyLabel}</span>
+        <span className="text-[14px] font-medium" style={{ color: FOREST }}>{policyDescription}</span>
+      </div>
+      <div className="flex justify-between items-center">
+        <span className="text-[14px]" style={{ color: '#8A8680' }}>{premiumLabel} · {modeLabel}</span>
+        <span className="text-[20px] font-semibold" style={{ color: FOREST }}>{formattedAmount} {currency}</span>
+      </div>
+    </div>
+  )
+}
+
 /* ── Loading Spinner ─────────────────────────────────── */
 
 function LoadingSpinner() {
@@ -237,6 +263,7 @@ export function PaymentCard({
   paymentId,
   policyDescription,
   redirectUrl,
+  mode = 'started',
   onPaymentComplete,
   language,
   isAnswered,
@@ -244,6 +271,13 @@ export function PaymentCard({
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const c = COPY[language]
+  // D3.5 (M4/M6): the engine-determined session mode keys the card headline —
+  // the engine emits codes only; localization lives here.
+  const modeLabel = t(`payment_mode_${mode}`, language)
+
+  // P1-5: one pure decision — never mount Stripe <Elements> with a null
+  // clientSecret, nor leave a dead disabled PayU button.
+  const cardState = resolvePaymentCardState({ isAnswered, providerName, clientSecret, redirectUrl: redirectUrl ?? null })
 
   const formattedAmount = amount.toLocaleString('ro-RO', {
     minimumFractionDigits: 0,
@@ -251,7 +285,7 @@ export function PaymentCard({
   })
 
   // ─── Answered state (read-only) ────────────────────────
-  if (isAnswered) {
+  if (cardState.kind === 'answered') {
     return (
       <div
         className="rounded-xl p-6 border"
@@ -292,40 +326,45 @@ export function PaymentCard({
   }
 
   // ─── Amount summary card ───────────────────────────────
-  const AmountSummary = () => (
-    <div className="mb-4">
-      <div className="flex justify-between items-center mb-1">
-        <span className="text-[14px]" style={{ color: '#8A8680' }}>
-          {c.policyLabel}
-        </span>
-        <span className="text-[14px] font-medium" style={{ color: FOREST }}>
-          {policyDescription}
-        </span>
-      </div>
-      <div className="flex justify-between items-center">
-        <span className="text-[14px]" style={{ color: '#8A8680' }}>
-          {c.premiumLabel}
-        </span>
-        <span className="text-[20px] font-semibold" style={{ color: FOREST }}>
-          {formattedAmount} {currency}
-        </span>
-      </div>
-    </div>
+  const amountSummary = (
+    <AmountSummary
+      policyLabel={c.policyLabel}
+      policyDescription={policyDescription}
+      premiumLabel={c.premiumLabel}
+      modeLabel={modeLabel}
+      formattedAmount={formattedAmount}
+      currency={currency}
+    />
   )
 
-  // ─── Stripe mode ───────────────────────────────────────
-  if (providerName === 'stripe') {
+  // ─── Unavailable: no usable provider credential (P1-5) ──
+  if (cardState.kind === 'unavailable') {
     return (
       <div
         className="rounded-xl p-6 border"
         style={{ borderColor: BORDER, backgroundColor: '#FFFFFF' }}
       >
-        <AmountSummary />
+        {amountSummary}
+        <p className="text-[14px]" style={{ color: ERROR_COLOR }} role="alert">
+          {c.errorGeneric}
+        </p>
+      </div>
+    )
+  }
+
+  // ─── Stripe mode ───────────────────────────────────────
+  if (cardState.kind === 'stripe_form') {
+    return (
+      <div
+        className="rounded-xl p-6 border"
+        style={{ borderColor: BORDER, backgroundColor: '#FFFFFF' }}
+      >
+        {amountSummary}
 
         <Elements
           stripe={getStripePromise()}
           options={{
-            clientSecret,
+            clientSecret: cardState.clientSecret,
             appearance: zenoAppearance,
           }}
         >
@@ -345,11 +384,10 @@ export function PaymentCard({
   }
 
   // ─── PayU mode ─────────────────────────────────────────
-  if (providerName === 'payu') {
+  if (cardState.kind === 'payu_redirect') {
+    const payuRedirectUrl = cardState.redirectUrl
     const handlePayURedirect = () => {
-      if (redirectUrl) {
-        window.location.href = redirectUrl
-      }
+      window.location.href = payuRedirectUrl
     }
 
     return (
@@ -357,11 +395,10 @@ export function PaymentCard({
         className="rounded-xl p-6 border"
         style={{ borderColor: BORDER, backgroundColor: '#FFFFFF' }}
       >
-        <AmountSummary />
+        {amountSummary}
 
         <button
           onClick={handlePayURedirect}
-          disabled={!redirectUrl}
           className="w-full py-3 px-6 rounded-lg font-medium text-[16px] border transition-opacity disabled:opacity-50"
           style={{
             backgroundColor: 'transparent',
@@ -399,7 +436,7 @@ export function PaymentCard({
       className="rounded-xl p-6 border"
       style={{ borderColor: BORDER, backgroundColor: '#FFFFFF' }}
     >
-      <AmountSummary />
+      {amountSummary}
 
       {error && (
         <p

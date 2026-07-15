@@ -14,6 +14,8 @@ export async function seedQuestions(prisma: PrismaClient) {
   if (!product) throw new Error('Product "protect" must be seeded before questions')
 
   // ── Helper: upsert a group then upsert all its questions ──────────
+  // code -> id across ALL groups (cross-group parent gating, B2/T3.D6)
+
   async function seedGroup(
     groupDef: {
       code: string
@@ -33,8 +35,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       insightKey?: string | null
       orderIndex: number
       isRequired?: boolean
-      parentQuestionCode?: string | null
-      showWhenValue?: string | null
+      sensitivity?: 'NONE' | 'CONFIRM_ON_MODIFY' | 'CONFIRM_ALWAYS'
     }>,
   ) {
     const group = await prisma.questionGroup.upsert({
@@ -56,16 +57,11 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
     })
 
-    // Build a map of code -> id for parent question linking within this group
+    // code -> id map (question gating lives in QuestionDependency since
+    // C1.8 — seed-dependency-edges.ts is THE dependency store, T6.D1)
     const questionIdMap: Record<string, string> = {}
 
     for (const q of questions) {
-      // Resolve parent question id if specified
-      let parentQuestionId: string | null = null
-      if (q.parentQuestionCode && questionIdMap[q.parentQuestionCode]) {
-        parentQuestionId = questionIdMap[q.parentQuestionCode]
-      }
-
       const existing = await prisma.question.findFirst({
         where: { groupId: group.id, text: { equals: q.text } },
       })
@@ -82,8 +78,7 @@ export async function seedQuestions(prisma: PrismaClient) {
             insightKey: q.insightKey ?? null,
             orderIndex: q.orderIndex,
             isRequired: q.isRequired ?? true,
-            parentQuestionId,
-            showWhenValue: q.showWhenValue ?? null,
+            sensitivity: q.sensitivity ?? 'NONE',
           },
         })
         questionIdMap[q.code] = existing.id
@@ -100,12 +95,24 @@ export async function seedQuestions(prisma: PrismaClient) {
             insightKey: q.insightKey ?? null,
             orderIndex: q.orderIndex,
             isRequired: q.isRequired ?? true,
-            parentQuestionId,
-            showWhenValue: q.showWhenValue ?? null,
+            sensitivity: q.sensitivity ?? 'NONE',
           },
         })
         questionIdMap[q.code] = created.id
       }
+    }
+
+    // B4: the seed is AUTHORITATIVE per group — questions removed from the
+    // catalog (e.g. the T5.D2 selection questions) are deleted, answers
+    // first (FK).
+    const stale = await prisma.question.findMany({
+      where: { groupId: group.id, code: { notIn: questions.map((q) => q.code) } },
+      select: { id: true },
+    })
+    if (stale.length > 0) {
+      const staleIds = stale.map((s) => s.id)
+      await prisma.answer.deleteMany({ where: { questionId: { in: staleIds } } })
+      await prisma.question.deleteMany({ where: { id: { in: staleIds } } })
     }
 
     return { group, questionIdMap }
@@ -176,6 +183,7 @@ export async function seedQuestions(prisma: PrismaClient) {
     [
       {
         code: 'DNT_CNP',
+        sensitivity: 'CONFIRM_ALWAYS',
         text: {
           en: 'Please enter your CNP (Personal Numeric Code)',
           ro: 'Te rugăm să introduci CNP-ul tău (Codul Numeric Personal)',
@@ -561,8 +569,6 @@ export async function seedQuestions(prisma: PrismaClient) {
         },
         type: 'DROPDOWN',
         orderIndex: 2,
-        parentQuestionCode: 'DNT_SUSTAINABILITY_IMPORTANCE',
-        showWhenValue: 'somewhat,quite_important,very_important',
         options: [
           { value: 'no_preference', label: { en: 'I want sustainability but have no clear preference', ro: 'Vreau dezvoltare durabilă, dar nu am o preferință clară' } },
           { value: 'specific', label: { en: 'I want specific sustainability principles followed', ro: 'Vreau ca asigurarea să respecte anumite principii specifice' } },
@@ -587,6 +593,7 @@ export async function seedQuestions(prisma: PrismaClient) {
     [
       {
         code: 'HEALTH_DECLARATION_CONFIRM',
+        sensitivity: 'CONFIRM_ON_MODIFY',
         text: {
           en: 'I confirm that I am in good health and have no known medical conditions that would affect this insurance',
           ro: 'Confirm că sunt sănătos/sănătoasă și nu am afecțiuni medicale cunoscute care ar afecta această asigurare',
@@ -598,63 +605,14 @@ export async function seedQuestions(prisma: PrismaClient) {
           flagAnswers: [{ value: 'false', action: 'escalate', reason: 'Customer declared existing health conditions — requires manual underwriting review' }],
         },
       },
-      {
-        code: 'PACKAGE_CHOICE',
-        text: {
-          en: 'Which insurance package would you like?',
-          ro: 'Ce pachet de asigurare doriți?',
-        },
-        type: 'DROPDOWN',
-        insightKey: 'selectedTier',
-        orderIndex: 2,
-        options: [
-          { value: 'standard', label: { en: 'Standard', ro: 'Standard' } },
-          { value: 'optim', label: { en: 'Optim', ro: 'Optim' } },
-        ],
-      },
-      {
-        code: 'PREMIUM_LEVEL',
-        text: {
-          en: 'Which premium level do you prefer?',
-          ro: 'Ce nivel de primă preferați?',
-        },
-        type: 'DROPDOWN',
-        insightKey: 'selectedLevel',
-        orderIndex: 3,
-        options: [
-          { value: 'level_1', label: { en: 'Level I (lowest premium)', ro: 'Nivelul I (primă minimă)' } },
-          { value: 'level_2', label: { en: 'Level II (medium premium)', ro: 'Nivelul II (primă medie)' } },
-          { value: 'level_3', label: { en: 'Level III (highest premium)', ro: 'Nivelul III (primă maximă)' } },
-        ],
-      },
-      {
-        code: 'BD_ADDON_INTEREST',
-        text: {
-          en: 'Would you like to add Medical Treatment Abroad coverage (up to EUR 2,000,000)?',
-          ro: 'Doriți să adăugați acoperirea Tratament Medical în Străinătate (până la 2.000.000 EUR)?',
-        },
-        type: 'BOOLEAN',
-        insightKey: 'selectedAddon_externalTreatment',
-        orderIndex: 4,
-      },
-      {
-        code: 'PAYMENT_FREQUENCY',
-        text: {
-          en: 'How would you like to pay?',
-          ro: 'Cum doriți să plătiți?',
-        },
-        type: 'DROPDOWN',
-        orderIndex: 5,
-        options: [
-          { value: 'annual', label: { en: 'Annually', ro: 'Anual' } },
-          { value: 'semi_annual', label: { en: 'Semi-annually', ro: 'Semestrial' } },
-          { value: 'quarterly', label: { en: 'Quarterly', ro: 'Trimestrial' } },
-        ],
-      },
+      // B4/T5.D2: PACKAGE_CHOICE, PREMIUM_LEVEL and BD_ADDON_INTEREST left
+      // the questionnaire — selection is select_coverage's Application
+      // columns, the sole writer. D1.8 (T7.D3): PAYMENT_FREQUENCY left too —
+      // the contract frequency is elected at accept_quote, never asked here.
     ],
   )
   void appResult
-  console.log('    application: 5 questions')
+  console.log('    application: 4 questions')
 
   // ── 8. bd_medical — BD Medical Questionnaire (6 questions) ────────
   await seedGroup(
@@ -669,6 +627,7 @@ export async function seedQuestions(prisma: PrismaClient) {
     [
       {
         code: 'BD_CANCER_HISTORY',
+        sensitivity: 'CONFIRM_ALWAYS', // T6.D3 deviation 2026-07-06: batch-signed once via sign_medical_declarations + confirm-on-modify (per-answer first-write cards retired)
         text: {
           en: 'Have you ever been diagnosed with or treated for cancer, pre-cancerous conditions, or tumors?',
           ro: 'Ați fost vreodată diagnosticat(ă) sau tratat(ă) pentru cancer, stări pre-canceroase sau tumori?',
@@ -681,6 +640,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'BD_CARDIOVASCULAR',
+        sensitivity: 'CONFIRM_ALWAYS', // T6.D3 deviation 2026-07-06: batch-signed once via sign_medical_declarations + confirm-on-modify (per-answer first-write cards retired)
         text: {
           en: 'Have you been diagnosed with or treated for cardiovascular conditions requiring surgery?',
           ro: 'Ați fost diagnosticat(ă) sau tratat(ă) pentru afecțiuni cardiovasculare care necesită intervenție chirurgicală?',
@@ -693,6 +653,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'BD_NEUROLOGICAL',
+        sensitivity: 'CONFIRM_ALWAYS', // T6.D3 deviation 2026-07-06: batch-signed once via sign_medical_declarations + confirm-on-modify (per-answer first-write cards retired)
         text: {
           en: 'Have you been diagnosed with or treated for neurological conditions requiring neurosurgery?',
           ro: 'Ați fost diagnosticat(ă) sau tratat(ă) pentru afecțiuni neurologice care necesită neurochirurgie?',
@@ -705,6 +666,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'BD_TRANSPLANT',
+        sensitivity: 'CONFIRM_ALWAYS', // T6.D3 deviation 2026-07-06: batch-signed once via sign_medical_declarations + confirm-on-modify (per-answer first-write cards retired)
         text: {
           en: 'Have you ever required or been evaluated for organ or bone marrow transplant?',
           ro: 'Ați necesitat vreodată sau ați fost evaluat(ă) pentru transplant de organe sau măduvă osoasă?',
@@ -717,6 +679,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'BD_CHRONIC_CONDITIONS',
+        sensitivity: 'CONFIRM_ALWAYS', // T6.D3 deviation 2026-07-06: batch-signed once via sign_medical_declarations + confirm-on-modify (per-answer first-write cards retired)
         text: {
           en: 'Do you have any chronic medical conditions currently under treatment?',
           ro: 'Aveți afecțiuni medicale cronice aflate în prezent sub tratament?',
@@ -729,6 +692,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
       {
         code: 'BD_HOSPITALIZATION_RECENT',
+        sensitivity: 'CONFIRM_ALWAYS', // T6.D3 deviation 2026-07-06: batch-signed once via sign_medical_declarations + confirm-on-modify (per-answer first-write cards retired)
         text: {
           en: 'Have you been hospitalized in the last 12 months for any reason other than accidents?',
           ro: 'Ați fost internat(ă) în ultimele 12 luni din alte motive decât accidente?',

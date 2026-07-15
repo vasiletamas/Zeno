@@ -13,15 +13,6 @@ async function main() {
   })
 
   const stateInput: StateGroundingInput = {
-    workflowSession: ctx.conversation.workflowSession
-      ? {
-          currentStep: {
-            code: ctx.conversation.workflowSession.currentStep.code,
-            name: ctx.conversation.workflowSession.currentStep.name,
-          },
-          status: 'ACTIVE',
-        }
-      : null,
     application: ctx.conversation.application
       ? {
           id: 'application',

@@ -18,6 +18,8 @@ interface MessageListProps {
   answeredMessageIds?: Set<string>
   onAction?: (action: UIAction) => void
   markAnswered?: (messageId: string) => void
+  /** P1-12: resend the message whose turn aborted */
+  onRetry?: () => void
   language?: Language
 }
 
@@ -30,6 +32,7 @@ export function MessageList({
   answeredMessageIds,
   onAction,
   markAnswered,
+  onRetry,
   language = 'ro',
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -79,35 +82,44 @@ export function MessageList({
         role="log"
         aria-live="polite"
       >
-        {messages.map((message) => {
-          if (message.role === 'user' || message.role === 'assistant') {
-            const actionData = message.role === 'assistant' ? uiActions?.get(message.id) : undefined
-            return (
-              <div key={message.id}>
-                <MessageBubble
-                  role={message.role}
-                  content={message.content}
-                  isStreaming={message.isStreaming}
-                />
-                {actionData && onAction && (
-                  <RichContent
-                    action={actionData}
-                    onAction={(action) => {
-                      onAction(action)
-                      markAnswered?.(message.id)
-                    }}
-                    language={language}
-                    isAnswered={answeredMessageIds?.has(message.id) ?? false}
-                    isLoading={isStreaming}
+        {(() => {
+          // Only the NEWEST card stays interactive: a superseded card acting
+          // on old state is how a "Da" on the health question got recorded
+          // against the cancer question (2026-07-06). Older cards render in
+          // their answered (inert) state.
+          const lastActionableId = [...messages].reverse().find(
+            (m) => m.role === 'assistant' && uiActions?.has(m.id),
+          )?.id
+          return messages.map((message) => {
+            if (message.role === 'user' || message.role === 'assistant') {
+              const actionData = message.role === 'assistant' ? uiActions?.get(message.id) : undefined
+              return (
+                <div key={message.id}>
+                  <MessageBubble
+                    role={message.role}
+                    content={message.content}
+                    isStreaming={message.isStreaming}
                   />
-                )}
-              </div>
-            )
-          }
-          return null
-        })}
+                  {actionData && onAction && (
+                    <RichContent
+                      action={actionData}
+                      onAction={(action) => {
+                        onAction(action)
+                        markAnswered?.(message.id)
+                      }}
+                      language={language}
+                      isAnswered={(answeredMessageIds?.has(message.id) ?? false) || message.id !== lastActionableId}
+                      isLoading={isStreaming}
+                    />
+                  )}
+                </div>
+              )
+            }
+            return null
+          })
+        })()}
 
-        {error && <ErrorMessage message={error} />}
+        {error && <ErrorMessage message={error} onRetry={onRetry} language={language === 'en' ? 'en' : 'ro'} />}
 
         <TypingIndicator
           visible={isStreaming && !messages.some((m) => m.isStreaming)}

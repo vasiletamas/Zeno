@@ -10,43 +10,34 @@ async function main() {
     where: { id: convId },
     include: {
       product: { select: { code: true } },
-      application: {
-        include: { tier: { select: { code: true } }, level: { select: { code: true } } },
-      },
-      workflowSession: {
-        include: {
-          currentStep: { select: { code: true } },
-          workflow: { select: { code: true } },
-        },
-      },
     },
   })
   if (!conv) {
     console.error('conversation not found')
     process.exit(1)
   }
+  // B4: the application hangs off the activeApplicationId pointer
+  const application = conv.activeApplicationId
+    ? await prisma.application.findUnique({
+        where: { id: conv.activeApplicationId },
+        include: { tier: { select: { code: true } }, level: { select: { code: true } } },
+      })
+    : null
   console.log(
     JSON.stringify(
       {
         productId: conv.productId,
         product: conv.product?.code ?? null,
         candidateProductId: conv.candidateProductId,
-        candidateConfidence: conv.candidateConfidence,
-        candidateSetAt: conv.candidateSetAt,
+                candidateSetAt: conv.candidateSetAt,
         mode: conv.mode,
-        application: conv.application
+        application: application
           ? {
-              status: conv.application.status,
-              tier: conv.application.tier?.code ?? null,
-              level: conv.application.level?.code ?? null,
-              currentQuestionIndex: conv.application.currentQuestionIndex,
-              totalQuestions: conv.application.totalQuestions,
-            }
-          : null,
-        workflowSession: conv.workflowSession
-          ? {
-              workflow: conv.workflowSession.workflow?.code ?? null,
-              step: conv.workflowSession.currentStep?.code ?? null,
+              status: application.status,
+              tier: application.tier?.code ?? null,
+              level: application.level?.code ?? null,
+              currentQuestionIndex: application.currentQuestionIndex,
+              totalQuestions: application.totalQuestions,
             }
           : null,
       },

@@ -1,83 +1,40 @@
 import { describe, it, expect } from 'vitest'
 import {
-  shouldShowQuestion,
   validateAnswer,
   checkForFlags,
 } from '@/lib/engines/questionnaire-engine'
+import { computeVisibleSet } from '@/lib/engines/dependency-graph'
+import { PROTECT_DEPENDENCY_EDGES } from '@/prisma/seeds/seed-dependency-edges'
 
-// ==========================================
-// shouldShowQuestion
-// ==========================================
+// shouldShowQuestion (parentQuestionId/showWhenValue) was retired in C1.8 —
+// visibility comes from computeVisibleSet over the typed graph (covered in
+// depth by dependency-graph.test.ts). Pin the migrated DNT gates here.
 
-describe('shouldShowQuestion', () => {
-  it('returns true when question has no parent', () => {
-    const result = shouldShowQuestion(
-      { parentQuestionId: null, showWhenValue: null },
-      new Map(),
-    )
-    expect(result).toBe(true)
+describe('graph-based questionnaire visibility (C1.8 migration)', () => {
+  const codes = ['DNT_LIFE_SUBTYPE', 'DNT_LIFE_BUDGET', 'DNT_LIFE_RISK_TOLERANCE', 'DNT_SUSTAINABILITY_IMPORTANCE', 'DNT_SUSTAINABILITY_PREFERENCE']
+  const noSelection = { tier: null, level: null, addon: null }
+
+  it('unanswered DNT_LIFE_SUBTYPE hides every gated life question', () => {
+    const visible = computeVisibleSet(PROTECT_DEPENDENCY_EDGES, codes, { answers: {}, selection: noSelection })
+    expect(visible.has('DNT_LIFE_SUBTYPE')).toBe(true)
+    expect(visible.has('DNT_LIFE_BUDGET')).toBe(false)
+    expect(visible.has('DNT_LIFE_RISK_TOLERANCE')).toBe(false)
   })
 
-  it('returns true when parent answered with matching value', () => {
-    const answersMap = new Map([['parent-1', 'yes']])
-    const result = shouldShowQuestion(
-      { parentQuestionId: 'parent-1', showWhenValue: 'yes' },
-      answersMap,
-    )
-    expect(result).toBe(true)
+  it('financial_protection reveals the financial set but not the investment set', () => {
+    const visible = computeVisibleSet(PROTECT_DEPENDENCY_EDGES, codes, { answers: { DNT_LIFE_SUBTYPE: 'financial_protection' }, selection: noSelection })
+    expect(visible.has('DNT_LIFE_BUDGET')).toBe(true)
+    expect(visible.has('DNT_LIFE_RISK_TOLERANCE')).toBe(false)
+    expect(visible.has('DNT_SUSTAINABILITY_IMPORTANCE')).toBe(false)
   })
 
-  it('returns false when parent answered with non-matching value', () => {
-    const answersMap = new Map([['parent-1', 'no']])
-    const result = shouldShowQuestion(
-      { parentQuestionId: 'parent-1', showWhenValue: 'yes' },
-      answersMap,
-    )
-    expect(result).toBe(false)
-  })
-
-  it('returns false when parent not answered', () => {
-    const result = shouldShowQuestion(
-      { parentQuestionId: 'parent-1', showWhenValue: 'yes' },
-      new Map(),
-    )
-    expect(result).toBe(false)
-  })
-
-  it('returns true when parent answered and showWhenValue is null', () => {
-    const answersMap = new Map([['parent-1', 'anything']])
-    const result = shouldShowQuestion(
-      { parentQuestionId: 'parent-1', showWhenValue: null },
-      answersMap,
-    )
-    expect(result).toBe(true)
-  })
-
-  it('matches boolean showWhenValue "true" with normalized answer "da"', () => {
-    const answersMap = new Map([['parent-1', 'true']])
-    const result = shouldShowQuestion(
-      { parentQuestionId: 'parent-1', showWhenValue: 'true' },
-      answersMap,
-    )
-    expect(result).toBe(true)
-  })
-
-  it('matches comma-separated showWhenValue', () => {
-    const answersMap = new Map([['parent-1', 'quite_important']])
-    const result = shouldShowQuestion(
-      { parentQuestionId: 'parent-1', showWhenValue: 'somewhat,quite_important,very_important' },
-      answersMap,
-    )
-    expect(result).toBe(true)
-  })
-
-  it('rejects comma-separated showWhenValue when not matching', () => {
-    const answersMap = new Map([['parent-1', 'not_necessary']])
-    const result = shouldShowQuestion(
-      { parentQuestionId: 'parent-1', showWhenValue: 'somewhat,quite_important,very_important' },
-      answersMap,
-    )
-    expect(result).toBe(false)
+  it('financial_and_investment reveals investment questions; sustainability preference still gated on importance', () => {
+    const visible = computeVisibleSet(PROTECT_DEPENDENCY_EDGES, codes, { answers: { DNT_LIFE_SUBTYPE: 'financial_and_investment' }, selection: noSelection })
+    expect(visible.has('DNT_LIFE_RISK_TOLERANCE')).toBe(true)
+    expect(visible.has('DNT_SUSTAINABILITY_IMPORTANCE')).toBe(true)
+    expect(visible.has('DNT_SUSTAINABILITY_PREFERENCE')).toBe(false)
+    const withImportance = computeVisibleSet(PROTECT_DEPENDENCY_EDGES, codes, { answers: { DNT_LIFE_SUBTYPE: 'financial_and_investment', DNT_SUSTAINABILITY_IMPORTANCE: 'quite_important' }, selection: noSelection })
+    expect(withImportance.has('DNT_SUSTAINABILITY_PREFERENCE')).toBe(true)
   })
 })
 
@@ -147,6 +104,33 @@ describe('validateAnswer', () => {
       expect(result.error).toContain('Invalid option')
     })
 
+    it('matches an unambiguous label prefix at a word boundary ("da" → "DA, pentru toate produsele", B2.7 live lesson)', () => {
+      const consentQuestion = {
+        type: 'DROPDOWN',
+        options: [
+          { value: 'yes_all', label: { en: 'Yes, for all products', ro: 'DA, pentru toate produsele' } },
+          { value: 'no', label: { en: 'No', ro: 'NU' } },
+        ],
+        validationRules: null,
+      }
+      expect(validateAnswer(consentQuestion, 'da')).toEqual({ valid: true, normalizedValue: 'yes_all' })
+      expect(validateAnswer(consentQuestion, 'nu')).toEqual({ valid: true, normalizedValue: 'no' })
+      // no mid-word matches: 'dac' is not a word-boundary prefix of 'DA, ...'
+      expect(validateAnswer(consentQuestion, 'dac').valid).toBe(false)
+    })
+
+    it('an ambiguous prefix stays rejected', () => {
+      const ambiguous = {
+        type: 'DROPDOWN',
+        options: [
+          { value: 'a1', label: { en: 'Yes today', ro: 'DA, azi' } },
+          { value: 'a2', label: { en: 'Yes tomorrow', ro: 'DA, mâine' } },
+        ],
+        validationRules: null,
+      }
+      expect(validateAnswer(ambiguous, 'da').valid).toBe(false)
+    })
+
     it('matches case-insensitively', () => {
       const result = validateAnswer(dropdownQuestion, 'STANDARD')
       expect(result).toEqual({ valid: true, normalizedValue: 'standard' })
@@ -195,6 +179,13 @@ describe('validateAnswer', () => {
     it('rejects if any value is invalid', () => {
       const result = validateAnswer(multiQuestion, 'salary_pension,invalid_option')
       expect(result.valid).toBe(false)
+    })
+
+    it('invalid-option error names the valid options — the model cannot see prior-turn tool results, the error is its only in-turn source (2026-07-06 stuck-loop)', () => {
+      const result = validateAnswer(multiQuestion, 'din salariu')
+      expect(result.valid).toBe(false)
+      expect(result.error).toContain('salary_pension')
+      expect(result.error).toContain('other_sources')
     })
   })
 

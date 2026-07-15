@@ -10,6 +10,7 @@ import type {
   DebugEvent,
   DebugGatePayload,
   DebugIdentityPayload,
+  DebugLegalityPayload,
   DebugPromptPayload,
   DebugToolNarrationPayload,
   DebugToolResultPayload,
@@ -36,6 +37,8 @@ export interface DebugTurn {
   startedAt: number
   identity?: Omit<DebugIdentityPayload, 'traceId'>
   gate?: Omit<DebugGatePayload, 'traceId'>
+  /** F2.1 (T14.D2): per-turn legality snapshots in arrival order, turn_start first. */
+  legality?: Omit<DebugLegalityPayload, 'traceId'>[]
   prompt?: Omit<DebugPromptPayload, 'traceId'>
   toolCalls: DebugTurnToolCall[]
   toolNarration?: Omit<DebugToolNarrationPayload, 'traceId'>
@@ -86,6 +89,11 @@ export function reduceDebugEvent(state: DebugState, event: DebugEvent): DebugSta
     case 'debug:gate': {
       const { traceId, ...rest } = event.data
       return updateTurn(state, traceId, (t) => ({ ...t, gate: rest }))
+    }
+
+    case 'debug:legality': {
+      const { traceId, ...rest } = event.data
+      return updateTurn(state, traceId, (t) => ({ ...t, legality: [...(t.legality ?? []), rest] }))
     }
 
     case 'debug:prompt': {

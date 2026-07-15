@@ -40,6 +40,15 @@ describe('resolveGroupCodes', () => {
       select: { code: true },
     })
   })
+
+  it('uses an injected db client instead of the global prisma (tx seam)', async () => {
+    const injectedFindMany = vi.fn().mockResolvedValueOnce([{ code: 'from_injected' }])
+    const injectedDb = { questionGroup: { findMany: injectedFindMany } } as unknown as Parameters<typeof resolveGroupCodes>[2]
+    const codes = await resolveGroupCodes('p-protect', 'dnt', injectedDb)
+    expect(codes).toEqual(['from_injected'])
+    expect(injectedFindMany).toHaveBeenCalledTimes(1)
+    expect(groupFindManySpy).not.toHaveBeenCalled()
+  })
 })
 
 describe('resolveActiveProductId', () => {

@@ -18,7 +18,9 @@ import type { Persona, ScriptedScenario, ScenarioStep, ConversationResult, Parse
 // CONSTANTS
 // ==============================================
 
-const TERMINAL_UI_ACTIONS = new Set(['show_payment_success', 'show_policy_issued'])
+// D2.5 (M9): show_policy_issued died at accept — the policy is issued at
+// first successful payment, so payment success IS the terminal surface.
+const TERMINAL_UI_ACTIONS = new Set(['show_payment_success'])
 const MAX_CONSECUTIVE_ERRORS = 3
 const OPENING_MESSAGE = 'Buna ziua, sunt interesat de o asigurare de viata.'
 
@@ -230,13 +232,11 @@ export async function driveConversation(options: DriverOptions): Promise<Convers
     const hasTerminal = lastTurn.uiActions.some(a => TERMINAL_UI_ACTIONS.has(a.type))
     if (hasTerminal) {
       finalStatus = 'COMPLETED'
+      // D2.1 (contradiction #11): sim completion lives on the Simulation*
+      // entities only — Conversation is a channel, never a funnel record.
       await prisma.simulationConversation.update({
         where: { conversationId },
         data: { status: 'COMPLETED', turnCount, durationMs: Date.now() - startTime },
-      })
-      await prisma.conversation.update({
-        where: { id: conversationId },
-        data: { status: 'COMPLETED', completedAt: new Date() },
       })
       return {
         conversationId,
@@ -266,13 +266,10 @@ export async function driveConversation(options: DriverOptions): Promise<Convers
           if (step.response.type === 'abandon') {
             // ABANDONED: update and return immediately
             finalStatus = 'ABANDONED'
+            // D2.1: recorded on the Simulation* entities only (see above)
             await prisma.simulationConversation.update({
               where: { conversationId },
               data: { status: 'ABANDONED', turnCount, durationMs: Date.now() - startTime },
-            })
-            await prisma.conversation.update({
-              where: { id: conversationId },
-              data: { status: 'ABANDONED' },
             })
             return {
               conversationId,
@@ -360,18 +357,8 @@ export async function driveConversation(options: DriverOptions): Promise<Convers
     },
   })
 
-  // Bridge a COMPLETED customer outcome into the Conversation table so the
-  // self-improvement scorer picks it up. (ABANDONED is already bridged inline
-  // above before its early return; FAILED is a system error, intentionally skipped.)
-  if (finalStatus === 'COMPLETED') {
-    await prisma.conversation.update({
-      where: { id: conversationId },
-      data: {
-        status: 'COMPLETED',
-        completedAt: new Date(),
-      },
-    })
-  }
+  // D2.1 (contradiction #11): the old Conversation.status bridge died —
+  // outcomes live on SimulationConversation; the scorer reads them there.
 
   // Step 8: Return result
   return {

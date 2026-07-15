@@ -1,19 +1,19 @@
 /**
- * PayU Webhook (IPN) Handler
+ * PayU Webhook (IPN) Handler (D2.7 — settlement-inbox path)
  *
  * POST /api/webhooks/payu
  *
- * Receives PayU Instant Payment Notification (IPN) callbacks.
- * PayU sends notifications when order status changes.
- *
- * PayU expects a specific acknowledgment response.
- * Unknown or missing payments are acknowledged (200) to prevent retries.
+ * Unsigned payloads are hard-rejected by the provider (400). Verified
+ * events flow through the transactional settlement inbox — exactly-once on
+ * the derived (orderId:status) event identity. 'ignored' (PENDING) and
+ * unmatched events are acknowledged with 200; INTERNAL failures return 5xx
+ * so PayU retries (T8.D3 — never silently drop a money event).
  */
 
+import crypto from 'crypto'
 import { NextResponse } from 'next/server'
-import { prisma } from '@/lib/db'
 import { getPaymentProvider } from '@/lib/payments'
-import { runPostPaymentFlow } from '@/lib/payments/post-payment'
+import { settlePaymentEvent, recordPaymentAnomaly } from '@/lib/payments/settlement'
 
 export async function POST(request: Request) {
   try {
@@ -23,7 +23,6 @@ export async function POST(request: Request) {
 
     const signature = request.headers.get('OpenPayU-Signature') ?? ''
 
-    // Parse and validate webhook via PayU provider
     const provider = getPaymentProvider()
     if (provider.name !== 'payu') {
       console.warn(
@@ -40,56 +39,46 @@ export async function POST(request: Request) {
         '[PayUWebhook] Webhook validation failed:',
         error instanceof Error ? error.message : error,
       )
+      // D2.ADD-1: a bad/missing signature never reaches the inbox — flag it
+      // (once per payload) so an operator sees possible forgery attempts.
+      await recordPaymentAnomaly({
+        anomaly: 'bad_signature',
+        ref: `PAYU:${crypto.createHash('sha256').update(rawBody).digest('hex').slice(0, 16)}`,
+        reason: `bad_signature: PayU webhook rejected — ${error instanceof Error ? error.message : 'validation failed'}`,
+      }).catch(() => {})
       return NextResponse.json(
         { error: 'Webhook validation failed' },
         { status: 400 },
       )
     }
 
-    // Find payment by provider payment ID
-    const payment = await prisma.payment.findFirst({
-      where: { providerPaymentId: webhookEvent.providerPaymentId },
-    })
-
-    if (!payment) {
-      // Payment not in our DB — acknowledge to prevent retries
-      console.log(
-        `[PayUWebhook] No payment found for providerPaymentId=${webhookEvent.providerPaymentId}, ignoring`,
-      )
+    if (webhookEvent.event === 'ignored') {
+      console.log(`[PayUWebhook] Ignoring event ${webhookEvent.eventId}`)
       return NextResponse.json({ status: 'OK' }, { status: 200 })
     }
 
-    // Process the event
-    if (webhookEvent.event === 'payment_succeeded') {
-      console.log(
-        `[PayUWebhook] Payment succeeded: ${payment.id} (provider: ${webhookEvent.providerPaymentId})`,
-      )
-      await runPostPaymentFlow(payment.id)
-    } else if (webhookEvent.event === 'payment_failed') {
-      console.log(
-        `[PayUWebhook] Payment failed: ${payment.id} (provider: ${webhookEvent.providerPaymentId})`,
-      )
-      const failureReason =
-        (webhookEvent.metadata?.status as string) ??
-        'Payment failed via PayU webhook'
+    const result = await settlePaymentEvent({
+      provider: 'PAYU',
+      eventId: webhookEvent.eventId,
+      event: webhookEvent.event,
+      providerPaymentId: webhookEvent.providerPaymentId,
+      failureReason: webhookEvent.metadata?.status as string | undefined,
+      // P1-6: the provider-reported captured amount + currency
+      providerAmountMinor: webhookEvent.amountMinor ?? null,
+      providerCurrency: webhookEvent.currency ?? null,
+    })
 
-      await prisma.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: 'FAILED',
-          failureReason,
-        },
-      })
+    if (result.disposition === 'unmatched') {
+      console.log(
+        `[PayUWebhook] No payment for providerPaymentId=${webhookEvent.providerPaymentId}, recorded + ignored`,
+      )
     }
 
     // PayU expects acknowledgment
-    return NextResponse.json({ status: 'OK' }, { status: 200 })
+    return NextResponse.json({ status: 'OK', disposition: result.disposition }, { status: 200 })
   } catch (error) {
-    console.error('[PayUWebhook] Unhandled error:', error)
-    // Return 200 to prevent PayU retries for consistently failing webhooks.
-    return NextResponse.json(
-      { status: 'OK', error: 'Internal processing error' },
-      { status: 200 },
-    )
+    console.error('[PayUWebhook] Internal processing error:', error)
+    // 5xx so PayU RETRIES — a verified money event must never be dropped.
+    return NextResponse.json({ error: 'processing_failed' }, { status: 500 })
   }
 }

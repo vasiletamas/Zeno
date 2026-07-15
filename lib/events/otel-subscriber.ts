@@ -133,18 +133,6 @@ export function registerOtelSubscriber(bus: EventBus): void {
         break
       }
 
-      case 'skillpack:activated': {
-        const ts = activeTraces.get(event.traceId)
-        ts?.root.addEvent('skillpack.activated', { slugs: event.slugs.join(',') })
-        break
-      }
-
-      case 'skillpack:deactivated': {
-        const ts = activeTraces.get(event.traceId)
-        ts?.root.addEvent('skillpack.deactivated', { slugs: event.slugs.join(',') })
-        break
-      }
-
       case 'compliance:result': {
         const ts = activeTraces.get(event.traceId)
         ts?.root.addEvent('compliance.result', {

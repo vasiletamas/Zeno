@@ -1,7 +1,84 @@
 export type Language = 'ro' | 'en'
 
-export const translations: Record<Language, Record<string, string>> = {
+/**
+ * Flat UI strings plus the nested per-ReasonCode map (A3.ADD-3/M6 GUI leg):
+ * the engine emits snake_case reason codes, never prose — these are the
+ * customer-safe bilingual renderings the GUI shows for blocked/rejected
+ * commits. Every member of REASON_CODES must have an entry (pinned by test).
+ */
+interface TranslationTable {
+  reasonCodes: Record<string, string>
+  [key: string]: string | Record<string, string>
+}
+
+export const translations: Record<Language, TranslationTable> = {
   ro: {
+    reasonCodes: {
+      no_product_in_focus: 'Mai întâi alegem produsul potrivit pentru tine.',
+      no_open_application: 'Nu există încă o aplicație deschisă.',
+      application_already_open: 'Există deja o aplicație în curs.',
+      application_paused: 'Aplicația este în pauză — o putem relua oricând.',
+      no_candidate_product: 'Mai întâi alegem produsul despre care vorbim.',
+      invalid_level_for_tier: 'Nivelul ales nu există pentru acest pachet — alegem unul valid.',
+      illegal_status_transition: 'Această acțiune nu mai este posibilă pentru aplicația curentă.',
+      with_underwriter: 'Cererea este în analiză la asigurător — revenim imediat ce avem un răspuns.',
+      requires_consent: 'Avem nevoie mai întâi de acordul tău.',
+      gdpr_processing_withdrawn: 'Consimțământul pentru prelucrarea datelor a fost retras — pentru a continua, este nevoie de un nou acord.',
+      dnt_not_signed: 'Analiza de nevoi trebuie semnată mai întâi.',
+      dnt_incomplete: 'Mai sunt întrebări de completat în analiza de nevoi.',
+      dnt_expired: 'Analiza de nevoi a expirat — o refacem rapid.',
+      dnt_session_already_active: 'Există deja o sesiune de analiză în curs — o continuăm pe aceea.',
+      dnt_session_incomplete: 'Mai sunt întrebări de completat în sesiunea de analiză.',
+      no_active_dnt_session: 'Nu există o sesiune de analiză activă — deschidem una întâi.',
+      questionnaire_incomplete: 'Mai sunt întrebări de completat înainte de ofertă.',
+      selection_incomplete: 'Mai întâi alegem pachetul și nivelul.',
+      quote_already_issued: 'Există deja o ofertă activă.',
+      no_issued_quote: 'Nu există încă o ofertă generată.',
+      quote_expired: 'Oferta a expirat — generăm una nouă.',
+      quote_already_accepted: 'Oferta a fost deja acceptată.',
+      requires_confirmation: 'Este nevoie de confirmarea ta pentru acest pas.',
+      requires_identity: 'Avem nevoie de câteva date de identificare mai întâi.',
+      requires_disclosures: 'Mai întâi trebuie parcurse informările obligatorii.',
+      already_applied: 'Acest pas a fost deja finalizat.',
+      stale_confirm_token: 'Confirmarea a expirat — te rugăm să reiei pasul.',
+      invalid_args: 'Datele trimise nu sunt valide.',
+      handler_rejected: 'Operațiunea nu a putut fi finalizată.',
+      temporarily_unavailable: 'Serviciul este momentan indisponibil. Încearcă din nou în scurt timp.',
+      degraded_mode: 'Funcționăm momentan în mod limitat.',
+      no_policy: 'Nu există încă o poliță emisă.',
+      payment_not_pending: 'Nu există o plată în așteptare.',
+      actor_not_permitted: 'Această operațiune este rezervată echipei de operatori.',
+      work_item_not_found: 'Sarcina de lucru nu a fost găsită.',
+      work_item_not_open: 'Sarcina de lucru a fost deja rezolvată sau închisă.',
+      permission_denied: 'Nu ai permisiunea pentru această acțiune.',
+      not_exposed: 'Această acțiune nu este disponibilă în acest moment.',
+      validity_dependency_changed: 'O alegere anterioară s-a schimbat, așa că acest răspuns trebuie reconfirmat.',
+      removed_by_branch: 'Această întrebare nu mai face parte din traseul actual al cererii.',
+      addon_ineligible_medical_history: 'Istoricul medical declarat nu permite adăugarea opțiunii de tratament în străinătate.',
+      ineligible_age_minimum: 'Produsul este disponibil de la vârsta de 18 ani.',
+      ineligible_age_maximum: 'Produsul este disponibil până la vârsta de 64 de ani.',
+      ineligible_residency: 'Produsul este disponibil doar pentru rezidenții din România.',
+      addon_age_band_unavailable: 'Opțiunea de tratament în străinătate nu este disponibilă pentru această vârstă.',
+      one_facet_per_commit: 'Schimbăm pe rând: întâi pachetul, apoi nivelul, apoi opțiunea suplimentară.',
+      eligibility_facts_missing: 'Mai avem nevoie de câteva date pentru a verifica eligibilitatea (de exemplu vârsta).',
+      suitability_warning_unacknowledged: 'Produsul nu se potrivește complet nevoilor declarate — putem continua doar după ce confirmi că ai înțeles diferența.',
+      no_suitability_warning_pending: 'Nu există o avertizare de potrivire de confirmat.',
+      product_has_no_investment_component: 'Protect nu are componentă de investiție — este o asigurare de protecție.',
+      severe_conditions_demand_needs_addon: 'Pentru afecțiuni medicale grave, potrivirea vine din opțiunea de tratament în străinătate.',
+      compliance_block: 'Pașii de conformitate nu sunt încheiați — analiza de nevoi și acordul GDPR trebuie să fie valide.',
+      application_frozen: 'Cererea a fost înghețată la emiterea ofertei — pentru schimbări, anulăm oferta și deschidem o cerere nouă.',
+      manual_underwriting: 'Cererea necesită analiza unui subscriitor — revenim imediat ce avem un răspuns.',
+      no_due_installment: 'Nu există nicio rată scadentă de plătit — planul de plată este achitat la zi.',
+      schedule_already_captured: 'Prima rată a fost deja încasată — frecvența de plată nu mai poate fi schimbată pentru acest plan.',
+      outside_free_look: 'Perioada de renunțare (free-look) s-a încheiat — anularea nu mai este posibilă pe acest canal; un coleg poate prelua cererea.',
+      verification_already_pending: 'Un cod de verificare este deja pe drum — folosește codul primit sau cere unul nou.',
+      repeated_failure: 'Ceva n-a mers la noi de mai multe ori la rând — un coleg poate prelua cererea.',
+      medical_declarations_unsigned: 'Declarația medicală trebuie semnată (un singur card de confirmare) înainte de generarea ofertei.',
+      medical_declarations_incomplete: 'Mai sunt întrebări medicale fără răspuns — declarația se semnează după ce toate au fost completate.',
+      already_escalated: 'Un coleg a fost deja anunțat pentru această conversație — va prelua discuția cu întregul context.',
+      value_not_grounded: 'Răspunsul trebuie să vină de la tine — te rugăm să răspunzi la întrebare sau să confirmi valoarea propusă.',
+      customer_intent_required: 'Oferta rămâne valabilă — o poți anula doar dacă ne spui explicit că vrei alta sau că renunți.',
+    },
     // Hero section
     hero_headline: 'Dacă mâine primești un diagnostic grav, ai fi pregătit?',
     hero_subtitle:
@@ -59,6 +136,9 @@ export const translations: Record<Language, Record<string, string>> = {
     bd_result_answered: 'Raspuns inregistrat',
 
     // B2: Policy issued card
+    payment_mode_started: 'Plătește acum',
+    payment_mode_resumed: 'Continuă plata începută',
+    payment_mode_retried: 'Reîncearcă plata',
     policy_congratulations: 'Felicitari!',
     policy_activating: 'Polita ta se activeaza.',
     policy_total_coverage: 'Acoperire totala',
@@ -97,6 +177,72 @@ export const translations: Record<Language, Record<string, string>> = {
     magic_link_error: 'Nu am putut trimite link-ul. Incearca din nou.',
   },
   en: {
+    reasonCodes: {
+      no_product_in_focus: 'Let’s pick the right product for you first.',
+      no_open_application: 'There is no open application yet.',
+      application_already_open: 'An application is already in progress.',
+      application_paused: 'The application is paused — we can resume anytime.',
+      no_candidate_product: 'Let’s choose the product we are talking about first.',
+      invalid_level_for_tier: 'That level does not exist for this package — let’s pick a valid one.',
+      illegal_status_transition: 'This action is no longer possible for the current application.',
+      with_underwriter: 'The application is with the underwriter — we will continue as soon as there is an answer.',
+      requires_consent: 'We need your consent first.',
+      gdpr_processing_withdrawn: 'Data-processing consent has been withdrawn — a new consent is required to continue.',
+      dnt_not_signed: 'The needs analysis must be signed first.',
+      dnt_incomplete: 'A few needs-analysis questions are still unanswered.',
+      dnt_expired: 'The needs analysis has expired — we can redo it quickly.',
+      dnt_session_already_active: 'A needs-analysis session is already in progress — we continue that one.',
+      dnt_session_incomplete: 'A few needs-analysis session questions are still unanswered.',
+      no_active_dnt_session: 'There is no active needs-analysis session — we open one first.',
+      questionnaire_incomplete: 'A few questions remain before the quote.',
+      selection_incomplete: 'Let’s choose the package and level first.',
+      quote_already_issued: 'There is already an active quote.',
+      no_issued_quote: 'No quote has been generated yet.',
+      quote_expired: 'The quote has expired — we’ll generate a new one.',
+      quote_already_accepted: 'The quote has already been accepted.',
+      requires_confirmation: 'Your confirmation is needed for this step.',
+      requires_identity: 'We need a few identification details first.',
+      requires_disclosures: 'The mandatory disclosures come first.',
+      already_applied: 'This step has already been completed.',
+      stale_confirm_token: 'The confirmation expired — please redo this step.',
+      invalid_args: 'The submitted data is not valid.',
+      handler_rejected: 'The operation could not be completed.',
+      temporarily_unavailable: 'The service is temporarily unavailable. Please try again shortly.',
+      degraded_mode: 'We are temporarily running in limited mode.',
+      no_policy: 'There is no issued policy yet.',
+      payment_not_pending: 'There is no pending payment.',
+      actor_not_permitted: 'This operation is reserved for the operator team.',
+      work_item_not_found: 'The work item could not be found.',
+      work_item_not_open: 'The work item has already been resolved or closed.',
+      permission_denied: 'You do not have permission for this action.',
+      not_exposed: 'This action is not available right now.',
+      validity_dependency_changed: 'An earlier choice changed, so this answer needs to be confirmed again.',
+      removed_by_branch: 'This question is no longer part of the current application path.',
+      addon_ineligible_medical_history: 'The declared medical history does not allow adding the treatment-abroad option.',
+      ineligible_age_minimum: 'The product is available from age 18.',
+      ineligible_age_maximum: 'The product is available up to age 64.',
+      ineligible_residency: 'The product is only available to residents of Romania.',
+      addon_age_band_unavailable: 'The treatment-abroad option is not available for this age.',
+      one_facet_per_commit: 'One change at a time: first the package, then the level, then the add-on.',
+      eligibility_facts_missing: 'A few more details are needed to check eligibility (for example your age).',
+      suitability_warning_unacknowledged: 'The product does not fully match the declared needs — we can continue only after you confirm you understand the difference.',
+      no_suitability_warning_pending: 'There is no suitability warning to acknowledge.',
+      product_has_no_investment_component: 'Protect has no investment component — it is a protection product.',
+      severe_conditions_demand_needs_addon: 'For severe medical conditions, the fit comes from the treatment-abroad option.',
+      compliance_block: 'The compliance steps are not complete — the needs analysis and GDPR consent must be valid.',
+      application_frozen: 'The application froze when the quote was issued — to change it, we cancel the quote and open a new application.',
+      manual_underwriting: 'The application needs an underwriter\'s review — we will continue as soon as there is an answer.',
+      no_due_installment: 'There is no due installment to pay — the payment plan is fully up to date.',
+      schedule_already_captured: 'The first installment was already captured — the payment frequency can no longer be changed on this plan.',
+      outside_free_look: 'The free-look window has ended — cancellation is no longer possible on this channel; a colleague can take over the request.',
+      verification_already_pending: 'A verification code is already on its way — use the code you received or ask for a new one.',
+      repeated_failure: 'Something went wrong on our side several times in a row — a colleague can take over the request.',
+      medical_declarations_unsigned: 'The medical declaration must be signed (one confirmation card) before the quote can be generated.',
+      medical_declarations_incomplete: 'Some medical questions are still unanswered — the declaration is signed once they are all complete.',
+      already_escalated: 'A colleague has already been notified for this conversation — they will take over with full context.',
+      value_not_grounded: 'The answer has to come from you — please answer the question or confirm the proposed value.',
+      customer_intent_required: 'Your quote still stands — it can only be cancelled if you tell us you want a different one or wish to drop it.',
+    },
     // Hero section
     hero_headline:
       'If you received a serious diagnosis tomorrow, would you be prepared?',
@@ -155,6 +301,9 @@ export const translations: Record<Language, Record<string, string>> = {
     bd_result_answered: 'Answer recorded',
 
     // B2: Policy issued card
+    payment_mode_started: 'Pay now',
+    payment_mode_resumed: 'Resume your payment',
+    payment_mode_retried: 'Retry the payment',
     policy_congratulations: 'Congratulations!',
     policy_activating: 'Your policy is being activated.',
     policy_total_coverage: 'Total coverage',
@@ -195,5 +344,6 @@ export const translations: Record<Language, Record<string, string>> = {
 }
 
 export function t(key: string, lang: Language): string {
-  return translations[lang]?.[key] ?? key
+  const value = translations[lang]?.[key]
+  return typeof value === 'string' ? value : key
 }

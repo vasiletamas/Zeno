@@ -2,7 +2,7 @@
  * Turn Context Loader
  *
  * Consolidates ~10 sequential DB queries across orchestrator Steps 1, 3, and 4
- * into 4 parallel queries executed via Promise.all.
+ * into 3 parallel queries executed via Promise.all.
  */
 
 import { prisma } from '@/lib/db'
@@ -16,26 +16,10 @@ export interface TurnContextConversation {
   status: string
   messageCount: number
   mode: string
-  activeSkillPacks: string[]
   productId: string | null
   product: { id: string; code: string; name: unknown } | null
   candidateProductId: string | null
-  candidateConfidence: number | null
   candidateSetAt: Date | null
-  workflowSession: {
-    id: string
-    workflowId: string
-    currentStepId: string
-    currentStep: {
-      id: string
-      code: string
-      name: string
-      agentInstructions: string | null
-      allowedTools: string[]
-      autoTool: string | null
-    }
-    data: unknown
-  } | null
   application: {
     status: string
     currentQuestionIndex: number
@@ -51,7 +35,6 @@ export interface TurnContextConversation {
 export interface TurnContextCustomer {
   name: string | null
   dateOfBirth: Date | null
-  extractedProfile: Record<string, unknown>
   language: string
   isAnonymous: boolean
   gdprConsentAt: Date | null
@@ -69,7 +52,6 @@ export interface TurnContext {
   conversation: TurnContextConversation
   customer: TurnContextCustomer
   recentMessages: TurnContextMessage[]
-  activeSkillPacks: { slug: string; description: string }[]
 }
 
 // =============================================================================
@@ -86,40 +68,13 @@ export async function loadTurnContext(
   conversationId: string,
   customerId: string,
 ): Promise<TurnContext> {
-  const [rawConversation, rawCustomer, rawMessages, rawSkillPacks] = await Promise.all([
-    // Query 1 — conversation with product, workflowSession (+ currentStep), application (+ quote + policy)
+  const [rawConversation, rawCustomer, rawConsentEvents, rawMessages] = await Promise.all([
+    // Query 1 — conversation with product (the application hangs off the
+    // activeApplicationId pointer since B4 and is loaded below)
     prisma.conversation.findUniqueOrThrow({
       where: { id: conversationId },
       include: {
         product: { select: { id: true, code: true, name: true } },
-        workflowSession: {
-          include: {
-            currentStep: {
-              select: {
-                id: true,
-                code: true,
-                name: true,
-                agentInstructions: true,
-                allowedTools: true,
-                autoTool: true,
-              },
-            },
-          },
-        },
-        application: {
-          select: {
-            status: true,
-            currentQuestionIndex: true,
-            totalQuestions: true,
-            quote: {
-              select: {
-                status: true,
-                premiumAnnual: true,
-                policy: { select: { id: true } },
-              },
-            },
-          },
-        },
       },
     }),
 
@@ -129,13 +84,17 @@ export async function loadTurnContext(
       select: {
         name: true,
         dateOfBirth: true,
-        extractedProfile: true,
         language: true,
         isAnonymous: true,
-        gdprConsentAt: true,
-        gdprConsentScope: true,
-        aiDisclosureAcknowledgedAt: true,
       },
+    }),
+
+    // Query 2b — consent ledger (B1): consent facts are DERIVED from the
+    // append-only ConsentEvent rows, latest event per kind wins
+    prisma.consentEvent.findMany({
+      where: { customerId },
+      orderBy: { createdAt: 'asc' },
+      select: { kind: true, action: true, scope: true, createdAt: true },
     }),
 
     // Query 3 — last 10 messages, newest-first, to be reversed to chronological
@@ -149,15 +108,6 @@ export async function loadTurnContext(
         createdAt: true,
       },
     }),
-
-    // Query 4 — active skill packs
-    prisma.skillPack.findMany({
-      where: { isActive: true },
-      select: {
-        slug: true,
-        description: true,
-      },
-    }),
   ])
 
   // -------------------------------------------------------------------------
@@ -168,34 +118,55 @@ export async function loadTurnContext(
     status: rawConversation.status,
     messageCount: rawConversation.messageCount,
     mode: (rawConversation.mode as string) ?? 'SALES',
-    activeSkillPacks: (rawConversation.activeSkillPacks as string[]) ?? [],
     productId: rawConversation.productId,
     product: rawConversation.product,
     candidateProductId: rawConversation.candidateProductId,
-    candidateConfidence: rawConversation.candidateConfidence,
     candidateSetAt: rawConversation.candidateSetAt,
-    workflowSession: rawConversation.workflowSession ?? null,
-    application: (rawConversation as { application?: TurnContextConversation['application'] }).application ?? null,
+    application: rawConversation.activeApplicationId
+      ? ((await prisma.application.findUnique({
+          where: { id: rawConversation.activeApplicationId },
+          select: {
+            status: true,
+            currentQuestionIndex: true,
+            totalQuestions: true,
+            quote: {
+              select: {
+                status: true,
+                premiumAnnual: true,
+                policy: { select: { id: true } },
+              },
+            },
+          },
+        })) as TurnContextConversation['application'])
+      : null,
   }
 
   // -------------------------------------------------------------------------
-  // Shape customer — handle null (anonymous) gracefully
+  // Shape customer — handle null (anonymous) gracefully. Consent facts are
+  // derived from the ledger: latest event per kind, granted → its timestamp.
   // -------------------------------------------------------------------------
+  const latestConsent = new Map<string, { action: string; scope: string | null; createdAt: Date }>()
+  for (const e of rawConsentEvents) latestConsent.set(e.kind, e)
+  const granted = (kind: string) => {
+    const e = latestConsent.get(kind)
+    return e?.action === 'granted' ? e : null
+  }
+  const gdprGrant = granted('gdpr_processing')
+  const aiGrant = granted('ai_disclosure')
+
   const customer: TurnContextCustomer = rawCustomer
     ? {
         name: rawCustomer.name ?? null,
         dateOfBirth: rawCustomer.dateOfBirth ?? null,
-        extractedProfile: (rawCustomer.extractedProfile as Record<string, unknown>) ?? {},
         language: rawCustomer.language,
         isAnonymous: rawCustomer.isAnonymous,
-        gdprConsentAt: rawCustomer.gdprConsentAt ?? null,
-        gdprConsentScope: rawCustomer.gdprConsentScope ?? null,
-        aiDisclosureAcknowledgedAt: rawCustomer.aiDisclosureAcknowledgedAt ?? null,
+        gdprConsentAt: gdprGrant?.createdAt ?? null,
+        gdprConsentScope: gdprGrant?.scope ?? null,
+        aiDisclosureAcknowledgedAt: aiGrant?.createdAt ?? null,
       }
     : {
         name: null,
         dateOfBirth: null,
-        extractedProfile: {},
         language: 'ro',
         isAnonymous: true,
         gdprConsentAt: null,
@@ -212,6 +183,20 @@ export async function loadTurnContext(
     conversation,
     customer,
     recentMessages,
-    activeSkillPacks: rawSkillPacks,
   }
+}
+
+/**
+ * D2.9 (contradiction #11): a conversation is a CHANNEL — ACTIVE or
+ * ARCHIVED (inactivity sweep), never a funnel stage. A turn on an archived
+ * conversation REACTIVATES it (the old terminal guard threw). This is the
+ * ONLY status-writing call site in lib/; the sweep script is the other, in
+ * scripts/.
+ */
+export async function reactivateIfArchived(conversationId: string): Promise<boolean> {
+  const res = await prisma.conversation.updateMany({
+    where: { id: conversationId, status: 'ARCHIVED' },
+    data: { status: 'ACTIVE', archivedAt: null },
+  })
+  return res.count > 0
 }

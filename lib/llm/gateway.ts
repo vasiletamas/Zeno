@@ -20,6 +20,7 @@ import type {
   ToolChoice,
   GatewayCallRecord,
   ReasoningConfig,
+  TokenUsage,
 } from '@/lib/llm/providers/types'
 import { eventBus } from '@/lib/events'
 
@@ -27,24 +28,19 @@ import { eventBus } from '@/lib/events'
 // CACHE USAGE
 // ==============================================
 
-export interface CacheUsage {
-  cacheRead: number
-  cacheWrite: number
-  cacheHit: boolean
-}
+// Raw-usage parsing lives with the providers (types.ts) — the raw fields only
+// exist before normalization. Re-exported here for existing importers.
+export { parseCacheUsage } from '@/lib/llm/providers/types'
+export type { CacheUsage } from '@/lib/llm/providers/types'
 
-export function parseCacheUsage(provider: string, usage: Record<string, unknown>): CacheUsage {
-  if (provider === 'ANTHROPIC') {
-    const cacheRead = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0
-    const cacheWrite = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0
-    return { cacheRead, cacheWrite, cacheHit: cacheRead > 0 }
-  }
-  if (provider === 'OPENAI') {
-    const details = usage.prompt_tokens_details as Record<string, unknown> | undefined
-    const cached = typeof details?.cached_tokens === 'number' ? details.cached_tokens : 0
-    return { cacheRead: cached, cacheWrite: 0, cacheHit: cached > 0 }
-  }
-  return { cacheRead: 0, cacheWrite: 0, cacheHit: false }
+/**
+ * Derive cache telemetry from NORMALIZED TokenUsage (A1). This is what the
+ * gateway sees post-normalization; the raw provider fields are already gone.
+ */
+export function cacheUsageFromTokens(usage: TokenUsage): import('@/lib/llm/providers/types').CacheUsage {
+  const cacheRead = usage.cacheReadTokens ?? 0
+  const cacheWrite = usage.cacheWriteTokens ?? 0
+  return { cacheRead, cacheWrite, cacheHit: cacheRead > 0 }
 }
 
 // ==============================================
@@ -154,6 +150,7 @@ export const gateway = {
           reasoning: options.reasoning,
         })
       },
+      { traceId: options.traceId ?? null }, // P1-10: retry/failover events correlate to the turn
     )
 
     const durationMs = Date.now() - startMs
@@ -183,7 +180,7 @@ export const gateway = {
     })
 
     if (options.traceId) {
-      const cacheUsage = parseCacheUsage(config.provider, result.usage as unknown as Record<string, unknown>)
+      const cacheUsage = cacheUsageFromTokens(result.usage)
       eventBus.emit({
         type: 'cache:status',
         traceId: options.traceId,
@@ -257,6 +254,7 @@ export const gateway = {
           reasoning: options.reasoning,
         })
       },
+      { traceId: options.traceId ?? null }, // P1-10: retry/failover events correlate to the turn
     )
 
     // Wrap iterable to record call on completion
@@ -330,7 +328,7 @@ async function* trackStreamCompletion(
   })
 
   if (meta.traceId) {
-    const cacheUsage = parseCacheUsage(meta.provider, usage as unknown as Record<string, unknown>)
+    const cacheUsage = cacheUsageFromTokens(usage)
     eventBus.emit({
       type: 'cache:status',
       traceId: meta.traceId,

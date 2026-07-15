@@ -15,6 +15,7 @@ import {
   Lightbulb,
   FlaskConical,
   TrendingUp,
+  Inbox,
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -26,12 +27,11 @@ const NAV_ITEMS = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard, adminOnly: false },
   { href: '/admin/applications', label: 'Aplicatii', icon: FileText, adminOnly: false },
   { href: '/admin/policies', label: 'Polite', icon: Shield, adminOnly: false },
+  { href: '/admin/work-items', label: 'Work items', icon: Inbox, adminOnly: false },
   { href: '/admin/conversations', label: 'Conversatii', icon: MessageCircle, adminOnly: true },
   { href: '/admin/agents', label: 'Agenti AI', icon: Settings, adminOnly: true },
-  { href: '/admin/skill-packs', label: 'Skill Packs', icon: Layers, adminOnly: true },
   { href: '/admin/users', label: 'Utilizatori', icon: Users, adminOnly: true },
   { href: '/admin/proposals', label: 'Proposals', icon: Lightbulb, adminOnly: true },
-  { href: '/admin/ab-tests', label: 'A/B Tests', icon: FlaskConical, adminOnly: true },
   { href: '/admin/self-improvement', label: 'Self-Improve', icon: TrendingUp, adminOnly: true },
 ]
 

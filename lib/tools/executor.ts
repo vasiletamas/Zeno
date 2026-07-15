@@ -6,34 +6,17 @@
  */
 
 import type { ToolContext, ToolResult, UserRole } from './types'
+import type { CommitResult } from '@/lib/engines/domain-types'
 import { getToolHandler, getToolDefinition } from './registry'
 import { validateToolArgs } from './validation'
 import { checkPermission } from './permissions'
+import { classifyEnvelopeFailure, TRANSIENT, VALIDATION, PRECONDITION, PERMANENT } from './failure-classification'
 import { isToolCacheable, getCachedResult, setCachedResult } from './cache'
-import { CircuitBreaker } from '@/lib/errors/circuit-breaker'
+import { getToolCircuit } from './circuit-state'
+import { executeCommit } from './gateway'
 import { TimeoutError } from '@/lib/errors/types'
 import { logError, logWarn } from '@/lib/errors/logger'
 import { eventBus } from '@/lib/events'
-
-// ==============================================
-// PER-TOOL CIRCUIT BREAKERS
-// ==============================================
-
-const toolCircuits = new Map<string, CircuitBreaker>()
-
-function getToolCircuit(name: string): CircuitBreaker {
-  let cb = toolCircuits.get(name)
-  if (!cb) {
-    cb = new CircuitBreaker({
-      name: `tool:${name}`,
-      failureThreshold: 3,
-      resetTimeoutMs: 20_000,
-      monitorWindowMs: 30_000,
-    })
-    toolCircuits.set(name, cb)
-  }
-  return cb
-}
 
 // ==============================================
 // TIMEOUT UTILITY
@@ -77,6 +60,7 @@ export async function executeTool(
     return {
       success: false,
       error: `Unknown tool: "${name}"`,
+      ...PERMANENT,
     }
   }
 
@@ -85,6 +69,7 @@ export async function executeTool(
     return {
       success: false,
       error: `No handler registered for tool: "${name}"`,
+      ...PERMANENT,
     }
   }
 
@@ -94,6 +79,7 @@ export async function executeTool(
     return {
       success: false,
       error: `Validation failed for "${name}": ${validation.errors?.join('; ') ?? 'unknown error'}`,
+      ...VALIDATION,
     }
   }
 
@@ -103,6 +89,66 @@ export async function executeTool(
     return {
       success: false,
       error: permission.reason ?? `Permission denied for "${name}".`,
+      ...PERMANENT,
+    }
+  }
+
+  // 3a-0. Exposure wall (A3.2, defense in depth): the orchestrator already
+  // limits the LLM surface to the exposure set; this rejects anything that
+  // slips past it (hallucinated calls, stale clients). escalate_to_human is
+  // the unconditional floor.
+  if (context.exposedTools && name !== 'escalate_to_human' && !context.exposedTools.includes(name)) {
+    const envelope: CommitResult = { outcome: 'rejected', reason: 'not_exposed', effects: [] }
+    return { success: false, envelope, error: 'not_exposed', ...PRECONDITION }
+  }
+
+  // 3a. Commits are gateway-owned (A2.9): legality, confirm tokens, replay,
+  // ledger, and the apply transaction all happen in executeCommit. Cache /
+  // circuit / timeout handling below stays for reads only.
+  if (definition.kind === 'commit') {
+    const actor = context.actor ?? 'agent'
+    const execStart = Date.now()
+    if (traceId) {
+      eventBus.emit({ type: 'tool:start', traceId, toolName: name, args: (validation.data ?? {}) as Record<string, unknown> })
+    }
+    try {
+      const envelope = await executeCommit({
+        tool: name,
+        args: (validation.data ?? {}) as Record<string, unknown>,
+        actor,
+        conversationId: context.conversationId,
+        customerId: context.customerId,
+        confirmToken: (args as Record<string, unknown> | null | undefined)?.confirmToken as string | undefined,
+        toolContext: context,
+      })
+      const d = (envelope.data ?? {}) as Record<string, unknown>
+      const failureClass = classifyEnvelopeFailure(envelope)
+      const result: ToolResult = {
+        success: envelope.outcome === 'applied',
+        envelope,
+        data: d,
+        error: envelope.outcome === 'rejected' ? String(d.error ?? envelope.reason) : undefined,
+        ...(failureClass ?? {}),
+        uiAction: d._uiAction as ToolResult['uiAction'],
+        confirmation: d._confirmation as ToolResult['confirmation'],
+        message: d._message as string | undefined,
+      }
+      if (traceId) {
+        eventBus.emit({ type: 'tool:end', traceId, toolName: name, durationMs: Date.now() - execStart, success: result.success, cached: false })
+      }
+      return result
+    } catch (err: unknown) {
+      if (traceId) {
+        eventBus.emit({ type: 'tool:end', traceId, toolName: name, durationMs: Date.now() - execStart, success: false, cached: false })
+      }
+      logError({
+        layer: 'tool',
+        category: 'gateway',
+        message: `Commit "${name}" threw in the gateway`,
+        context: { toolName: name },
+        error: err,
+      })
+      return { success: false, error: err instanceof Error ? err.message : 'Commit execution failed', ...TRANSIENT }
     }
   }
 
@@ -134,6 +180,7 @@ export async function executeTool(
     return {
       success: false,
       error: 'Tool temporarily unavailable. Please try a different approach or try again shortly.',
+      ...TRANSIENT,
     }
   }
 
@@ -144,16 +191,35 @@ export async function executeTool(
   }
 
   try {
-    const result = await withTimeout(
-      () => handler(validation.data ?? {}, context),
-      `tool:${name}`,
-    )
+    const runOnce = () => withTimeout(() => handler(validation.data ?? {}, context), `tool:${name}`)
+    let result: ToolResult
+    try {
+      result = await runOnce()
+    } catch (err: unknown) {
+      // M10 retry policy (A3.ADD-2): READS may retry exactly once on a
+      // transient infra failure; commits never auto-retry (gateway-owned —
+      // resubmission replays via the ledger).
+      if (!(err instanceof TimeoutError)) throw err
+      logWarn({
+        layer: 'tool',
+        category: 'transient_retry',
+        message: `Read tool "${name}" timed out — retrying once`,
+        context: { toolName: name },
+      })
+      result = await runOnce()
+    }
     const durationMs = Date.now() - execStart
 
     circuit.recordSuccess()
 
     if (traceId) {
       eventBus.emit({ type: 'tool:end', traceId, toolName: name, durationMs, success: result.success, cached: false })
+    }
+
+    // Handler-declared read failures default to precondition ("no quote
+    // yet", "no active session") unless the handler set its own class.
+    if (!result.success && result.errorCode === undefined) {
+      result = { ...result, ...PRECONDITION }
     }
 
     // Cache successful results for cacheable tools
@@ -187,6 +253,7 @@ export async function executeTool(
     return {
       success: false,
       error: message,
+      ...TRANSIENT,
     }
   }
 }

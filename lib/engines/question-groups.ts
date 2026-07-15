@@ -1,20 +1,28 @@
 import { prisma } from '@/lib/db'
+import type { Prisma } from '@/lib/generated/prisma/client'
 
 export type QuestionPhase = 'dnt' | 'application'
+
+type Db = typeof prisma | Prisma.TransactionClient
 
 /**
  * Group codes for a product + phase: the product's own groups plus any
  * global (productId = null) groups, ordered by orderIndex. Replaces the
  * hardcoded DNT_GROUP_CODES / APPLICATION_GROUP_CODES constants.
+ *
+ * Accepts an injectable client so callers running inside a transaction
+ * (e.g. the snapshot loader under the A2 commit gateway) keep every read
+ * on the same connection instead of escaping to the global client.
  */
 export async function resolveGroupCodes(
   productId: string | null,
   phase: QuestionPhase,
+  db: Db = prisma,
 ): Promise<string[]> {
   const productFilter = productId
     ? [{ productId }, { productId: null }]
     : [{ productId: null }]
-  const groups = await prisma.questionGroup.findMany({
+  const groups = await db.questionGroup.findMany({
     where: { phase, OR: productFilter },
     orderBy: { orderIndex: 'asc' },
     select: { code: true },

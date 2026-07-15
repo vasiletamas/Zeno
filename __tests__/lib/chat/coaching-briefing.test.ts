@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/db', () => ({
   prisma: {
-    workflowStep: { findFirst: vi.fn() },
     product: { findUnique: vi.fn() },
   },
 }))
@@ -16,20 +15,10 @@ describe('loadCoachingBriefing (subsystem B)', () => {
     flushCoachingBriefingCache()
   })
 
-  it('returns WorkflowStep.salesPlaybook when workflowStepCode is provided and step has playbook', async () => {
-    vi.mocked(prisma.workflowStep.findFirst).mockResolvedValue({ salesPlaybook: 'Step playbook content' } as never)
-
-    const result = await loadCoachingBriefing('prod-1', 'dnt_questionnaire')
-
-    expect(result).toBe('Step playbook content')
-    expect(prisma.workflowStep.findFirst).toHaveBeenCalled()
-    expect(prisma.product.findUnique).not.toHaveBeenCalled()
-  })
-
-  it('falls back to Product.defaultPlaybook when workflowStepCode is null', async () => {
+  it('returns Product.defaultPlaybook', async () => {
     vi.mocked(prisma.product.findUnique).mockResolvedValue({ defaultPlaybook: 'Product playbook' } as never)
 
-    const result = await loadCoachingBriefing('prod-1', null)
+    const result = await loadCoachingBriefing('prod-1')
 
     expect(result).toBe('Product playbook')
     expect(prisma.product.findUnique).toHaveBeenCalledWith({
@@ -38,28 +27,17 @@ describe('loadCoachingBriefing (subsystem B)', () => {
     })
   })
 
-  it('falls back to Product.defaultPlaybook when WorkflowStep has no salesPlaybook', async () => {
-    vi.mocked(prisma.workflowStep.findFirst).mockResolvedValue({ salesPlaybook: null } as never)
-    vi.mocked(prisma.product.findUnique).mockResolvedValue({ defaultPlaybook: 'Product fallback' } as never)
-
-    const result = await loadCoachingBriefing('prod-1', 'dnt_questionnaire')
-
-    expect(result).toBe('Product fallback')
-  })
-
-  it('returns null when neither WorkflowStep nor Product has playbook', async () => {
-    vi.mocked(prisma.workflowStep.findFirst).mockResolvedValue(null)
+  it('returns null when the Product has no playbook', async () => {
     vi.mocked(prisma.product.findUnique).mockResolvedValue({ defaultPlaybook: null } as never)
 
-    const result = await loadCoachingBriefing('prod-1', 'dnt_questionnaire')
+    const result = await loadCoachingBriefing('prod-1')
 
     expect(result).toBeNull()
   })
 
-  it('returns null when productId is null and workflowStepCode is null', async () => {
-    const result = await loadCoachingBriefing(null, null)
+  it('returns null when productId is null', async () => {
+    const result = await loadCoachingBriefing(null)
     expect(result).toBeNull()
-    expect(prisma.workflowStep.findFirst).not.toHaveBeenCalled()
     expect(prisma.product.findUnique).not.toHaveBeenCalled()
   })
 })

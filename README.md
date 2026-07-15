@@ -28,7 +28,10 @@ cp .env.example .env
 # 4. Start Postgres (port 5435 — 5434 is reserved on Vasi's main machine)
 docker compose up -d
 
-# 5. Run database migrations
+# 5. Run database migrations (deployable chain: baseline_main + v3_upgrade).
+# Fresh empty DB and upgrade-from-main are both verified by
+# `npx tsx scripts/verify-migrations.ts` (runs on disposable databases).
+# NOTE: `prisma db push` is a dev convenience only — never production evidence.
 npx prisma migrate deploy
 
 # 6. Generate the Prisma client

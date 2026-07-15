@@ -39,25 +39,6 @@ export function IdentitySection({ identity, previousIdentity }: Props) {
         <Row label="language" path="customer.language" diff={diff}>
           {identity.customer.language}
         </Row>
-        <div className="pt-1">
-          <div className="text-gray-500">extractedProfile:</div>
-          {Object.keys(identity.customer.extractedProfile).length === 0 ? (
-            <div className="pl-3 text-gray-400">—</div>
-          ) : (
-            <div className="pl-3 space-y-0.5">
-              {Object.entries(identity.customer.extractedProfile).map(([k, v]) => (
-                <Row
-                  key={k}
-                  label={k}
-                  path={`customer.extractedProfile.${k}`}
-                  diff={diff}
-                >
-                  {formatValue(v)}
-                </Row>
-              ))}
-            </div>
-          )}
-        </div>
       </Group>
 
       <Group title="Consent">
@@ -82,9 +63,6 @@ export function IdentitySection({ identity, previousIdentity }: Props) {
       </Group>
 
       <Group title="Conversation State">
-        <Row label="phase" path="conversation.phase" diff={diff}>
-          <PhaseBadge phase={identity.conversation.phase} />
-        </Row>
         <Row label="product" path="conversation.productId" diff={diff}>
           {identity.conversation.productId
             ? `✓ ${identity.conversation.productName ?? identity.conversation.productCode ?? identity.conversation.productId}`
@@ -92,7 +70,7 @@ export function IdentitySection({ identity, previousIdentity }: Props) {
         </Row>
         <Row label="candidate" path="conversation.candidateProductId" diff={diff}>
           {identity.conversation.candidateProductId
-            ? `${identity.conversation.candidateProductId.slice(0, 8)}… (conf ${identity.conversation.candidateConfidence ?? '?'})`
+            ? `${identity.conversation.candidateProductId.slice(0, 8)}…`
             : '—'}
         </Row>
         {identity.conversation.candidateSetAt && (
@@ -164,19 +142,6 @@ function Row({
         )}
       </span>
     </div>
-  )
-}
-
-function PhaseBadge({ phase }: { phase: 'presentation' | 'application' | 'post_sale' }) {
-  const styles: Record<string, string> = {
-    presentation: 'bg-blue-100 text-blue-800',
-    application: 'bg-emerald-100 text-emerald-800',
-    post_sale: 'bg-purple-100 text-purple-800',
-  }
-  return (
-    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${styles[phase] ?? 'bg-gray-100 text-gray-800'}`}>
-      {phase}
-    </span>
   )
 }
 

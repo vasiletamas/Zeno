@@ -12,13 +12,43 @@
  *   - when the customer's age is known, trims age-based coverages to the
  *     matching band (collapses dozens of rows to one)
  *
+ * E1.7 (T11.D1/D3): every NUMBER the agent can utter pre-quote is
+ * engine-derived (pricing_examples via calculateQuote, eligibility_bounds
+ * via the rules projection) and every CLAIM is published authored content
+ * (key_value_product_points / sell_specific_info / pricing_note; addons[]
+ * fold sell_specific_addon_info — no separate addon-info tool). The legacy
+ * authored surfaces (features / pricingExplanation / premiumRange /
+ * targetAgeRange / raw eligibility passthrough) are GONE from the shape.
+ *
  * Pure function — no DB, no caching concerns. The handler resolves age and
- * calls this.
+ * the derived inputs and calls this.
  */
+
+import { parseEligibilityRuleSet } from '@/lib/engines/eligibility'
+import type { EligibilityBounds } from '@/lib/engines/eligibility'
+import type { PricingExample } from '@/lib/engines/pricing-examples'
 
 interface LocalizedText {
   en: string
   ro: string
+}
+
+/** Published bilingual authored value (content is prose or a string list). */
+export interface LocalizedContent {
+  ro: unknown
+  en: unknown
+}
+
+export interface DerivedProductInputs {
+  pricingExamples: PricingExample[]
+  eligibilityBounds: EligibilityBounds
+  content: {
+    keyValueProductPoints: LocalizedContent | null
+    sellSpecificInfo: LocalizedContent | null
+    pricingNote: LocalizedContent | null
+    contentVersions: string[]
+  }
+  addonContent: Record<string, { sellSpecificAddonInfo: LocalizedContent | null }>
 }
 
 interface RawCoverageType {
@@ -77,16 +107,12 @@ export interface RawProduct {
   insuranceType: string
   subType?: string
   eligibility?: unknown
-  features?: unknown
   exclusions?: unknown
-  pricingExplanation?: string
   targetCustomer?: string
-  targetAgeRange?: string
   contractTerm?: string
   gracePeriod?: string
   medicalExamRequired?: boolean
   territoryCoverage?: string
-  premiumRange?: unknown
   paymentFrequencyOptions?: unknown
   quoteValidityDays?: number
   pricingTiers?: RawTier[]
@@ -128,6 +154,7 @@ interface ShapedAddon {
   description: LocalizedText
   waitingPeriod: string | null
   coverages: ShapedCoverage[]
+  sell_specific_addon_info?: LocalizedContent | null
 }
 
 export interface ShapedProduct {
@@ -136,19 +163,24 @@ export interface ShapedProduct {
   description: LocalizedText
   insuranceType: string
   subType?: string
-  eligibility?: unknown
-  features?: unknown
   exclusions?: unknown
-  pricingExplanation?: string
   targetCustomer?: string
-  targetAgeRange?: string
   contractTerm?: string
   gracePeriod?: string
   medicalExamRequired?: boolean
   territoryCoverage?: string
-  premiumRange?: unknown
   paymentFrequencyOptions?: unknown
   quoteValidityDays?: number
+  /** E1.7: engine-derived example premiums over the declared grid. */
+  pricing_examples: PricingExample[]
+  /** E1.7: bounds projected from the SAME rules the engine enforces. */
+  eligibility_bounds: EligibilityBounds | null
+  /** C2.3: authored eligibility prose (never evaluated, never numbers). */
+  eligibility_narrative?: unknown
+  /** E1.7: published authored claims — the ONLY selling-claim source. */
+  key_value_product_points: LocalizedContent | null
+  sell_specific_info: LocalizedContent | null
+  pricing_note: LocalizedContent | null
   coverageTypes: Record<string, CoverageLegendEntry>
   packages: ShapedPackage[]
   addons: ShapedAddon[]
@@ -158,6 +190,15 @@ function ageInBand(age: number, minAge: number | null, maxAge: number | null): b
   if (minAge != null && age < minAge) return false
   if (maxAge != null && age > maxAge) return false
   return true
+}
+
+/** The authored narrative prose from the typed ruleset — never bounds, never rules. */
+function shapeNarrative(raw: unknown): unknown {
+  try {
+    return parseEligibilityRuleSet(raw).narrative
+  } catch {
+    return undefined
+  }
 }
 
 function shapeCoverages(
@@ -193,11 +234,19 @@ function shapeCoverages(
   return out
 }
 
+const EMPTY_DERIVED: DerivedProductInputs = {
+  pricingExamples: [],
+  eligibilityBounds: { minAge: null, maxAge: null, otherRuleCodes: [] },
+  content: { keyValueProductPoints: null, sellSpecificInfo: null, pricingNote: null, contentVersions: [] },
+  addonContent: {},
+}
+
 export function shapeProductInfo(
   raw: RawProduct,
-  opts: { age?: number } = {},
+  opts: { age?: number; derived?: DerivedProductInputs } = {},
 ): ShapedProduct {
   const { age } = opts
+  const derived = opts.derived ?? EMPTY_DERIVED
   const coverageTypes: Record<string, CoverageLegendEntry> = {}
 
   const packages: ShapedPackage[] = (raw.pricingTiers ?? []).map((tier) => ({
@@ -217,6 +266,7 @@ export function shapeProductInfo(
     description: addon.description,
     waitingPeriod: addon.waitingPeriod ?? null,
     coverages: shapeCoverages(addon.coverageAmounts, age, coverageTypes),
+    sell_specific_addon_info: derived.addonContent[addon.code]?.sellSpecificAddonInfo ?? null,
   }))
 
   return {
@@ -225,19 +275,20 @@ export function shapeProductInfo(
     description: raw.description,
     insuranceType: raw.insuranceType,
     subType: raw.subType,
-    eligibility: raw.eligibility,
-    features: raw.features,
     exclusions: raw.exclusions,
-    pricingExplanation: raw.pricingExplanation,
     targetCustomer: raw.targetCustomer,
-    targetAgeRange: raw.targetAgeRange,
     contractTerm: raw.contractTerm,
     gracePeriod: raw.gracePeriod,
     medicalExamRequired: raw.medicalExamRequired,
     territoryCoverage: raw.territoryCoverage,
-    premiumRange: raw.premiumRange,
     paymentFrequencyOptions: raw.paymentFrequencyOptions,
     quoteValidityDays: raw.quoteValidityDays,
+    pricing_examples: derived.pricingExamples,
+    eligibility_bounds: opts.derived ? derived.eligibilityBounds : null,
+    eligibility_narrative: shapeNarrative(raw.eligibility),
+    key_value_product_points: derived.content.keyValueProductPoints,
+    sell_specific_info: derived.content.sellSpecificInfo,
+    pricing_note: derived.content.pricingNote,
     coverageTypes,
     packages,
     addons,

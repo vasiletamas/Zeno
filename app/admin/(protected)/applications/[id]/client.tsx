@@ -82,14 +82,15 @@ export default function ApplicationDetailClient({
   const [allianzNumber, setAllianzNumber] = useState('')
   const [showActivateModal, setShowActivateModal] = useState(false)
 
-  async function handleStatusUpdate(status: string, allianzPolicyNumber?: string) {
+  // D4.3: the route rides operator commits — actions, never raw statuses
+  async function handleStatusUpdate(action: string, allianzPolicyNumber?: string) {
     if (!policy) return
     setActivatingPolicy(true)
     try {
       await fetch(`/api/admin/policies/${policy.id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, allianzPolicyNumber }),
+        body: JSON.stringify({ action, allianzPolicyNumber }),
       })
       router.refresh()
     } finally {
@@ -260,7 +261,7 @@ export default function ApplicationDetailClient({
 
         {policy && policy.status === 'PENDING_SUBMISSION' && (
           <button
-            onClick={() => handleStatusUpdate('SUBMITTED')}
+            onClick={() => handleStatusUpdate('mark_submitted')}
             disabled={activatingPolicy}
             className="rounded-md border border-sage px-4 py-2 text-sm font-medium text-sage hover:bg-sage/10 transition-colors disabled:opacity-50"
           >
@@ -296,7 +297,7 @@ export default function ApplicationDetailClient({
             />
             <div className="flex gap-3">
               <button
-                onClick={() => handleStatusUpdate('ACTIVE', allianzNumber)}
+                onClick={() => handleStatusUpdate('activate', allianzNumber)}
                 disabled={activatingPolicy || !allianzNumber}
                 className="rounded-md bg-forest px-4 py-2 text-sm font-medium text-linen hover:bg-sage transition-colors disabled:opacity-50"
               >

@@ -8,15 +8,15 @@
  */
 
 import type { SSEEvent } from './stream-handler'
-import type { ReasoningGateInput, ReasoningGateOutput } from './reasoning-gate'
 import type { PromptSections } from './prompt-builder'
 import type { ToolNarrationResult } from './tool-narration-detector'
 import type { TurnContextCustomer } from './turn-context'
 import type { RawCustomerInsight } from './context-loaders'
-import type { DerivedState } from './derive-state'
+import type { DerivedStateV3, ExposedActions } from '@/lib/engines/domain-types'
 import { calculateAge } from './age'
-import { getConversationPhase } from './phase'
 import { writeDebugEvent } from './debug-persistence'
+import { redactSnapshot, maskCnpShapes } from '@/lib/debug/redact'
+import { engineVersion } from '@/lib/engines/derive-and-expose'
 
 // ==============================================
 // DEBUG EVENT PAYLOADS
@@ -34,18 +34,31 @@ export interface DebugGatePayload {
   traceId: string
   skipped: boolean
   reason?: 'fast_path' | 'synthetic'
-  input?: ReasoningGateInput
-  output?: ReasoningGateOutput
   durationMs: number
   /**
    * The phase derived this turn (replaces the old reasoning-gate output).
    */
   derivedPhase?: string
   /**
-   * The full DerivedState snapshot for this turn, surfaced to the debug
-   * drawer's "State" panel. Null when derivation failed.
+   * True when state derivation failed this turn and the orchestrator fell
+   * back to the DISCOVERY section set.
    */
-  derivedState?: DerivedState | null
+  error?: boolean
+  /**
+   * The full DerivedStateV3 snapshot for this turn (deriveAndExpose output),
+   * surfaced to the debug drawer's "State" panel. Null when derivation failed.
+   */
+  derivedState?: DerivedStateV3 | null
+  /**
+   * The exposure computed this turn: available + blocked actions with reason
+   * codes. Part of the per-turn legality snapshot (T14.D2).
+   */
+  actions?: ExposedActions
+  /**
+   * Version stamp of the derive-and-expose rule set that produced this
+   * snapshot, for recompute-and-diff replay (T14.D2).
+   */
+  engineVersion?: string
 }
 
 export interface DebugPromptPayload {
@@ -58,6 +71,9 @@ export interface DebugPromptPayload {
   stablePrefix: string | null
   dynamicSuffix: string | null
   totalChars: number
+  /** A1 cost telemetry: cacheable vs per-turn split of totalChars. */
+  stablePrefixChars: number
+  dynamicSuffixChars: number
 }
 
 export interface DebugToolCallPayload {
@@ -104,6 +120,59 @@ export interface DebugTurnEndPayload {
   cost: number | null
   latencyMs: number
   anomalies: unknown[]
+  /** A1 cache telemetry, accumulated across every LLM round of the turn. */
+  totalCacheReadTokens?: number
+  totalCacheWriteTokens?: number
+  llmCalls?: number
+  cacheHitCalls?: number
+  /** Serialized size of the tool definitions sent on this turn's LLM calls. */
+  toolDefChars?: number
+}
+
+/**
+ * Per-turn legality snapshot (F2.1, T14.D2): the deriveAndExpose INPUT
+ * (redacted snapshot) + OUTPUT (state, actions) + the version stamps that
+ * make recompute-and-diff replay meaningful. Emitted at turn start and
+ * after every applied-commit round (point: post_commit, carrying the
+ * gateway ledger row id — F2 erratum 2).
+ */
+export interface DebugLegalityPayload {
+  traceId: string
+  point: 'turn_start' | 'post_commit'
+  commitLedgerId?: string
+  /** Tool-round ordinal (post_commit only). Every entry of one round carries
+   * the round's END state/actions — same-round siblings must never serve as
+   * each other's legality baseline (run cmrabhsyk turn 56: a batched
+   * [collect, collect, generate_quote] round recorded the collects' snapshots
+   * with the quote already issued). */
+  round?: number
+  engineVersion: string
+  /** ProductContent version id(s) injected into this turn's prompt (M8 pin 1). */
+  contentVersions: string[]
+  /** REDACTED DomainSnapshot — input of deriveAndExpose, replayable. */
+  snapshot: unknown
+  state: DerivedStateV3
+  actions: ExposedActions
+}
+
+/**
+ * Pure builder (F2.2, mirroring buildIdentityPayload): stamps the LIVE
+ * engine version and redacts the snapshot; state/actions pass verbatim —
+ * EXCEPT identity.pendingChallenge.target (Task 1.1 added it for the
+ * gateway's resend guard): a raw email/phone must not persist in TurnDebug,
+ * and the stored value must equal what a recompute from the REDACTED
+ * snapshot yields (same '[redacted]' literal), or same-version drift fires.
+ */
+export function buildLegalityPayload(input: Omit<DebugLegalityPayload, 'engineVersion'>): DebugLegalityPayload {
+  const pc = input.state.identity?.pendingChallenge
+  let state = pc?.target
+    ? { ...input.state, identity: { ...input.state.identity, pendingChallenge: { ...pc, target: '[redacted]' } } }
+    : input.state
+  // Task 5.4 (D11): CNP-shaped values are masked in the STATE too — same
+  // rule as redactSnapshot, so a recompute from the redacted snapshot still
+  // matches the stored state (no false same-version drift).
+  state = JSON.parse(maskCnpShapes(JSON.stringify(state))) as DerivedStateV3
+  return { ...input, engineVersion, state, snapshot: redactSnapshot(input.snapshot) }
 }
 
 export interface DebugIdentityMemoryEntry {
@@ -125,7 +194,6 @@ export interface DebugIdentityPayload {
     name: string | null
     age: number | null
     language: string
-    extractedProfile: Record<string, unknown>
   }
   consent: {
     gdprConsentAt: string | null
@@ -133,12 +201,10 @@ export interface DebugIdentityPayload {
     aiDisclosureAcknowledgedAt: string | null
   }
   conversation: {
-    phase: 'presentation' | 'application' | 'post_sale'
     productId: string | null
     productCode: string | null
     productName: string | null
     candidateProductId: string | null
-    candidateConfidence: number | null
     candidateSetAt: string | null
   }
   memory: DebugIdentityMemoryEntry[]
@@ -152,6 +218,7 @@ export type DebugEvent =
   | { event: 'debug:turn_start'; data: DebugTurnStartPayload }
   | { event: 'debug:identity'; data: DebugIdentityPayload }
   | { event: 'debug:gate'; data: DebugGatePayload }
+  | { event: 'debug:legality'; data: DebugLegalityPayload }
   | { event: 'debug:prompt'; data: DebugPromptPayload }
   | { event: 'debug:tool_call'; data: DebugToolCallPayload }
   | { event: 'debug:tool_result'; data: DebugToolResultPayload }
@@ -221,13 +288,10 @@ export interface BuildIdentityPayloadInput {
   customerId: string
   customer: TurnContextCustomer
   conversation: {
-    mode: string
     productId: string | null
     product: { code: string; name: unknown } | null
     candidateProductId: string | null
-    candidateConfidence: number | null
     candidateSetAt: Date | null
-    application: { status: string } | null
   }
   insights: RawCustomerInsight[]
   now: Date
@@ -267,7 +331,6 @@ export function buildIdentityPayload(
       name: input.customer.name,
       age: calculateAge(input.customer.dateOfBirth, input.now),
       language: input.customer.language,
-      extractedProfile: input.customer.extractedProfile,
     },
     consent: {
       gdprConsentAt: input.customer.gdprConsentAt
@@ -279,12 +342,10 @@ export function buildIdentityPayload(
         : null,
     },
     conversation: {
-      phase: getConversationPhase(input.conversation),
       productId: input.conversation.productId,
       productCode: input.conversation.product?.code ?? null,
       productName: extractLocalizedName(input.conversation.product?.name, input.customer.language),
       candidateProductId: input.conversation.candidateProductId,
-      candidateConfidence: input.conversation.candidateConfidence,
       candidateSetAt: input.conversation.candidateSetAt
         ? input.conversation.candidateSetAt.toISOString()
         : null,

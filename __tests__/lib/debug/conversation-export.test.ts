@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildConversationExport } from '@/lib/debug/conversation-export'
+import { buildConversationExport, EXPORT_SCHEMA_VERSION } from '@/lib/debug/conversation-export'
 import type { DebugTurn } from '@/lib/debug/reducer'
 
 function turn(messageIndex: number, toolNames: string[]): DebugTurn {
@@ -69,5 +69,24 @@ describe('buildConversationExport', () => {
     expect(out.summary).toEqual({ turns: 0, messages: 0, toolCalls: 0, toolsUsed: [] })
     expect(out.turns).toEqual([])
     expect(out.messages).toEqual([])
+    expect(out.ledger).toEqual([])
+  })
+
+  // F2.5 (M8 pin 2): the export is a versioned contract carrying the commit
+  // ledger — the ground truth the assertion library joins turns against.
+  it('stamps schemaVersion 2 and carries ledger rows sorted by createdAt (M8 pin 2)', () => {
+    const out = buildConversationExport({
+      exportedAt: 'x',
+      conversation: CONVO,
+      messages: [],
+      turns: [],
+      ledger: [
+        { id: 'l2', tool: 'sign_dnt', actor: 'agent', outcome: 'applied', effects: ['advance_phase'], reasonCode: null, phaseFrom: 'APPLICATION', phaseTo: 'APPLICATION', idempotencyDisposition: 'fresh', targetRef: 'dnt_1', createdAt: '2026-07-01T10:05:00Z' },
+        { id: 'l1', tool: 'open_dnt_session', actor: 'agent', outcome: 'applied', effects: [], reasonCode: null, phaseFrom: 'APPLICATION', phaseTo: 'APPLICATION', idempotencyDisposition: 'fresh', targetRef: 'dnt_1', createdAt: '2026-07-01T10:01:00Z' },
+      ],
+    })
+    expect(out.schemaVersion).toBe(EXPORT_SCHEMA_VERSION)
+    expect(out.schemaVersion).toBe(2)
+    expect(out.ledger.map((l) => l.id)).toEqual(['l1', 'l2'])
   })
 })

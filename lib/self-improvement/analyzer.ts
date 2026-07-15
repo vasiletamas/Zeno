@@ -106,43 +106,29 @@ export async function analyzeScores(): Promise<AnalysisResult> {
     }
   }
 
-  // 5. A/B test results
-  const abTestResults: Record<
-    string,
-    { avgScoreA: number; avgScoreB: number; countA: number; countB: number }
-  > = {}
-  const activeTests = await prisma.aBTestVariant.findMany({
-    where: { isActive: true },
-  })
+  // Task 5.5 (D12): surface quality regressions — the loop is no longer
+  // blind to re-asks, unexplained errors, rejected insights, or dead
+  // verification funnels.
+  const q = sorted.reduce(
+    (acc, s) => ({
+      reasked: acc.reasked + (s.reaskedKnownFactCount ?? 0),
+      errors: acc.errors + (s.unexplainedToolErrorCount ?? 0),
+      rejected: acc.rejected + (s.insightRejectedCount ?? 0),
+      verified: acc.verified + (s.verificationCompleted ? 1 : 0),
+    }),
+    { reasked: 0, errors: 0, rejected: 0, verified: 0 },
+  )
+  if (q.reasked > 0) patterns.push(`${q.reasked} known-fact re-ask(s) across ${sorted.length} conversation(s) — stored facts are not being consulted.`)
+  if (q.errors > 0) patterns.push(`${q.errors} unexplained tool error(s) (failed and never recovered) across ${sorted.length} conversation(s).`)
+  if (q.rejected > 0) patterns.push(`${q.rejected} insight emission(s) rejected by the typed gate — extractor quality regression.`)
+  if (q.verified < sorted.length) patterns.push(`Channel verification completed in only ${q.verified}/${sorted.length} scored conversation(s).`)
 
-  for (const test of activeTests) {
-    const variantAScores = sorted.filter(
-      (s) =>
-        s.skillPackSlugs.includes(test.skillPackSlugA) &&
-        !s.skillPackSlugs.includes(test.skillPackSlugB),
-    )
-    const variantBScores = sorted.filter((s) =>
-      s.skillPackSlugs.includes(test.skillPackSlugB),
-    )
-
-    abTestResults[test.id] = {
-      avgScoreA:
-        variantAScores.length > 0
-          ? variantAScores.reduce((sum, s) => sum + s.score, 0) / variantAScores.length
-          : 0,
-      avgScoreB:
-        variantBScores.length > 0
-          ? variantBScores.reduce((sum, s) => sum + s.score, 0) / variantBScores.length
-          : 0,
-      countA: variantAScores.length,
-      countB: variantBScores.length,
-    }
-  }
+  // A/B test results died with the pack A/B machinery (A5.2).
 
   return {
     skillPackPerformance,
     patterns,
-    abTestResults,
+    abTestResults: {}, // pack A/B machinery deleted (A5.2)
     topConversationIds,
     bottomConversationIds,
   }

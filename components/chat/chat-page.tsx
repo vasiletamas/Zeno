@@ -35,6 +35,7 @@ export default function ChatPage({
     error,
     sendMessage,
     sendAction,
+    retryLastMessage,
     suggestions,
     uiActions,
     answeredMessageIds,
@@ -81,6 +82,7 @@ export default function ChatPage({
           answeredMessageIds={answeredMessageIds}
           onAction={sendAction}
           markAnswered={markAnswered}
+          onRetry={retryLastMessage}
           language={lang}
         />
 

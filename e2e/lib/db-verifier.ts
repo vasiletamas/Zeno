@@ -71,16 +71,16 @@ export async function verifyHappyPath(
   )
   checks.push(
     check(
-      'Conversation.status = COMPLETED',
-      'COMPLETED',
+      'Conversation stays ACTIVE (D2: a channel, never a funnel stage)',
+      'ACTIVE',
       conversation?.status,
-      conversation?.status === 'COMPLETED',
+      conversation?.status === 'ACTIVE',
     ),
   )
 
   // 2. Application exists, status COMPLETED, tierId + levelId set, includesAddon true
-  const application = await prisma.application.findUnique({
-    where: { conversationId },
+  const application = await prisma.application.findFirst({
+    where: { originConversationId: conversationId },
   })
   checks.push(
     check(
@@ -124,9 +124,9 @@ export async function verifyHappyPath(
   )
 
   // 3. DNT answers count > 0
-  const answerCount = await prisma.answer.count({
-    where: { conversationId },
-  })
+  const answerCount = application
+    ? await prisma.answer.count({ where: { applicationId: application.id, status: 'ACTIVE' } })
+    : 0
   checks.push(
     check(
       'DNT answers count > 0',
@@ -136,17 +136,20 @@ export async function verifyHappyPath(
     ),
   )
 
-  // 4. Conversation.dntSignedAt is set
+  // 4. Customer holds a signed Dnt (B2: customer-scoped aggregate)
   const convDnt = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { dntSignedAt: true },
+    select: { customerId: true },
   })
+  const signedDnt = convDnt
+    ? await prisma.dnt.findFirst({ where: { customerId: convDnt.customerId, status: 'ACTIVE' } })
+    : null
   checks.push(
     check(
-      'Conversation.dntSignedAt is set',
+      'Customer has an ACTIVE Dnt',
       'non-null',
-      convDnt?.dntSignedAt ?? null,
-      convDnt?.dntSignedAt != null,
+      signedDnt?.signedAt ?? null,
+      signedDnt != null,
     ),
   )
 
@@ -200,8 +203,9 @@ export async function verifyHappyPath(
   // 7. Payment exists, status COMPLETED
   let payment = null
   if (policy) {
+    // D2.1 re-anchor: a Payment settles an installment of the quote's schedule
     payment = await prisma.payment.findFirst({
-      where: { policyId: policy.id },
+      where: { installment: { schedule: { quoteId: policy.quoteId } } },
     })
   }
   checks.push(
@@ -256,16 +260,16 @@ export async function verifyBdRejection(
   )
   checks.push(
     check(
-      'Conversation.status = COMPLETED',
-      'COMPLETED',
+      'Conversation stays ACTIVE (D2: a channel, never a funnel stage)',
+      'ACTIVE',
       conversation?.status,
-      conversation?.status === 'COMPLETED',
+      conversation?.status === 'ACTIVE',
     ),
   )
 
   // 2. Application exists, status COMPLETED, includesAddon = false
-  const application = await prisma.application.findUnique({
-    where: { conversationId },
+  const application = await prisma.application.findFirst({
+    where: { originConversationId: conversationId },
   })
   checks.push(
     check(
@@ -309,9 +313,9 @@ export async function verifyBdRejection(
   )
 
   // 3. DNT answers count > 0
-  const answerCount = await prisma.answer.count({
-    where: { conversationId },
-  })
+  const answerCount = application
+    ? await prisma.answer.count({ where: { applicationId: application.id, status: 'ACTIVE' } })
+    : 0
   checks.push(
     check(
       'DNT answers count > 0',
@@ -371,8 +375,9 @@ export async function verifyBdRejection(
   // 6. Payment exists, status COMPLETED
   let payment = null
   if (policy) {
+    // D2.1 re-anchor: a Payment settles an installment of the quote's schedule
     payment = await prisma.payment.findFirst({
-      where: { policyId: policy.id },
+      where: { installment: { schedule: { quoteId: policy.quoteId } } },
     })
   }
   checks.push(
@@ -496,10 +501,10 @@ export async function verifyObjectionHandling(
   // 3. Conversation should still reach completion (sale continues after objections)
   checks.push(
     check(
-      'Conversation.status = COMPLETED',
-      'COMPLETED',
+      'Conversation stays ACTIVE (D2: a channel, never a funnel stage)',
+      'ACTIVE',
       conversation?.status,
-      conversation?.status === 'COMPLETED',
+      conversation?.status === 'ACTIVE',
     ),
   )
 
@@ -529,8 +534,8 @@ export async function verifyChangeOfMind(
   )
 
   // 2. Application exists
-  const application = await prisma.application.findUnique({
-    where: { conversationId },
+  const application = await prisma.application.findFirst({
+    where: { originConversationId: conversationId },
   })
   checks.push(
     check(
@@ -593,10 +598,10 @@ export async function verifyChangeOfMind(
   // 4. Conversation completed
   checks.push(
     check(
-      'Conversation.status = COMPLETED',
-      'COMPLETED',
+      'Conversation stays ACTIVE (D2: a channel, never a funnel stage)',
+      'ACTIVE',
       conversation?.status,
-      conversation?.status === 'COMPLETED',
+      conversation?.status === 'ACTIVE',
     ),
   )
 
@@ -625,9 +630,10 @@ export async function verifyDntPauseResume(
     ),
   )
 
-  // 2. All DNT answers present (count > 0)
+  // 2. All DNT answers present (count > 0) — B4: answers hang off the
+  // application originated by this conversation
   const answers = await prisma.answer.findMany({
-    where: { conversationId },
+    where: { application: { originConversationId: conversationId }, status: 'ACTIVE' },
     include: { question: true },
   })
   checks.push(
@@ -655,24 +661,27 @@ export async function verifyDntPauseResume(
   // 4. Conversation completed (the flow should resume and finish)
   checks.push(
     check(
-      'Conversation.status = COMPLETED',
-      'COMPLETED',
+      'Conversation stays ACTIVE (D2: a channel, never a funnel stage)',
+      'ACTIVE',
       conversation?.status,
-      conversation?.status === 'COMPLETED',
+      conversation?.status === 'ACTIVE',
     ),
   )
 
-  // 5. DNT signed (Conversation.dntSignedAt)
+  // 5. DNT signed (customer-scoped Dnt aggregate, B2)
   const convDntResume = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { dntSignedAt: true },
+    select: { customerId: true },
   })
+  const signedDntResume = convDntResume
+    ? await prisma.dnt.findFirst({ where: { customerId: convDntResume.customerId, status: 'ACTIVE' } })
+    : null
   checks.push(
     check(
-      'DNT signed (Conversation.dntSignedAt)',
+      'Customer has an ACTIVE Dnt',
       'non-null',
-      convDntResume?.dntSignedAt ?? null,
-      convDntResume?.dntSignedAt != null,
+      signedDntResume?.signedAt ?? null,
+      signedDntResume != null,
     ),
   )
 

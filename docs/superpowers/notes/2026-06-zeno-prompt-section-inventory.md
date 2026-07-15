@@ -1,0 +1,190 @@
+# Zeno prompt-section inventory + M13 pathology baseline (A4.1)
+
+Behavioral-content inventory taken BEFORE the A4 sections rework (M13 criteria
+a–c). Every `SECTION_REGISTRY` key appears exactly once with a destination or
+a "retired because X" note. Pathology baselines are recorded verbatim below
+and re-run after the rework (A4.5, criterion d).
+
+## 1. Pathology baseline — BEFORE the rework (criterion a)
+
+Command: `npx tsx scripts/verify-pathology1.ts 3 && npx tsx scripts/verify-pathology2.ts && npx tsx scripts/verify-pathology3.ts && npx tsx scripts/verify-pathology4.ts`
+
+Run 2026-07-02 (cloud, live OpenAI). Verbatim summary lines:
+
+```
+P1: ==== 3/3 trials fully detector-clean ====
+P2: ==== stalls-after-"da" across 2 trials: 0 (lower = better; advances instead of interrogating) ====
+P3: ==== across 3 trials: BLIND choices=0 (want 0), INFORMED choices=3 ====
+P4: ==== 3/3 trials clean (pivots to Protect, no invented categories) ====
+```
+
+ALL FOUR CLEAN — criterion a satisfied; the rework may proceed.
+(Sandbox note: the pathology scripts print their verdict and then linger on
+open handles instead of exiting — P2–P4's "EXIT 143" in the raw log is the
+supervisor reaping the already-finished process AFTER its verdict printed,
+not a failure. P1 exited 0 on its own.)
+
+## 2. Section inventory (criterion c: every key, exactly once)
+
+Sources read: `lib/chat/prompt-builder.ts` SECTION_REGISTRY (15 keys), every
+loader in `lib/chat/context-loaders.ts`, `lib/chat/phase-sections-map.ts`,
+seeded `Agent.systemPrompt`/`constraints` in `prisma/seeds/seed-agents.ts`.
+
+Scenario labels: P1 tool-narration, P2 deflection loop, P3 blind forced
+choices, P4 empty-category, CAT catalog-overview guardrails, OOS
+out-of-scope decline, CP consultative pushback.
+
+| # | Section key | Behavioral rules carried (quoted/condensed) | Serves | Target home |
+|---|---|---|---|---|
+| 1 | `agentIdentity` | The seeded MAIN_CHAT_PROMPT: first-turn disclosure ("Sunt Zeno, consilier virtual… un sistem"; never "AI"; insurer disclosed at first product mention, not opener; no products named on turn 1; ONE open question); HUMAN HANDOFF reactive + async only; CORE BEHAVIORS (listen first, explain simply, honest about unknowns); CUSTOMER SIGNAL AWARENESS; PRODUCT KNOWLEDGE catalog-vs-specifics ("generic training knowledge is NOT a valid source"); "TOOL USE IS INVISIBLE INFRASTRUCTURE" (forbidden "vrei să verific…" family; read tool errors for preconditions, never swallow); PRODUCT DISCOVERY GUARDRAILS 1–6 (catalog-first, name-from-catalog/quote-from-tool, grounded discovery dimensions, ranges-vs-quote pricing, one question per turn, insurer disclosure); PACING; ANSWER FIRST — DON'T DEFLECT (bare "da" = act now); OFF-TOPIC HANDLING | P1, P2, P3, P4, CAT, OOS, CP | UNCHANGED — phase-agnostic constitution, ALWAYS |
+| 2 | `constraints` | Seeded constraints JSON: no invented URLs; no fake forms; no promises without tool actions; past tense for completed actions; insurance/financial only; CURRENT SYSTEM STATE is ground truth (✗ facts cannot be claimed); no side-effect claims in prose ("am notat/am salvat/I saved…" forbidden — tools render confirmations) | P1, OOS, CP | UNCHANGED — ALWAYS |
+| 3 | `stateGrounding` | "=== CURRENT SYSTEM STATE (ground truth — do not contradict) ===" ✓/✗ facts (workflow, application, product, GDPR consent, AI disclosure) + "You cannot claim to have completed any of these. To change state, call the matching tool and wait for its success." | P1, CP | UNCHANGED — ALWAYS. (B1 re-points the consent facts to ConsentEvent when the Customer columns drop.) |
+| 4 | `capabilityManifest` | "My tools for this conversation: …" + "I can only act through these tools." Fed from engine exposure since A3.1 (patched after gate). | P1 | DISCOVERY (target map) |
+| 5 | `catalogOverview` | "These are the ONLY products in the catalog… Any category NOT listed here is NOT available — never imply otherwise"; empty-catalog sentinel "nothing to sell" | P4, CAT | UNCHANGED — ALWAYS |
+| 6 | `productContext` | Product name/type/description, key features, premium RANGE only ("Exact pricing is available only via generate_quote"), addon coverage amounts + waiting period | P3, CAT | DISCOVERY; QUOTE; APPLICATION/QUOTE_GENERATION. RETIRED from PAYMENT/POLICY because the sale is closed — product pitching post-close is pathology surface, and post-sale product facts belong to get_policy_info (D4). |
+| 7 | `coachingBriefing` | WorkflowStep.salesPlaybook (dead source — no WorkflowSession ever exists) falling back to Product.defaultPlaybook: sales-coaching prose | CP | DISCOVERY only. RETIRED from QUOTE + APPLICATION/QUOTE_GENERATION because closing coaching after the customer has already converged adds pressure where compliance risk is highest (T10.D4); the QUOTE surface keeps productContext + complianceGuidance instead. |
+| 8 | `domainGuidance` | Populated ONLY by mergeSkillPackSections (PACK_WRITABLE_KEYS = {domainGuidance}); no phase map references it | — | NO A4 CHANGE — the key exists only as the skill-pack injection slot; the entire SkillPack subsystem is deleted in A5 (M12 salvage-audit first). Recorded here so its retirement is deliberate, not silent. |
+| 9 | `complianceGuidance` | Injected by the orchestrator when the compliance checker flags rules (rulesForPhase: narrow PRESENTATION_RULES in DISCOVERY, full IDD/GDPR set elsewhere) | CP, legal | APPLICATION/DNT; APPLICATION/QUESTIONNAIRE; APPLICATION/QUOTE_GENERATION; QUOTE. NOTE: the compliance CHECKER still runs for PAYMENT/POLICY (COMPLIANCE_RELEVANT_BY_PHASE unchanged); only the static guidance section is dropped there — the new paymentContext/policyContext carry the phase-specific compliance language (no in-force claims before ACTIVE, no selling post-close). |
+| 10 | `situationalBriefing` | formatDerivedBriefing: Phase/subphase, engine nextBestAction, product, selection, remaining question codes, flagsForReview (A3.ADD-1), available actions, blocked actions with reason codes + "NEVER work around a blocked action" (A3.3) | P2, P3, CP | UNCHANGED — ALWAYS; A4.4 adds per-stage facts (DNT remaining, quote validUntil, payment status). |
+| 11 | `customerMemory` | "=== RETURNING CUSTOMER ===" insights by category, >30-day entries marked "(unverified)", token-capped | CP | DISCOVERY (target map) |
+| 12 | `agentKnowledge` | "=== PROVEN PATTERNS ===" AgentKnowledge rows (min n=5, top 5 by success rate) | CP | DISCOVERY (target map) |
+| 13 | `customerContext` | "=== CUSTOMER PROFILE ===" name/language/age/anonymous + extractedProfile demographics, family, motivations, interests | CP | DISCOVERY (target map) |
+| 14 | `workflowInstructions` | "=== ACTIVE WORKFLOW ===" step name/instructions/allowed tools/collected data — loader keyed on WorkflowSession | — | RETIRED because the workflow machine is dead config: WorkflowSession rows are never created in the phase-derived architecture, so the loader has returned null on every live turn since the machine died; its behavioral value (per-step instructions + tool list) is superseded by situationalBriefing + the engine-computed tool list (A3.1). Nothing to salvage: the step prose lives only in seed-workflows.ts rows that A5 deletes (M9 — history disposable). Removed from ALWAYS in A4.3. |
+| 15 | `questionnaireContext` | "=== ACTIVE QUESTIONNAIRE ===" progress, current question + type + options (P3: present REAL options, never invented), CONTEXT-HIT block ("DO NOT RE-ASK — confirm the extracted value"; medical hits require explicit DA/NU affirmation) | P3, CP | APPLICATION/QUESTIONNAIRE (target map). ⚠ KNOWN LATENT GAP (pre-existing, NOT introduced by A4): loadQuestionnaireContext still keys on workflowStepCode, which is always null since the workflow machine died — the section renders null on live turns. The questionnaire tool surface + its context re-keying are owned by C1 (ruling 7); A4 keeps the section mapped so C1 has a home to light up. |
+
+## 3. Old → new mapping (criterion b)
+
+| Old (A1 content-preserving map) | New target home (T10.D4) |
+|---|---|
+| ALWAYS: agentIdentity, constraints, stateGrounding, catalogOverview, situationalBriefing, **workflowInstructions** | ALWAYS loses workflowInstructions (retired — dead machine, see §2 row 14) |
+| DISCOVERY (old DISCOVERY ∪ old SELECTION): capabilityManifest, customerContext, customerMemory, agentKnowledge, productContext, coachingBriefing | DISCOVERY: unchanged set — SELECTION's product/coaching content stays absorbed here |
+| old CONSENT payload → APPLICATION/DNT: complianceGuidance | APPLICATION/DNT: **dntContext (new)** + complianceGuidance — the DNT/consent compliance payload gets a dedicated per-state section |
+| APPLICATION/QUESTIONNAIRE: questionnaireContext, complianceGuidance | unchanged |
+| APPLICATION/QUOTE_GENERATION (old QUOTE ready-to-generate): productContext, coachingBriefing, complianceGuidance | productContext, complianceGuidance — coaching retired (§2 row 7) |
+| QUOTE (old QUOTE set): productContext, coachingBriefing, complianceGuidance | productContext, complianceGuidance — coaching retired (§2 row 7) |
+| PAYMENT (old CLOSING set): productContext, complianceGuidance | **paymentContext (new)** — schedule facts, failure recovery, "the sale is closed — no selling, no upgrades" (productContext/complianceGuidance retirements: §2 rows 6, 9) |
+| POLICY (old CLOSING set): productContext, complianceGuidance | **policyContext (new)** — policy status + engine-gated language ("never describe the policy as active or in force unless status is ACTIVE") |
+
+Binding note A4.ADD-1: the APPLICATION-phase section copy must include the
+T4-R6 soft channel-verification offer ("save your progress") shown only while
+`identity.tier !== 'verified_channel'` — trigger data arrives with B3's
+`verificationOffer` envelope flag (B3.ADD-3); the copy lands in the DNT/
+questionnaire context sections when B3 provides the flag. Tracked here so
+M13's inventory covers it.
+
+## 4. Seeded agent prose (seed-agents.ts)
+
+MAIN_CHAT_PROMPT and the main-chat constraints were swept for retired phase
+vocabulary in A1.7 (clean). No A4 prompt-prose changes required by the
+inventory: every behavioral rule in §2 row 1–2 is phase-agnostic
+constitution content and keeps its home.
+
+## 5. Completeness check (criterion c)
+
+15/15 SECTION_REGISTRY keys inventoried exactly once: rows 1–15 above.
+New keys added by A4.2: dntContext, paymentContext, policyContext (see §3).
+No rule dropped without a retired-because-X note (rows 6, 7, 9, 14 carry
+them).
+
+## 6. Pathology verification — AFTER the rework (criterion d, A4.5)
+
+Run 2026-07-02 (cloud, live OpenAI), same commands plus advance-flow.
+Verbatim summary lines:
+
+```
+P1: ==== 3/3 trials fully detector-clean ====
+P2: ==== stalls-after-"da" across 2 trials: 0 (lower = better; advances instead of interrogating) ====
+P3: ==== across 3 trials: BLIND choices=0 (want 0), INFORMED choices=3 ====
+P4: ==== 3/3 trials clean (pivots to Protect, no invented categories) ====
+AF: ==== advance-flow: 2/2 trials PASS (advanced into DNT, no confirm-product ceremony) ====
+```
+
+ALL CLEAN after the rework — identical verdicts to the baseline, and the
+sections rework did not re-introduce advance-flow stalls (2/2). M13 criteria
+a–d all satisfied.
+
+## 7. E1 — identity-prompt split (2026-07-07, autonomy-skills-cost plan)
+
+MAIN_CHAT_PROMPT (row 1 above; 18,152 chars) split into three homes, seeded
+as `Agent.systemPrompt` (core) + `Agent.promptSections` Json (the other two).
+Combined text after the split: 18,140 chars — the 12-char delta is the two
+cross-reference rewordings marked ⟲ below. Every block of row 1 appears in
+exactly ONE home:
+
+| Block (in original order) | New home | Note |
+|---|---|---|
+| "You are Zeno, a calm and knowledgeable…" intro | CONSTITUTION_CORE | always-on |
+| FIRST-TURN RULES (6 bullets) + reference opening | **FIRST_TURN_RULES** → section `firstTurnRules` | ships while `messageCount <= 2` (detectFirstTurn); ⟲ "see HUMAN HANDOFF section below" → "see the HUMAN HANDOFF section" (handoff now renders above, in the core) |
+| first-turn IMPORTANT block (never "AI"; warm tone) | CONSTITUTION_CORE | MOVED to core: the never-"AI" vocabulary + tone rule is global (customers ask "ești un AI?" at any turn), not first-turn-shaped |
+| HUMAN HANDOFF (reactive, async) | CONSTITUTION_CORE | reactive at any turn |
+| CORE BEHAVIORS | CONSTITUTION_CORE | |
+| CUSTOMER SIGNAL AWARENESS | CONSTITUTION_CORE | |
+| PRODUCT KNOWLEDGE — WHAT WE SELL vs. THE SPECIFICS | **DISCOVERY_CONDUCT** → section `discoveryConduct` | phases DISCOVERY + QUOTE (includeDiscoveryConduct) |
+| TOOL USE IS INVISIBLE INFRASTRUCTURE | CONSTITUTION_CORE | P1-pinned, phase-agnostic |
+| PRODUCT DISCOVERY GUARDRAILS 1–6 + "non-negotiable" close | DISCOVERY_CONDUCT | ⟲ guardrail 2 "(see TOOL USE IS INVISIBLE below)" → "(see TOOL USE IS INVISIBLE)" (that block now renders above) |
+| SINGLE-MATCH CATEGORY | DISCOVERY_CONDUCT | |
+| PACING | DISCOVERY_CONDUCT | |
+| ANSWER FIRST — DON'T DEFLECT | CONSTITUTION_CORE | P2-pinned; deflection is phase-agnostic |
+| ADVANCING TO THE OFFER | CONSTITUTION_CORE | stays until Workstream C (gated on SE-1.3); its removal is C2 cut 1–4 |
+| OFF-TOPIC HANDLING | CONSTITUTION_CORE | P4/OOS-pinned |
+| CRITICAL CONSTRAINTS 1–5 | CONSTITUTION_CORE | |
+| CUSTOMER AUTONOMY | CONSTITUTION_CORE | |
+| "Always prioritize the customer's best interest…" | CONSTITUTION_CORE | |
+| WHAT I CAN DO / WHAT I CANNOT DO | CONSTITUTION_CORE | |
+
+Sizes: CONSTITUTION_CORE 11,382 chars (≤ 12KB budget; drops under 9KB when C
+removes ADVANCING), FIRST_TURN_RULES 1,179, DISCOVERY_CONDUCT 5,579.
+APPLICATION/PAYMENT/POLICY turns shed 6,758 chars (≈ 1.7k tokens) of
+now-out-of-scope prose; DISCOVERY turns past the opener shed 1,179.
+Registry keys: `firstTurnRules` (constitution layer, priority 1.3),
+`discoveryConduct` (stable layer, 1.6) — both scoped by the orchestrator's
+post-gate patch (the dntContext content-nullness pattern), both listed in
+BY_PHASE for DISCOVERY/QUOTE (map documents intent; nullness enforces).
+Gate: assembly tests in `__tests__/lib/chat/identity-split.test.ts` + the
+full pathology suite re-run — verdicts recorded in
+`2026-07-07-prompt-cost-baseline.md` §6.
+
+## 8. B2 — imperative-language sweep (2026-07-07, autonomy-skills-cost plan Task B2)
+
+Method: a deterministic multi-agent sweep (workflow `b2-imperative-sweep`,
+43 agents). Four inventory agents (one per prose surface —
+`formatDerivedBriefing`, `CONSTITUTION_CORE`, `DISCOVERY_CONDUCT`,
+`FIRST_TURN_RULES`) extracted every imperative and classified it
+keep-pinned / rewrite-informative / delete. Each non-keep proposal then
+went to an independent adversarial verifier prompted to REFUTE it — find
+the behavior gate that regresses if the imperative is reworded — and to
+default to keep-pinned when uncertain (the safe direction: a wrong flip
+causes a live pathology regression).
+
+**Result: 126 imperatives inventoried, 39 proposed for change by the
+inventory pass, 0 survived verification.** Every proposed rewrite/delete
+was refuted back to keep-pinned. No prompt content changed, so B2 lands as
+this documentation entry only — no reseed, no pathology re-run (zero
+behavior delta).
+
+Why zero survived — the load-bearing principle B2 confirms: Workstream B's
+rationale is the D5 pathology (the model OBEYS an imperative into a *wrong
+tool call* when the fallible engine hint is wrong). That failure mode
+exists only for an imperative that (a) commands a tool action and (b) is
+driven by mutable engine state. **B1 already flipped the sole such
+imperative — the engine's `nextBestAction` "call X" hint → objective
+facts.** Every residual imperative in the briefing/constitution falls into
+a category that is pure downside to reword:
+
+| Refutation category | Representative imperative (proposed → refuted) | Pin that saved it |
+|---|---|---|
+| Persona/tone — commands no tool action, no engine hint to be "wrong" | "Keep the tone warm and inviting, not clinical or robotic." | brand-voice compliance; sole runtime enforcer of the warm-tone contract |
+| Anti-hallucination — must be OBEYED, not reasoned over (hallucination = absence of any engine wall) | "If you don't know something, say so." / "WHEN IN DOUBT, BE HONEST" | D5 / anti-fabrication NEVER-VIOLATE block |
+| Compound sentence — rewrite silently DROPPED a load-bearing clause | "'Not now' is a valid answer." (dropped "Offer to save progress and return later.") | advance-flow / DNT pause-resume |
+| Signal→action pair — the "action" half is the P2 directive | "If a customer says 'that's a lot'… — address it." | P2 (ANSWER FIRST — DON'T DEFLECT) |
+| Compliance gate — prose is the ONLY enforcer (no engine check) | "The insurer (Allianz-Țiriac…) is NOT mentioned in the first message." | IDD insurer-disclosure; one-question-per-turn; pricing-only-via-quote |
+| P1 tool-invisibility family | "The system handles form display." / "The lookup is invisible." | P1 (fake-forms / tool-narration) |
+| P4 empty-category / OOS redirect | the RO/EN OFF-TOPIC decline templates | P4 (pivot-to-real-product) |
+| Structural anchor (delete proposals) | "These guardrails are non-negotiable." | precedence anchor for the 6 numbered guardrails |
+
+Conclusion: after B1, the briefing and constitution carry no further
+safe imperative→informative rewrites. The next imperative-density
+reduction is not a reword but a REMOVAL — the ADVANCING TO THE OFFER
+choreography (Workstream C, gated on SE-1.3), whose imperatives duplicate
+engine-enforced exposure ordering and therefore CAN leave without losing a
+pin. B2 is complete; C is where the remaining imperative budget comes off.

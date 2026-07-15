@@ -1,26 +1,15 @@
 /**
  * State Handlers
  *
- * get_current_state
+ * get_current_state — returns the full deriveAndExpose output:
+ * { state: DerivedStateV3, actions: ExposedActions }.
  */
 
-import { deriveState } from '@/lib/chat/derive-state'
-import type { ToolHandler } from '@/lib/tools/types'
-
-// ─────────────────────────────────────────────
-// get_current_state
-// ─────────────────────────────────────────────
+import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
+import { deriveAndExpose } from '@/lib/engines/derive-and-expose'
+import type { ToolHandler } from '../types'
 
 export const getStateHandler: ToolHandler = async (_args, context) => {
-  try {
-    const state = await deriveState(context.conversationId)
-    return {
-      success: true,
-      data: { state },
-      message: `Retrieved current state for phase: ${state.phase}`,
-    }
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    return { success: false, error: `Failed to get current state: ${message}` }
-  }
+  const { state, actions } = deriveAndExpose(await loadDomainSnapshot(context.conversationId))
+  return { success: true, data: { state, actions }, message: `Phase ${state.phase}${state.subphase ? '/' + state.subphase : ''}. ${state.nextBestAction}` }
 }

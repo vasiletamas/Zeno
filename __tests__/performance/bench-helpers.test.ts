@@ -191,7 +191,9 @@ describe('createMockProvider', () => {
     const elapsed = Date.now() - start
 
     expect(response.content).toBe('hello world')
-    expect(elapsed).toBeGreaterThanOrEqual(10)
+    // 1ms tolerance: setTimeout can fire up to ~1ms before Date.now() ticks
+    // over, which made this assertion flaky (observed elapsed=9).
+    expect(elapsed).toBeGreaterThanOrEqual(9)
   })
 
   it('chat returns the configured token usage', async () => {
@@ -225,7 +227,7 @@ describe('createMockProvider', () => {
   it('chatStream yields a content chunk then a done chunk', async () => {
     const provider = createMockProvider({ latencyMs: 0, content: 'streamed content' })
     const chunks = []
-    for await (const chunk of provider.chatStream({
+    for await (const chunk of await provider.chatStream({
       messages: [{ role: 'user', content: 'stream this' }],
       model: 'test-model',
     })) {
@@ -244,7 +246,7 @@ describe('createMockProvider', () => {
   it('chatStreamWithTools yields content chunk then done chunk', async () => {
     const provider = createMockProvider({ latencyMs: 0, content: 'tool-stream' })
     const chunks = []
-    for await (const chunk of provider.chatStreamWithTools({
+    for await (const chunk of await provider.chatStreamWithTools({
       messages: [{ role: 'user', content: 'go' }],
       model: 'test-model',
       tools: [],

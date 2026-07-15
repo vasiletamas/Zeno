@@ -45,55 +45,81 @@ const getObjectionStrategySchema = z.object({
 
 const getCustomerProfileSchema = z.object({}).strict()
 
-const updateCustomerProfileSchema = z.record(z.string(), z.unknown())
+// B4.ADD-1: confidence is GONE (strict rejection); addonIds is the soft
+// addon-interest binding.
+const setCandidateProductSchema = z.object({
+  productId: z.string().min(1, 'productId is required'),
+  addonIds: z.array(z.string()).optional(),
+}).strict()
 
 // ==============================================
 // DNT TOOL SCHEMAS
 // ==============================================
 
-const checkDntStatusSchema = z.object({
-  insuranceType: InsuranceTypeSchema.optional(),
+const getDntStateSchema = z.object({}).strict()
+const getNextQuestionSchema = z.object({}).strict()
+const getDntQuestionsSchema = z.object({}).strict()
+const getDntNextQuestionSchema = z.object({}).strict()
+
+const openDntSessionSchema = z.object({}).strict()
+
+const writeDntAnswerSchema = z.object({
+  questionCode: z.string().min(1, 'Question code is required'),
+  value: z.string().min(1, 'Answer value is required'),
 }).strict()
 
-const startDntQuestionnaireSchema = z.object({
-  insuranceType: InsuranceTypeSchema,
-}).strict()
-
-const saveDntAnswerSchema = z.object({
-  questionId: z.string().optional(),
-  answer: z.string().min(1, 'Answer is required'),
-}).strict()
-
+// The gateway owns two-step confirmation (A2 erratum 1): confirm-class keys
+// are stripped before validation and the ceremony flag is injected server-
+// side. Since B1.5 the customer's consent decision is a MATERIAL argument —
+// sign_dnt is the sole consent-capturing commit (contradiction #2), so the
+// consent object participates in the args hash and the confirm token binds
+// to it (a changed consent is a fresh commit, not a replay).
 const signDntSchema = z.object({
-  confirmSignature: z.literal(true, {
-    message: 'Signature confirmation is required',
-  }),
-  gdprConsent: z.literal(true, {
-    message: 'GDPR consent is required',
-  }),
+  consent: z.object({
+    gdpr: z.boolean(),
+    aiDisclosure: z.boolean(),
+  }).optional(),
+  confirmSignature: z.boolean().optional(),
+  confirmToken: z.string().optional(),
 }).strict()
 
 // ==============================================
 // APPLICATION TOOL SCHEMAS
 // ==============================================
 
-const startApplicationSchema = z.object({
+const setApplicationSchema = z.object({
   productId: z.string().optional(),
 }).strict()
 
-const saveApplicationAnswerSchema = z.object({
+const writeQuestionAnswerSchema = z.object({
   answer: z.string().min(1, 'Answer is required'),
-  field: z.string().optional(),
+  // C1.9: addresses the commit for replay scope; validated against the
+  // engine's current question when present.
+  questionCode: z.string().optional(),
+  confirmToken: z.string().optional(), // BD questions are CONFIRM_ALWAYS (T6.D3)
+}).strict()
+
+const modifyAnswerSchema = z.object({
+  questionCode: z.string().min(1, 'Question code is required'),
+  newValue: z.string().min(1, 'New value is required'),
+  confirmToken: z.string().optional(),
+}).strict()
+
+const selectCoverageSchema = z.object({
+  tier: z.string().optional(),
+  level: z.string().optional(),
+  addon: z.boolean().optional(),
 }).strict()
 
 const resumeApplicationSchema = z.object({
   applicationId: z.string().optional(),
 }).strict()
 
-const getApplicationStatusSchema = z.object({}).strict()
+const acknowledgeSuitabilityWarningSchema = z.object({}).strict()
 
 const cancelApplicationSchema = z.object({
   reason: z.string().optional(),
+  confirmToken: z.string().optional(),
 }).strict()
 
 // ==============================================
@@ -104,25 +130,30 @@ const generateQuoteSchema = z.object({
   applicationId: z.string().optional(),
 }).strict()
 
+// D2.5 (T7.D6/T7.D3): the elected contract frequency is THE material arg —
+// no legacy confirmAcceptance flag (the gateway owns the two-step), no
+// monthly (not sellable, D2 erratum 2).
 const acceptQuoteSchema = z.object({
-  quoteId: z.string().optional(),
-  confirmAcceptance: z.literal(true, {
-    message: 'Confirmation is required to accept the quote',
-  }),
+  paymentOption: z.enum(['annual', 'semi_annual', 'quarterly']),
+  confirmToken: z.string().optional(),
 }).strict()
 
-const getQuoteDetailsSchema = z.object({
+const getQuoteInfoSchema = z.object({
   quoteId: z.string().optional(),
 }).strict()
 
-const modifyQuoteSchema = z.object({}).strict()
+// D1.5: no material args — the gateway owns the two-step (confirm token),
+// so there is no literal-true confirmation flag here.
+const cancelQuoteSchema = z.object({
+  confirmToken: z.string().optional(),
+}).strict()
 
-// ==============================================
-// BD ELIGIBILITY
-// ==============================================
+const acknowledgeDisclosuresSchema = z.object({}).strict()
 
-const checkBdEligibilitySchema = z.object({
-  applicationId: z.string().optional(),
+// P2-15: previously absent — the permissive unknown-tool fallback let any
+// args through. The token is card-carried (never model-emitted).
+const signMedicalDeclarationsSchema = z.object({
+  confirmToken: z.string().optional(),
 }).strict()
 
 // ==============================================
@@ -144,13 +175,64 @@ const escalateToHumanSchema = z.object({
   priority: z.string().optional(),
 }).strict()
 
-const profileExtractorSchema = z.object({
-  messageContent: z.string().min(1),
+// ==============================================
+// IDENTITY / CHANNEL VERIFICATION (B3.5)
+// ==============================================
+
+const startChannelVerificationSchema = z.object({
+  channel: z.enum(['email', 'sms']),
+  target: z.string().min(3, 'Target contact is required'),
+  // Task 1.1 (D5): the ONLY way to re-issue for the SAME target while a
+  // challenge is pending — the customer must have asked for a new code.
+  resend: z.boolean().optional(),
 }).strict()
 
-const summarizerSchema = z.object({
-  conversationId: z.string().min(1),
-  maxLength: z.number().min(50).max(2000).optional(),
+const confirmChannelVerificationSchema = z.object({
+  code: z.string().regex(/^\d{6}$/, 'The verification code is 6 digits'),
+}).strict()
+
+const requestDocumentUploadSchema = z.object({
+  kind: z.enum(['id_card']).optional(),
+}).strict()
+
+// ==============================================
+// OPERATOR QUEUE (E2.4)
+// ==============================================
+
+const markSubmittedSchema = z.object({
+  policyId: z.string().min(1, 'Policy id is required'),
+}).strict()
+
+const activatePolicySchema = z.object({
+  policyId: z.string().min(1, 'Policy id is required'),
+  allianzPolicyNumber: z.string().min(1, 'The Allianz policy number is mandatory'),
+}).strict()
+
+const cancelSubmissionSchema = z.object({
+  policyId: z.string().min(1, 'Policy id is required'),
+}).strict()
+
+const resolveReferralSchema = z.object({
+  workItemId: z.string().min(1, 'Work item id is required'),
+  decision: z.enum(['approve', 'reject']),
+  note: z.string().optional(),
+  resolvedBy: z.string().optional(),
+}).strict()
+
+const resolveWorkItemSchema = z.object({
+  workItemId: z.string().min(1, 'Work item id is required'),
+  decision: z.enum(['resolve', 'dismiss']),
+  note: z.string().optional(),
+  resolvedBy: z.string().optional(),
+}).strict()
+
+// ==============================================
+// CONSENT
+// ==============================================
+
+const withdrawConsentSchema = z.object({
+  kind: z.enum(['gdpr_processing', 'ai_disclosure', 'marketing']),
+  scope: z.string().optional(),
 }).strict()
 
 // ==============================================
@@ -166,40 +248,75 @@ const toolSchemas: Record<string, ZodType> = {
 
   // Profile
   get_customer_profile: getCustomerProfileSchema,
-  update_customer_profile: updateCustomerProfileSchema,
+
+  // Candidate (B4.ADD-1)
+  set_candidate_product: setCandidateProductSchema,
 
   // DNT
-  check_dnt_status: checkDntStatusSchema,
-  start_dnt_questionnaire: startDntQuestionnaireSchema,
-  save_dnt_answer: saveDntAnswerSchema,
+  get_dnt_state: getDntStateSchema,
+  get_dnt_questions: getDntQuestionsSchema,
+  get_dnt_next_question: getDntNextQuestionSchema,
+  open_dnt_session: openDntSessionSchema,
+  write_dnt_answer: writeDntAnswerSchema,
   sign_dnt: signDntSchema,
 
-  // Application
-  start_application: startApplicationSchema,
-  save_application_answer: saveApplicationAnswerSchema,
+  // Application (B4 lifecycle)
+  set_application: setApplicationSchema,
+  get_next_question: getNextQuestionSchema,
+  write_question_answer: writeQuestionAnswerSchema,
+  modify_answer: modifyAnswerSchema,
+  select_coverage: selectCoverageSchema,
   resume_application: resumeApplicationSchema,
-  get_application_status: getApplicationStatusSchema,
   cancel_application: cancelApplicationSchema,
+  acknowledge_suitability_warning: acknowledgeSuitabilityWarningSchema,
+  get_last_application_info: z.object({}).strict(),
 
   // Quote
   generate_quote: generateQuoteSchema,
   accept_quote: acceptQuoteSchema,
-  get_quote_details: getQuoteDetailsSchema,
-  modify_quote: modifyQuoteSchema,
+  get_quote_info: getQuoteInfoSchema,
+  cancel_quote: cancelQuoteSchema,
+  acknowledge_disclosures: acknowledgeDisclosuresSchema,
+  sign_medical_declarations: signMedicalDeclarationsSchema,
 
   // BD Eligibility
-  check_bd_eligibility: checkBdEligibilitySchema,
 
   // Payment
-  initiate_payment: z.object({}).strict(),
+  ensure_payment_session: z.object({}).strict(),
+  change_payment_option: z.object({ paymentOption: z.enum(['annual', 'semi_annual', 'quarterly']), confirmToken: z.string().optional() }).strict(),
+  get_payment_status: z.object({}).strict(),
 
   // Data Collection
   collect_customer_field: collectCustomerFieldSchema,
 
   // Utility / Background
   escalate_to_human: escalateToHumanSchema,
-  profile_extractor: profileExtractorSchema,
-  summarizer: summarizerSchema,
+
+  // Consent
+  withdraw_consent: withdrawConsentSchema,
+
+  // Identity / channel verification
+  start_channel_verification: startChannelVerificationSchema,
+  confirm_channel_verification: confirmChannelVerificationSchema,
+  request_document_upload: requestDocumentUploadSchema,
+
+  // Operator queue
+  resolve_referral: resolveReferralSchema,
+  get_policy_info: z.object({}).strict(),
+  request_cancellation: z.object({ confirmToken: z.string().optional() }).strict(),
+  mark_submitted: markSubmittedSchema,
+  activate_policy: activatePolicySchema,
+  cancel_submission: cancelSubmissionSchema,
+  resolve_work_item: resolveWorkItemSchema,
+
+  // E4: the ONE list read
+  get_open_items: z.object({}).strict(),
+
+  // GDPR (E3)
+  request_erasure: z.object({ reason: z.string().max(500).optional() }).strict(),
+  request_data_export: z.object({ reason: z.string().max(500).optional() }).strict(),
+  approve_erasure: z.object({ workItemId: z.string().min(1) }).strict(),
+  approve_export: z.object({ workItemId: z.string().min(1) }).strict(),
 }
 
 // ==============================================

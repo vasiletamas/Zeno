@@ -30,7 +30,10 @@ export async function resolveProductRef(
   input: ProductResolveInput,
 ): Promise<ResolvedProductRef | null> {
   const id = clean(input.productId)
-  const rawCode = clean(input.productCode)
+  // A missed id falls through the code pipeline with the same value: the
+  // handlers' "Available codes:" error text invites passing the CODE under
+  // productId, and the model does exactly that (2026-07-06 battery).
+  const rawCode = clean(input.productCode) ?? id
 
   if (id) {
     const hit = await prisma.product.findUnique({

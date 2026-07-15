@@ -5,11 +5,6 @@
  * for tool calls during a conversation turn — it just executes the tool and
  * returns a PipelineResult, with uniform error handling.
  *
- * The legacy workflow gate + step-transition machinery has been retired:
- * `WorkflowSession` records are never created in the current (phase-derived)
- * architecture, so the gate/transition branches were dead. The
- * `_workflowSession` parameter is kept only so the existing call sites in the
- * orchestrator don't need editing.
  */
 
 import type { ToolContext, PipelineResult } from './types'
@@ -23,18 +18,16 @@ import { logError } from '@/lib/errors/logger'
 /**
  * Execute a tool and return its result.
  *
- * @param name             - Tool name
- * @param args             - Raw arguments
- * @param context          - Tool context
- * @param _workflowSession - Unused (always null in the current architecture); kept for call-site compatibility
- * @param traceId          - Optional trace ID for event bus instrumentation
+ * @param name    - Tool name
+ * @param args    - Raw arguments
+ * @param context - Tool context
+ * @param traceId - Optional trace ID for event bus instrumentation
  * @returns PipelineResult — tool result
  */
 export async function executeToolWithPipeline(
   name: string,
   args: unknown,
   context: ToolContext,
-  _workflowSession?: unknown | null,
   traceId?: string,
 ): Promise<PipelineResult> {
   try {

@@ -15,6 +15,10 @@ vi.mock('@/lib/db', () => ({
     customer: {
       findUnique: (...args: unknown[]) => customerFindUniqueSpy(...args),
     },
+    // E1.7: the handler loads published content (none in these unit specs) —
+    // getAge's profile read is try/caught, so its missing model just means no age
+    productContent: { findMany: async () => [] },
+    coverageAmount: { findMany: async () => [] },
   },
 }))
 

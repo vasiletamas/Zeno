@@ -75,6 +75,13 @@ export interface QuoteResult {
  * 7. validUntil = now + quoteValidityDays
  */
 export function calculateQuote(input: QuoteInput): QuoteResult {
+  // C2.4 last-line invariant: the D1 eligibility gate rejects BEFORE pricing
+  // (addon_age_band_unavailable is a fact, #9) — reaching here with the
+  // addon selected but no matched band is a programming error, never a
+  // silent price 0.
+  if (input.includesAddon && input.addonPricingRule === null) {
+    throw new Error('addon_age_band_unavailable: includesAddon=true but no AddonPricingRule matched customerAge — the eligibility gate must reject before pricing')
+  }
   const basePremiumAnnual = input.pricingLevel.premiumAnnual
   const addonPremiumAnnual = input.addonPricingRule?.premiumAnnual ?? 0
   const premiumAnnual = basePremiumAnnual + addonPremiumAnnual

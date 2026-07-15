@@ -1,5 +1,19 @@
 import { describe, it, expect } from 'vitest'
 import { validateSideEffectClaims } from '@/lib/chat/side-effect-validator'
+import { registerTool } from '@/lib/tools/registry'
+
+// The standalone consent tools died in B1.1 (capture folds into sign_dnt at
+// B1.5) — pin the consent-category pathway with a test-only registration.
+registerTool('__test_consent_tool', {
+  description: 'test-only consent-category tool',
+  parameters: { type: 'object', properties: {} },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ['CUSTOMER', 'OPERATOR', 'ADMIN'],
+  sideEffect: 'consent',
+  kind: 'commit',
+}, async () => ({ success: true }))
 
 describe('validateSideEffectClaims', () => {
   it('flags "am notat" when no save-category tool was called', () => {
@@ -17,7 +31,7 @@ describe('validateSideEffectClaims', () => {
   it('allows "am notat" when a save-category tool was called and succeeded', () => {
     const result = validateSideEffectClaims(
       'Am notat răspunsul tău.',
-      [{ id: 't1', name: 'save_application_answer', arguments: {} } as any],
+      [{ id: 't1', name: 'write_question_answer', arguments: {} } as any],
       [{ success: true }] as any,
       'ro',
     )
@@ -27,7 +41,7 @@ describe('validateSideEffectClaims', () => {
   it('flags "am notat" when a save tool was called but failed', () => {
     const result = validateSideEffectClaims(
       'Am notat răspunsul tău.',
-      [{ id: 't1', name: 'save_application_answer', arguments: {} } as any],
+      [{ id: 't1', name: 'write_question_answer', arguments: {} } as any],
       [{ success: false, error: 'db down' }] as any,
       'ro',
     )
@@ -45,10 +59,10 @@ describe('validateSideEffectClaims', () => {
     expect(result.violations[0].category).toBe('lifecycle')
   })
 
-  it('allows "am pornit aplicația" when start_application succeeded', () => {
+  it('allows "am pornit aplicația" when set_application succeeded', () => {
     const result = validateSideEffectClaims(
       'Perfect, am pornit aplicația pentru tine.',
-      [{ id: 't1', name: 'start_application', arguments: {} } as any],
+      [{ id: 't1', name: 'set_application', arguments: {} } as any],
       [{ success: true }] as any,
       'ro',
     )
@@ -90,7 +104,7 @@ describe('validateSideEffectClaims', () => {
     expect(categories.has('lifecycle')).toBe(true)
   })
 
-  it('flags consent claim without record_gdpr_consent call', () => {
+  it('flags consent claim without a consent-category tool call', () => {
     const result = validateSideEffectClaims(
       'Am confirmat consimțământul GDPR.',
       [],
@@ -101,10 +115,10 @@ describe('validateSideEffectClaims', () => {
     expect(result.violations[0].category).toBe('consent')
   })
 
-  it('allows consent phrase when record_gdpr_consent succeeded', () => {
+  it('allows consent phrase when a consent-category tool succeeded', () => {
     const result = validateSideEffectClaims(
       'Am confirmat consimțământul.',
-      [{ id: 't1', name: 'record_gdpr_consent', arguments: {} } as any],
+      [{ id: 't1', name: '__test_consent_tool', arguments: {} } as any],
       [{ success: true }] as any,
       'ro',
     )

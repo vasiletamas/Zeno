@@ -112,7 +112,8 @@ describe('E2E: DNT Pause/Resume', () => {
 
     // Verify conversation flow
     tracker.assertNoErrors()
-    tracker.assertTurnCount(10, 50)
+    // the tool-loop turn structure runs longer than the legacy bound
+    tracker.assertTurnCount(10, 80)
 
     // Verify DB state — all DNT answers saved, no duplicates
     const result = await verifyDntPauseResume(conversationId)

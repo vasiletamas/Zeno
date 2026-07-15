@@ -2,14 +2,27 @@
  * Questionnaire Engine
  *
  * Shared logic for DNT, Application, and BD medical questionnaire flows.
- * All three use the same Question/Answer tables but different QuestionGroups.
+ * All three use the same Question table but different QuestionGroups.
  *
- * Design: Pure functions (shouldShowQuestion, validateAnswer, checkForFlags)
- * take pre-fetched data and return results. DB wrapper functions
- * (getNextQuestion, calculateProgress) do DB I/O then delegate to pure functions.
+ * Design: Pure functions (validateAnswer, checkForFlags, deriveFlags) take
+ * pre-fetched data and return results. DB wrapper functions
+ * (getNextQuestion, calculateProgress) do DB I/O then delegate to pure
+ * functions. Visibility comes from computeVisibleSet over the typed
+ * QuestionDependency graph — the ONE dependency store (C1.8, T6.D1); the
+ * legacy parentQuestionId/showWhenValue mechanism is retired.
  */
 
 import { prisma } from '@/lib/db'
+import { Prisma } from '@/lib/generated/prisma/client'
+import { computeVisibleSet } from './dependency-graph'
+import { loadDependencyGraph } from './dependency-graph-loader'
+
+// Injectable client (same convention as question-groups.ts): callers running
+// inside the commit gateway's transaction MUST pass their tx client — the
+// global client cannot see rows written in the open transaction, so the
+// post-write next-question walk re-serves the just-answered question
+// (2026-07-06 user-found stale-card defect).
+type Db = typeof prisma | Prisma.TransactionClient
 
 // ==========================================
 // TYPES
@@ -25,10 +38,10 @@ export interface QuestionData {
   type: string
   options: unknown
   validationRules: unknown
-  parentQuestionId: string | null
-  showWhenValue: string | null
   orderIndex: number
   isRequired: boolean
+  /** Task 1.2 (D2): CustomerInsight key for the context-hit lookup — null when the question maps to no stored insight. */
+  insightKey: string | null
 }
 
 // ==========================================
@@ -58,50 +71,9 @@ function normalizeBooleanValue(value: string): string | null {
   return null
 }
 
-/**
- * Evaluate conditional visibility for a question.
- *
- * - If parentQuestionId is null: always visible
- * - If parent not answered: hidden
- * - If showWhenValue matches parent answer: visible
- */
-export function shouldShowQuestion(
-  question: { parentQuestionId: string | null; showWhenValue: string | null },
-  answersMap: Map<string, string>,
-): boolean {
-  // No parent → always visible
-  if (!question.parentQuestionId) {
-    return true
-  }
-
-  // Parent not answered → hidden
-  const parentAnswer = answersMap.get(question.parentQuestionId)
-  if (parentAnswer === undefined) {
-    return false
-  }
-
-  // No condition → visible if parent answered
-  if (question.showWhenValue === null || question.showWhenValue === undefined) {
-    return true
-  }
-
-  const showWhen = question.showWhenValue
-
-  // Comma-separated values: show if parent answer matches any
-  if (showWhen.includes(',')) {
-    const allowedValues = showWhen.split(',').map(v => v.trim())
-    return allowedValues.includes(parentAnswer)
-  }
-
-  // Boolean normalization: "true"/"false" showWhenValue
-  if (showWhen === 'true' || showWhen === 'false') {
-    const normalizedAnswer = normalizeBooleanValue(parentAnswer)
-    return normalizedAnswer === showWhen
-  }
-
-  // Exact string match
-  return parentAnswer === showWhen
-}
+// shouldShowQuestion (parentQuestionId/showWhenValue) was retired in C1.8 —
+// visibility is computeVisibleSet over the typed dependency graph, shared
+// with the consequence planner and the domain snapshot (T6.D1).
 
 /**
  * Validate an answer based on the question type.
@@ -162,10 +134,12 @@ export function validateAnswer(
       for (const val of values) {
         const matched = fuzzyMatchOption(val, options)
         if (!matched) {
+          // Same self-healing shape as the DROPDOWN branch: the model cannot
+          // see prior-turn tool results, so the error must carry the options.
           return {
             valid: false,
             normalizedValue: trimmedValue,
-            error: `Invalid option: "${val}"`,
+            error: `Invalid option: "${val}". Valid options: ${options.map(o => o.value).join(', ')}`,
           }
         }
         normalizedValues.push(matched.value)
@@ -290,6 +264,35 @@ export function checkForFlags(
   return { flagged: false, action: null, reason: null }
 }
 
+export interface DerivedFlag {
+  questionCode: string
+  answer: string
+  reason: string | null
+  action: 'flag' | 'escalate' | 'reject'
+}
+
+/**
+ * Flags DERIVED from active answer revisions (C1.5, erratum 10 / T6.D2):
+ * pure recomputation over the active view, so a corrected answer can never
+ * leave a zombie flag behind. The consequence applier persists the result
+ * (plus PAUSED/OPEN status recompute) inside the commit transaction.
+ */
+export function deriveFlags(
+  activeAnswers: Record<string, string>,
+  questionRules: { code: string; validationRules: unknown }[],
+): DerivedFlag[] {
+  const flags: DerivedFlag[] = []
+  for (const q of questionRules) {
+    const value = activeAnswers[q.code]
+    if (value === undefined) continue
+    const result = checkForFlags(q.validationRules, value)
+    if (result.flagged && result.action) {
+      flags.push({ questionCode: q.code, answer: value, reason: result.reason, action: result.action })
+    }
+  }
+  return flags
+}
+
 // ==========================================
 // HELPERS (PRIVATE)
 // ==========================================
@@ -370,6 +373,27 @@ function fuzzyMatchOption(
       }
     }
   }
+
+  // Second pass (B2.7 live lesson): customers answer "da" to a label like
+  // "DA, pentru toate produsele" — accept a prefix that ends at a word
+  // boundary, but ONLY when it identifies exactly one option.
+  const labelStrings = (opt: ParsedOption): string[] => {
+    const out = [opt.value]
+    if (typeof opt.label === 'string') out.push(opt.label)
+    else if (opt.label) {
+      if (opt.label.en) out.push(opt.label.en)
+      if (opt.label.ro) out.push(opt.label.ro)
+    }
+    return out
+  }
+  const isWordBoundaryPrefix = (candidate: string): boolean =>
+    candidate.startsWith(normalized) &&
+    (candidate.length === normalized.length || !/[a-z0-9]/i.test(candidate[normalized.length]))
+  const prefixMatches = options.filter((opt) =>
+    labelStrings(opt).some((l) => isWordBoundaryPrefix(stripDiacritics(l.toLowerCase()))),
+  )
+  if (normalized.length > 0 && prefixMatches.length === 1) return prefixMatches[0]
+
   return null
 }
 
@@ -378,20 +402,41 @@ function fuzzyMatchOption(
 // ==========================================
 
 /**
+ * Where a questionnaire's answers live (T3.D6 generalization, B2.3):
+ * application-scoped Answer rows (B4.1 re-key — the conversation scope
+ * died with Answer.conversationId) or session-scoped DntAnswer rows.
+ */
+export type AnswerScope =
+  | { kind: 'application'; applicationId: string }
+  | { kind: 'dntSession'; sessionId: string }
+
+async function loadScopedAnswers(scope: AnswerScope, questionIds: string[], db: Db = prisma): Promise<Map<string, string>> {
+  const rows = scope.kind === 'application'
+    ? await db.answer.findMany({ where: { applicationId: scope.applicationId, questionId: { in: questionIds }, status: 'ACTIVE' } })
+    : await db.dntAnswer.findMany({ where: { sessionId: scope.sessionId, questionId: { in: questionIds } } })
+  return new Map(rows.map(a => [a.questionId, a.value]))
+}
+
+/**
  * Find the next unanswered, visible question across the given groups.
  *
  * 1. Load all questions for the group codes, ordered by group.orderIndex then question.orderIndex
- * 2. Load all answers for the conversationId
+ * 2. Load all answers in the given scope
  * 3. Build answersMap (questionId -> value)
  * 4. Iterate: first visible + unanswered question is returned
  * 5. Progress: count visible answered / visible total
  */
 export async function getNextQuestion(
   groupCodes: string[],
-  conversationId: string,
-): Promise<{ question: QuestionData; progress: { answered: number; total: number } } | null> {
+  scope: AnswerScope,
+  // B4.6 prefill-as-proposals (T5.D5): questionCode → prior answer. A match
+  // rides back as suggestedAnswer — a PROPOSAL the customer must confirm
+  // via a real save commit, never a silently copied answer.
+  proposals?: Map<string, string>,
+  db: Db = prisma,
+): Promise<{ question: QuestionData; progress: { answered: number; total: number }; suggestedAnswer?: string } | null> {
   // Load all question groups matching the codes
-  const groups = await prisma.questionGroup.findMany({
+  const groups = await db.questionGroup.findMany({
     where: { code: { in: groupCodes } },
     orderBy: { orderIndex: 'asc' },
   })
@@ -402,7 +447,7 @@ export async function getNextQuestion(
   const groupCodeMap = new Map(groups.map(g => [g.id, g.code]))
 
   // Load all questions for these groups
-  const questions = await prisma.question.findMany({
+  const questions = await db.question.findMany({
     where: { groupId: { in: groupIds } },
     orderBy: [{ groupId: 'asc' }, { orderIndex: 'asc' }],
   })
@@ -418,20 +463,12 @@ export async function getNextQuestion(
     return a.orderIndex - b.orderIndex
   })
 
-  // Load answers for this conversation
+  // Load answers in the given scope
   const questionIds = questions.map(q => q.id)
-  const answers = await prisma.answer.findMany({
-    where: {
-      conversationId,
-      questionId: { in: questionIds },
-    },
-  })
+  const answersMap = await loadScopedAnswers(scope, questionIds, db)
 
-  // Build answers map
-  const answersMap = new Map<string, string>()
-  for (const a of answers) {
-    answersMap.set(a.questionId, a.value)
-  }
+  // Visibility from the ONE dependency store (C1.8)
+  const visible = await visibleCodesForScope(questions, answersMap, scope, db)
 
   // Find visible questions and next unanswered
   let nextQuestion: QuestionData | null = null
@@ -439,12 +476,7 @@ export async function getNextQuestion(
   let answeredCount = 0
 
   for (const q of questions) {
-    const questionForVisibility = {
-      parentQuestionId: q.parentQuestionId,
-      showWhenValue: q.showWhenValue,
-    }
-
-    if (!shouldShowQuestion(questionForVisibility, answersMap)) {
+    if (q.code && !visible.has(q.code)) {
       continue
     }
 
@@ -463,19 +495,20 @@ export async function getNextQuestion(
         type: q.type,
         options: q.options,
         validationRules: q.validationRules,
-        parentQuestionId: q.parentQuestionId,
-        showWhenValue: q.showWhenValue,
         orderIndex: q.orderIndex,
         isRequired: q.isRequired,
+        insightKey: q.insightKey ?? null,
       }
     }
   }
 
   if (!nextQuestion) return null
 
+  const suggestedAnswer = nextQuestion.code ? proposals?.get(nextQuestion.code) : undefined
   return {
     question: nextQuestion,
     progress: { answered: answeredCount, total: visibleCount },
+    ...(suggestedAnswer !== undefined ? { suggestedAnswer } : {}),
   }
 }
 
@@ -484,10 +517,11 @@ export async function getNextQuestion(
  */
 export async function calculateProgress(
   groupCodes: string[],
-  conversationId: string,
+  scope: AnswerScope,
+  db: Db = prisma,
 ): Promise<{ answered: number; total: number; percentage: number }> {
   // Load groups
-  const groups = await prisma.questionGroup.findMany({
+  const groups = await db.questionGroup.findMany({
     where: { code: { in: groupCodes } },
     orderBy: { orderIndex: 'asc' },
   })
@@ -497,33 +531,25 @@ export async function calculateProgress(
   const groupIds = groups.map(g => g.id)
 
   // Load questions
-  const questions = await prisma.question.findMany({
+  const questions = await db.question.findMany({
     where: { groupId: { in: groupIds } },
   })
 
   if (questions.length === 0) return { answered: 0, total: 0, percentage: 0 }
 
-  // Load answers
+  // Load answers in the given scope
   const questionIds = questions.map(q => q.id)
-  const answers = await prisma.answer.findMany({
-    where: {
-      conversationId,
-      questionId: { in: questionIds },
-    },
-  })
+  const answersMap = await loadScopedAnswers(scope, questionIds, db)
 
-  const answersMap = new Map<string, string>()
-  for (const a of answers) {
-    answersMap.set(a.questionId, a.value)
-  }
+  // Visibility from the ONE dependency store (C1.8)
+  const visible = await visibleCodesForScope(questions, answersMap, scope, db)
 
   // Count visible and answered
   let total = 0
   let answered = 0
 
   for (const q of questions) {
-    const vis = { parentQuestionId: q.parentQuestionId, showWhenValue: q.showWhenValue }
-    if (!shouldShowQuestion(vis, answersMap)) continue
+    if (q.code && !visible.has(q.code)) continue
     total++
     if (answersMap.has(q.id)) answered++
   }
@@ -531,4 +557,32 @@ export async function calculateProgress(
   const percentage = total > 0 ? Math.round((answered / total) * 100) : 0
 
   return { answered, total, percentage }
+}
+
+/**
+ * The scope's visible question codes via computeVisibleSet (C1.8): answers
+ * keyed by CODE, selection facts from the application (DNT sessions carry
+ * none). Questions without a code cannot be gated and stay visible.
+ */
+async function visibleCodesForScope(
+  questions: { id: string; code: string | null }[],
+  answersMap: Map<string, string>,
+  scope: AnswerScope,
+  db: Db = prisma,
+): Promise<Set<string>> {
+  const codes: string[] = []
+  const answers: Record<string, string> = {}
+  for (const q of questions) {
+    if (!q.code) continue
+    codes.push(q.code)
+    const v = answersMap.get(q.id)
+    if (v !== undefined) answers[q.code] = v
+  }
+  let selection: { tier: string | null; level: string | null; addon: boolean | null } = { tier: null, level: null, addon: null }
+  if (scope.kind === 'application') {
+    const app = await db.application.findUnique({ where: { id: scope.applicationId }, include: { tier: true, level: true } })
+    if (app) selection = { tier: app.tier?.code ?? null, level: app.level?.code ?? null, addon: app.includesAddon }
+  }
+  const graph = await loadDependencyGraph(db)
+  return computeVisibleSet(graph, codes, { answers, selection })
 }

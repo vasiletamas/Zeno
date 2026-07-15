@@ -8,6 +8,10 @@ vi.mock('@/lib/db', () => ({
     agentKnowledge: { findMany: vi.fn() },
     question: { findMany: vi.fn() },
     answer: { findMany: vi.fn() },
+    // P0-7: loadQuestionnaireContext resolves the active-application pointer;
+    // null pointer -> no questionnaire surface (what these tests expect)
+    conversation: { findUnique: vi.fn().mockResolvedValue(null) },
+    application: { findUnique: vi.fn().mockResolvedValue(null) },
   },
 }))
 
@@ -26,7 +30,6 @@ const { loadAllSections, loadCustomerContextFromData } = await import(
 )
 
 const emptyStateGroundingInput = {
-  workflowSession: null,
   application: null,
   product: null,
   customer: { gdprConsentAt: null, gdprConsentScope: null, aiDisclosureAcknowledgedAt: null },
@@ -47,13 +50,6 @@ describe('loadAllSections with prefetchedCustomer', () => {
     const prefetchedCustomer = {
       name: 'Ion Popescu',
       dateOfBirth: new Date('1985-06-15'),
-      extractedProfile: {
-        occupation: 'Engineer',
-        incomeLevel: 'middle',
-        familySize: 4,
-        hasChildren: true,
-        motivations: ['family protection'],
-      } as Record<string, unknown>,
       language: 'ro',
       isAnonymous: false,
     }
@@ -64,8 +60,6 @@ describe('loadAllSections with prefetchedCustomer', () => {
       productId: null,
       conversationId: 'conv-1',
       customerId: 'cust-1',
-      workflowSession: null,
-      workflowStepCode: null,
       situationalBriefing: null,
       language: 'ro',
       prefetchedCustomer,
@@ -78,9 +72,6 @@ describe('loadAllSections with prefetchedCustomer', () => {
     // The returned customerContext should contain the pre-fetched data
     expect(result.customerContext).not.toBeNull()
     expect(result.customerContext).toContain('Ion Popescu')
-    expect(result.customerContext).toContain('Engineer')
-    expect(result.customerContext).toContain('family protection')
-    expect(result.customerContext).toContain('Family size: 4')
   })
 
   it('calls prisma.customer.findUnique when prefetchedCustomer is NOT provided', async () => {
@@ -88,7 +79,6 @@ describe('loadAllSections with prefetchedCustomer', () => {
       id: 'cust-1',
       name: 'Maria Ionescu',
       dateOfBirth: new Date('1990-01-01'),
-      extractedProfile: {},
       language: 'ro',
       isAnonymous: false,
       email: null,
@@ -104,8 +94,6 @@ describe('loadAllSections with prefetchedCustomer', () => {
       productId: null,
       conversationId: 'conv-1',
       customerId: 'cust-1',
-      workflowSession: null,
-      workflowStepCode: null,
       situationalBriefing: null,
       language: 'ro',
       stateGroundingInput: emptyStateGroundingInput,
@@ -123,35 +111,21 @@ describe('loadAllSections with prefetchedCustomer', () => {
       productId: null,
       conversationId: 'conv-1',
       customerId: 'cust-1',
-      workflowSession: null,
-      workflowStepCode: null,
       situationalBriefing: null,
       language: 'ro',
       stateGroundingInput: emptyStateGroundingInput,
     })
 
     expect(result.stateGrounding).toContain('=== CURRENT SYSTEM STATE')
-    expect(result.stateGrounding).toContain('✗ No workflow is active')
     expect(result.stateGrounding).toContain('✗ No product is selected')
   })
 })
 
 describe('loadCustomerContextFromData', () => {
-  it('formats all fields from pre-fetched customer data', () => {
+  it('formats basic fields from pre-fetched customer data', () => {
     const data = {
       name: 'Ion Popescu',
       dateOfBirth: new Date('1985-06-15'),
-      extractedProfile: {
-        occupation: 'Software developer',
-        incomeLevel: 'high',
-        education: 'Masters',
-        familySize: 3,
-        hasSpouse: true,
-        hasChildren: true,
-        minorChildren: 1,
-        motivations: ['family protection', 'retirement'],
-        interests: ['term life', 'investment'],
-      } as Record<string, unknown>,
       language: 'ro',
       isAnonymous: false,
     }
@@ -161,15 +135,6 @@ describe('loadCustomerContextFromData', () => {
     expect(result).toContain('Name: Ion Popescu')
     expect(result).toContain('Language: ro')
     expect(result).toContain('Age:')
-    expect(result).toContain('Occupation: Software developer')
-    expect(result).toContain('Income level: high')
-    expect(result).toContain('Education: Masters')
-    expect(result).toContain('Family size: 3')
-    expect(result).toContain('Has spouse: true')
-    expect(result).toContain('Has children: true')
-    expect(result).toContain('Minor children: 1')
-    expect(result).toContain('Motivations: family protection, retirement')
-    expect(result).toContain('Interests: term life, investment')
     // Not anonymous, so should NOT contain 'Anonymous visitor'
     expect(result).not.toContain('Anonymous visitor')
   })
@@ -178,7 +143,6 @@ describe('loadCustomerContextFromData', () => {
     const data = {
       name: null,
       dateOfBirth: null,
-      extractedProfile: {} as Record<string, unknown>,
       language: 'en',
       isAnonymous: true,
     }
@@ -196,7 +160,6 @@ describe('loadCustomerContextFromData', () => {
     const data = {
       name: null,
       dateOfBirth: null,
-      extractedProfile: {} as Record<string, unknown>,
       language: 'ro',
       isAnonymous: false,
     }

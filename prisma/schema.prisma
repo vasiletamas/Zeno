@@ -11,31 +11,66 @@ datasource db {
 // ENUMS
 // ==========================================
 
+// D2 (contradiction #11): a conversation is a CHANNEL, never a funnel stage —
+// it is ACTIVE or ARCHIVED (inactivity sweep); turns reactivate archived ones.
 enum ConversationStatus {
   ACTIVE
-  IDLE
-  COMPLETED
-  ABANDONED
+  ARCHIVED
 }
 
+// The T5.D6-ratified status vocabulary. REFERRED + CANCELLED joined in E2
+// (the referral queue needs them and E2 precedes C1/B4 in the execution
+// order); B4 owns the transition machine over this set.
 enum ApplicationStatus {
   OPEN
   PAUSED
+  REFERRED
   COMPLETED
+  CANCELLED
 }
 
+enum WorkItemKind {
+  REFERRAL
+  ESCALATION
+  DOCUMENT_REVIEW
+  GDPR_ERASURE
+  GDPR_EXPORT
+  ALERT_FLAG
+}
+
+enum WorkItemStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  DISMISSED
+}
+
+enum WorkItemPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// D1.1 (T7): the quote is the immutable priced artifact — ISSUED at
+// creation (freeze-at-issue), ACCEPTED/EXPIRED/CANCELLED terminal.
 enum QuoteStatus {
-  DRAFT
+  ISSUED
   ACCEPTED
   EXPIRED
+  CANCELLED
 }
 
+// D4.1 (T9.D3): explicit machine with exclusive owners (lib/engines/
+// policy-machine.ts). LAPSED is reachable only from ACTIVE, owner = system
+// job (M16: detection deferred; the transition row exists already).
 enum PolicyStatus {
   PENDING_SUBMISSION
   SUBMITTED
   ACTIVE
   CANCELLED
   EXPIRED
+  LAPSED
 }
 
 enum PaymentStatus {
@@ -43,19 +78,13 @@ enum PaymentStatus {
   COMPLETED
   FAILED
   REFUNDED
+  SUPERSEDED
 }
 
 enum PaymentProvider {
   STRIPE
   PAYU
   MOCK
-}
-
-enum WorkflowSessionStatus {
-  ACTIVE
-  PAUSED
-  COMPLETED
-  CANCELLED
 }
 
 enum LLMProvider {
@@ -97,6 +126,56 @@ enum ProposalStatus {
   REJECTED
 }
 
+// C1 (contradiction #4): ONE typed dependency graph spanning answers and
+// selection, in node-key form ('answer:<code>' | 'selection:<facet>').
+enum DependencyKind {
+  VISIBILITY
+  VALIDITY
+  ELIGIBILITY
+}
+
+// T6.D3: typed sensitivity — CONFIRM_ON_MODIFY guards corrections,
+// CONFIRM_ALWAYS guards even first writes (bd declarations, CNP).
+enum QuestionSensitivity {
+  NONE
+  CONFIRM_ON_MODIFY
+  CONFIRM_ALWAYS
+}
+
+// D2 (T9.D1) — landed early with C3.6 which registers the quote-keyed
+// suitability report: ONE document registry behind a storage provider,
+// replacing the path-column pattern. D2 seeds IPID/TERMS and wires the
+// disclosure gate; D4 retires suitabilityReportPath.
+enum DocumentKind {
+  IPID
+  TERMS
+  PAYMENT_RECEIPT
+  SUITABILITY_REPORT
+  POLICY_SCHEDULE
+}
+
+// D2 (contradiction #3): the schedule is the live money truth from
+// acceptance onward — integer minor units, never re-derived from the quote.
+enum PaymentScheduleStatus {
+  PENDING_FIRST_CAPTURE
+  ACTIVE
+  COMPLETED
+  SUPERSEDED
+  ABANDONED
+}
+
+enum InstallmentStatus {
+  PENDING
+  PAID
+  FAILED
+  WAIVED
+}
+
+enum DocumentSource {
+  STATIC_PER_PRODUCT_VERSION
+  GENERATED
+}
+
 // ==========================================
 // DOMAIN: CORE PRODUCT
 // ==========================================
@@ -106,29 +185,42 @@ model Product {
   code                    String   @unique
   name                    Json
   description             Json
-  insuranceType           String
+  insuranceType           ProductType
   subType                 String
   eligibility             Json
-  features                String[]
   exclusions              String[]
   defaultPlaybook         String   @db.Text
-  pricingExplanation      String   @db.Text
   targetCustomer          String
-  targetAgeRange          String
   contractTerm            String
   gracePeriod             String
   medicalExamRequired     Boolean  @default(false)
   territoryCoverage       String
-  premiumRange            Json?
   paymentFrequencyOptions Json?
   insightKeys             Json?
+  // B3.7 (#1 productDocuments): per-commit document requirements, e.g.
+  // { accept_quote: [], initiate_payment: ["id_card"] }. R6 ambiguity
+  // resolved to before-initiate_payment; flip by seeding accept_quote:
+  // ["id_card"] if compliance wants accept-time.
+  verificationRequirements Json?
+  // D4.2: distance-channel free-look default per OG 85/2004 — the constant is
+  // FLAGGED FOR LEGAL/COMPLIANCE CONFIRMATION (channel-dependent 30 vs 20).
+  freeLookDays            Int      @default(30)
+  // C3.2 (M7): typed SuitabilityRuleSet { version, mode, rules } — parsed by
+  // lib/engines/suitability.ts, never evaluated as informal Json.
+  suitabilityRules        Json?
   quoteValidityDays       Int      @default(30)
+  // E1 (T11.D1): the DECLARED pricing-example grid — per-product data naming
+  // the variation parameter and sample points; every number derived through
+  // calculateQuote at read time, never authored.
+  pricingExampleGrid      Json?
   isActive                Boolean  @default(true)
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
   pricingTiers        PricingTier[]
   addons              Addon[]
+  productContent      ProductContent[]
+  dntSessions         DntSession[]
   questionGroups      QuestionGroup[]
   objectionStrategies ObjectionStrategy[]
   conversations          Conversation[] @relation("ConversationProduct")
@@ -225,6 +317,7 @@ model Addon {
   product         Product            @relation(fields: [productId], references: [id])
   pricingRules    AddonPricingRule[]
   coverageAmounts CoverageAmount[]
+  productContent  ProductContent[]
 
   @@unique([productId, code])
 }
@@ -260,6 +353,50 @@ model ObjectionStrategy {
   @@unique([productId, type])
 }
 
+// E1 (T11.D2): versioned, bilingual authored selling claims with a
+// draft→published governance workflow. The agent may only utter claims
+// from PUBLISHED rows; every number it speaks is DERIVED (pricing_examples,
+// eligibility_bounds) — authored content is numeral-free by the publish gate.
+enum ProductContentField {
+  KEY_VALUE_PRODUCT_POINTS
+  SELL_SPECIFIC_INFO
+  SELL_SPECIFIC_ADDON_INFO
+  PRICING_NOTE
+}
+
+enum ProductContentStatus {
+  DRAFT
+  PUBLISHED
+  RETIRED
+}
+
+model ProductContent {
+  id          String               @id @default(cuid())
+  productId   String
+  addonId     String?
+  field       ProductContentField
+  locale      String
+  content     Json
+  version     Int
+  status      ProductContentStatus @default(DRAFT)
+  authoredBy  String
+  approvedBy  String?
+  publishedAt DateTime?
+  retiredAt   DateTime?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  product Product @relation(fields: [productId], references: [id])
+  addon   Addon?  @relation(fields: [addonId], references: [id])
+
+  // E1 erratum 1: this composite covers addon-scoped rows only — Postgres
+  // treats NULLs as distinct, so product-level rows (addonId NULL) are
+  // enforced by the partial unique index "ProductContent_product_level_unique"
+  // created in the seed bootstrap (prisma/seeds/index.ts).
+  @@unique([productId, addonId, field, locale, version])
+  @@index([productId, field, status])
+}
+
 // ==========================================
 // DOMAIN: CONVERSATION AND SALES
 // ==========================================
@@ -275,26 +412,258 @@ model Customer {
   cnpTag           String?
   address          Json?
   language         String    @default("ro")
-  extractedProfile   Json?
   isAnonymous        Boolean   @default(true)
-  magicLinkToken     String?   @unique
-  magicLinkExpiresAt DateTime?
+  mergedIntoId       String?
+  mergedAt           DateTime?
+  // E3.2 (M3): tombstone marker set by the erasure executor — aligns with
+  // B0's pseudonymized-customer tombstone (claim-and-merge).
+  erasedAt           DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
-
-  gdprConsentAt              DateTime?
-  gdprConsentScope           String?
-  aiDisclosureAcknowledgedAt DateTime?
 
   conversations     Conversation[]
   applications      Application[]
   quotes            Quote[]
   policies          Policy[]
   payments          Payment[]
+  paymentSchedules  PaymentSchedule[]
   referralsMade     Referral[] @relation("referrer")
   referralsReceived Referral[] @relation("referred")
   user              User?
   insights          CustomerInsight[]
+  profileFields     CustomerProfileField[]
+  consentEvents     ConsentEvent[]
+  suitabilityWarningAcks SuitabilityWarningAck[]
+  dnts              Dnt[]
+  dntSessions       DntSession[]
+  verificationChallenges VerificationChallenge[]
+  documents         CustomerDocument[]
+}
+
+// B3.4: ONE challenge primitive with two presentations (in-chat OTP code and
+// magic link) — the same row backs both, so the paths cannot diverge (T4-R5).
+enum VerificationChannel {
+  email
+  sms
+}
+
+model QuestionDependency {
+  id           String         @id @default(cuid())
+  productId    String?
+  subjectKey   String
+  dependsOnKey String
+  kind         DependencyKind
+  predicate    Json
+  createdAt    DateTime       @default(now())
+
+  @@unique([subjectKey, dependsOnKey, kind])
+  @@index([dependsOnKey])
+}
+
+model VerificationChallenge {
+  id                String              @id @default(cuid())
+  customerId        String
+  channel           VerificationChannel
+  target            String
+  codeHash          String
+  linkToken         String?             @unique
+  conversationId    String?
+  expiresAt         DateTime
+  attemptsRemaining Int                 @default(5)
+  consumedAt        DateTime?
+  createdAt         DateTime            @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([customerId, consumedAt])
+}
+
+// B3.7: identity documents. Images live ONLY here, AES-GCM encrypted —
+// never in the ledger or TurnDebug (T14.D5). (Renamed from DocumentKind at
+// C3.6 — that name belongs to D2's registry of generated/disclosure docs.)
+enum CustomerDocumentKind {
+  id_card
+}
+
+enum DocumentStatus {
+  uploaded
+  extracted
+  validated
+  review
+  rejected
+}
+
+model CustomerDocument {
+  id                 String         @id @default(cuid())
+  customerId         String
+  kind               CustomerDocumentKind
+  status             DocumentStatus @default(uploaded)
+  encryptedData      Bytes
+  dataIv             String
+  dataTag            String
+  language           String?
+  extractedFields    Json?
+  validationFindings Json?
+  verifiedFields     String[]
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([customerId, status])
+}
+
+enum ConsentKind {
+  gdpr_processing
+  ai_disclosure
+  marketing
+}
+
+enum ConsentAction {
+  granted
+  withdrawn
+}
+
+// B2: the product-type vocabulary is PINNED to the catalog reality — new
+// members join when real products do.
+enum ProductType {
+  LIFE
+}
+
+enum DntStatus {
+  ACTIVE
+  EXPIRED
+  SUPERSEDED
+  WITHDRAWN
+}
+
+enum DntSessionType {
+  NEW
+  UPDATE
+}
+
+enum DntSessionStatus {
+  ACTIVE
+  FINISHED
+  SIGNED
+  CANCELLED
+}
+
+// B2: the customer-scoped DNT aggregate. Consent evidence lives in
+// ConsentEvent (#2), NOT duplicated here.
+model Dnt {
+  id                  String        @id @default(cuid())
+  customerId          String
+  signedAt            DateTime
+  validUntil          DateTime
+  productTypesCovered ProductType[]
+  status              DntStatus     @default(ACTIVE)
+  sourceSessionId     String        @unique
+  supersededById      String?
+  createdAt           DateTime      @default(now())
+
+  customer      Customer   @relation(fields: [customerId], references: [id])
+  sourceSession DntSession @relation(fields: [sourceSessionId], references: [id])
+
+  @@index([customerId, status])
+}
+
+// Working questionnaire session. At most ONE ACTIVE session per customer —
+// enforced by a partial unique index applied in the seed bootstrap
+// (CREATE UNIQUE INDEX ... WHERE status = 'ACTIVE'; Prisma cannot express it).
+model DntSession {
+  id                   String           @id @default(cuid())
+  customerId           String
+  productId            String
+  type                 DntSessionType
+  status               DntSessionStatus @default(ACTIVE)
+  baseDntId            String?
+  originConversationId String?
+  startedAt            DateTime         @default(now())
+  finishedAt           DateTime?
+
+  customer Customer    @relation(fields: [customerId], references: [id])
+  product  Product     @relation(fields: [productId], references: [id])
+  answers  DntAnswer[]
+  dnt      Dnt?
+
+  @@index([customerId, status])
+}
+
+model DntAnswer {
+  id         String   @id @default(cuid())
+  sessionId  String
+  questionId String
+  value      String
+  answeredAt DateTime @default(now())
+
+  session  DntSession @relation(fields: [sessionId], references: [id])
+  question Question   @relation(fields: [questionId], references: [id])
+
+  @@unique([sessionId, questionId])
+}
+
+// E2 (M5): the generic operator work queue. Operator decisions flow through
+// the commit gateway — free-form status edits never exist for this queue.
+model WorkItem {
+  id             String           @id @default(cuid())
+  kind           WorkItemKind
+  status         WorkItemStatus   @default(OPEN)
+  priority       WorkItemPriority @default(MEDIUM)
+  reason         String           @db.Text
+  refs           Json
+  payload        Json?
+  createdBy      String
+  resolution     String?          @db.Text
+  resolutionCode String?
+  resolvedBy     String?
+  resolvedAt     DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([status, kind, priority])
+}
+
+// B1: append-only consent ledger — the consent SSOT. No update path; the
+// current state is DERIVED (latest event per kind wins).
+model ConsentEvent {
+  id             String        @id @default(cuid())
+  customerId     String
+  kind           ConsentKind
+  action         ConsentAction
+  scope          String?
+  sourceCommitId String?
+  createdAt      DateTime      @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([customerId, kind, createdAt])
+}
+
+enum FieldProvenance {
+  declared
+  verified
+  conflict
+}
+
+// B0: per-field provenance store — the SSOT for profile facts (M1).
+// cnp values are stored as the AES-GCM JSON envelope, never plaintext.
+model CustomerProfileField {
+  id             String          @id @default(cuid())
+  customerId     String
+  field          String
+  value          String
+  provenance     FieldProvenance
+  source         String
+  evidenceRef    String?
+  conflictValue  String?
+  conflictSource String?
+  recordedAt     DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@unique([customerId, field])
 }
 
 model Conversation {
@@ -302,20 +671,18 @@ model Conversation {
   customerId          String
   productId           String?
   candidateProductId  String?
-  candidateConfidence Int?
+  candidateAddonIds   String[]  @default([]) // B4.ADD-1: soft addon interest, replaces the confidence pseudo-metric
   candidateSetAt      DateTime?
-  dntSignedAt         DateTime?
-  dntValidUntil       DateTime?
+  activeApplicationId String? // T5.D4 channel pointer to the customer-scoped application (B4.1)
   status              ConversationStatus @default(ACTIVE)
   channel             String             @default("web")
   language            String             @default("ro")
   messageCount        Int                @default(0)
   startedAt           DateTime           @default(now())
-  completedAt         DateTime?
+  archivedAt          DateTime?
   lastActivityAt      DateTime           @default(now())
   metadata            Json?
   mode                String             @default("SALES")
-  activeSkillPacks    String[]           @default([])
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 
@@ -323,10 +690,7 @@ model Conversation {
   product          Product?             @relation("ConversationProduct", fields: [productId], references: [id])
   candidateProduct Product?             @relation("ConversationCandidateProduct", fields: [candidateProductId], references: [id])
   messages         Message[]
-  workflowSession  WorkflowSession?
   summary          ConversationSummary?
-  answers          Answer[]
-  application      Application?
   turnTraces       TurnTrace[]
   turnDebugs       TurnDebug[]
   score            ConversationScore?
@@ -361,74 +725,8 @@ model ConversationSummary {
 }
 
 // ==========================================
-// DOMAIN: WORKFLOW AND QUESTIONNAIRE
+// DOMAIN: QUESTIONNAIRE
 // ==========================================
-
-model Workflow {
-  id          String   @id @default(cuid())
-  code        String   @unique
-  name        String
-  description String?
-  isActive    Boolean  @default(true)
-  version     Int      @default(1)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  steps    WorkflowStep[]
-  sessions WorkflowSession[]
-}
-
-model WorkflowStep {
-  id                String   @id @default(cuid())
-  workflowId        String
-  code              String
-  name              String
-  type              String
-  orderIndex        Int
-  autoTool          String?
-  allowedTools      String[]
-  agentInstructions String?  @db.Text
-  salesPlaybook     String?  @db.Text
-  uiAction          String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  workflow         Workflow          @relation(fields: [workflowId], references: [id])
-  transitionsFrom  StepTransition[]  @relation("fromStep")
-  transitionsTo    StepTransition[]  @relation("toStep")
-  workflowSessions WorkflowSession[]
-
-  @@unique([workflowId, code])
-}
-
-model StepTransition {
-  id             String   @id @default(cuid())
-  fromStepId     String
-  toStepId       String
-  conditionType  String
-  conditionValue String
-  label          String?
-  priority       Int      @default(0)
-  createdAt      DateTime @default(now())
-
-  fromStep WorkflowStep @relation("fromStep", fields: [fromStepId], references: [id])
-  toStep   WorkflowStep @relation("toStep", fields: [toStepId], references: [id])
-}
-
-model WorkflowSession {
-  id             String                @id @default(cuid())
-  workflowId     String
-  currentStepId  String
-  conversationId String                @unique
-  status         WorkflowSessionStatus @default(ACTIVE)
-  data           Json?
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
-
-  workflow     Workflow     @relation(fields: [workflowId], references: [id])
-  currentStep  WorkflowStep @relation(fields: [currentStepId], references: [id])
-  conversation Conversation @relation(fields: [conversationId], references: [id])
-}
 
 model QuestionGroup {
   id          String   @id @default(cuid())
@@ -445,6 +743,9 @@ model QuestionGroup {
   questions Question[]
 }
 
+// C1.8: question gating lives in QuestionDependency (the ONE dependency
+// store, T6.D1) — the legacy parent-question/show-when columns and the
+// questionBranching relation were retired with it.
 model Question {
   id               String   @id @default(cuid())
   groupId          String
@@ -455,41 +756,66 @@ model Question {
   options          Json?
   validationRules  Json?
   insightKey       String?
-  parentQuestionId String?
-  showWhenValue    String?
+  sensitivity      QuestionSensitivity @default(NONE) // T6.D3 (C1.2)
   orderIndex       Int
   isRequired       Boolean  @default(true)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
   group          QuestionGroup @relation(fields: [groupId], references: [id])
-  parentQuestion Question?     @relation("questionBranching", fields: [parentQuestionId], references: [id])
-  childQuestions Question[]    @relation("questionBranching")
   answers        Answer[]
+  dntAnswers     DntAnswer[]
 
   @@index([groupId, orderIndex])
 }
 
+// C1.4: answers are append-only revisions — writes supersede, cascades
+// invalidate with causality, nothing is destroyed. "At most one ACTIVE row
+// per (questionId, applicationId)" is a raw-SQL partial unique index
+// ("answer_active_unique") in the seed bootstrap; Prisma cannot express it.
 model Answer {
-  id             String   @id @default(cuid())
-  questionId     String
-  conversationId String
-  value          String
-  answeredAt     DateTime @default(now())
+  id                String               @id @default(cuid())
+  questionId        String
+  applicationId     String
+  value             String
+  source            AnswerSource         @default(USER_ANSWER)
+  status            AnswerRevisionStatus @default(ACTIVE)
+  invalidatedReason String?
+  causedByKey       String?
+  commitId          String?
+  answeredAt        DateTime             @default(now())
 
-  question     Question     @relation(fields: [questionId], references: [id])
-  conversation Conversation @relation(fields: [conversationId], references: [id])
+  question    Question    @relation(fields: [questionId], references: [id])
+  application Application @relation(fields: [applicationId], references: [id])
 
-  @@unique([questionId, conversationId])
+  @@index([questionId, applicationId, status])
+}
+
+enum AnswerSource {
+  USER_ANSWER
+  PREFILL
+  SELECTION_MIRROR
+  SYSTEM
+}
+
+enum AnswerRevisionStatus {
+  ACTIVE
+  SUPERSEDED
+  INVALIDATED
 }
 
 // ==========================================
 // DOMAIN: QUOTE AND POLICY
 // ==========================================
 
+// B4.1: applications are CUSTOMER-scoped (at most one open per customer ×
+// product — raw-SQL partial unique index in the seed bootstrap, Prisma
+// cannot express it). Conversations point at an application via
+// Conversation.activeApplicationId (T5.D4); originConversationId is audit
+// only. Answers key on the application, not the conversation.
 model Application {
   id                   String            @id @default(cuid())
-  conversationId       String            @unique
+  originConversationId String?
   customerId           String
   productId            String
   tierId               String?
@@ -499,16 +825,79 @@ model Application {
   currentQuestionIndex Int               @default(0)
   totalQuestions        Int               @default(0)
   flagsForReview       Json?
+  // D1 (T7.D1/T7.D4): set in the SAME transaction as Quote creation; the
+  // generate_quote decision audit {outcome, reason, decidedAt}.
+  frozenAt             DateTime?
+  quoteDecision        Json?
   completedAt          DateTime?
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
 
-  conversation Conversation  @relation(fields: [conversationId], references: [id])
   customer     Customer      @relation(fields: [customerId], references: [id])
   product      Product       @relation(fields: [productId], references: [id])
   tier         PricingTier?  @relation(fields: [tierId], references: [id])
   level        PricingLevel? @relation(fields: [levelId], references: [id])
   quote        Quote?
+  answers      Answer[]
+  suitabilityWarningAcks SuitabilityWarningAck[]
+
+  @@index([customerId, status])
+}
+
+// T6.D3 deviation (2026-07-06): the customer's ONE batch affirmation of the
+// sensitive (CONFIRM_ALWAYS) medical answers — sign_dnt precedent. Currency
+// is recomputed, never cleared: answersHash is the stable hash of the active
+// sensitive (questionCode, revisionId) pairs at sign time; a later answer
+// revision changes the recomputed hash and the questionnaire counts as
+// unsigned again. Append-only history (latest row by signedAt decides).
+model MedicalDeclarationSignature {
+  id             String   @id @default(cuid())
+  applicationId  String
+  customerId     String
+  answersHash    String
+  actor          String
+  sourceCommitId String?
+  signedAt       DateTime @default(now())
+
+  @@index([applicationId, signedAt])
+}
+
+// C3.4 (M7): the documented-warning audit row — the customer's explicit
+// acknowledgement of a suitability mismatch, bound to the ruleset version
+// it was shown for (a stale ack never satisfies the gate) and the ledger
+// row that carried the commit.
+model Document {
+  id          String         @id @default(cuid())
+  kind        DocumentKind
+  version     Int
+  language    String
+  storageKey  String
+  contentHash String
+  source      DocumentSource
+  productId   String?
+  customerId  String?
+  quoteId     String?
+  policyId    String?
+  generatedAt DateTime       @default(now())
+
+  @@index([productId, kind, language])
+  @@index([quoteId])
+}
+
+model SuitabilityWarningAck {
+  id             String   @id @default(cuid())
+  customerId     String
+  applicationId  String
+  productCode    String
+  ruleSetVersion Int
+  mismatches     Json
+  acknowledgedAt DateTime @default(now())
+  sourceCommitId String
+
+  customer    Customer    @relation(fields: [customerId], references: [id])
+  application Application @relation(fields: [applicationId], references: [id])
+
+  @@unique([customerId, applicationId, ruleSetVersion])
 }
 
 model Quote {
@@ -524,15 +913,19 @@ model Quote {
   currency          String      @default("RON")
   coverages      Json
   addonsSelected Json?
-  status         QuoteStatus @default(DRAFT)
+  status         QuoteStatus @default(ISSUED)
+  // D2 (T7.D6): immutable acceptance evidence — paymentFrequency is written
+  // ONLY by accept_quote, never re-read for money math (the schedule owns it)
+  acceptedAt     DateTime?
   validUntil     DateTime
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
-  application Application @relation(fields: [applicationId], references: [id])
-  product     Product     @relation(fields: [productId], references: [id])
-  customer    Customer    @relation(fields: [customerId], references: [id])
-  policy      Policy?
+  application      Application       @relation(fields: [applicationId], references: [id])
+  product          Product           @relation(fields: [productId], references: [id])
+  customer         Customer          @relation(fields: [customerId], references: [id])
+  policy           Policy?
+  paymentSchedules PaymentSchedule[]
 }
 
 model Policy {
@@ -549,25 +942,63 @@ model Policy {
   paymentFrequency    String?
   currency            String       @default("RON")
   coverageSummary         Json
-  suitabilityReportPath  String?
-  issuedAt               DateTime?
+  issuedAt               DateTime? // single-meaning: FIRST CAPTURE, written only by settlement (D2.6)
+  activatedAt            DateTime?
+  freeLookEndsAt         DateTime? // frozen per-policy snapshot at activation (T9.D2)
   createdAt              DateTime     @default(now())
   updatedAt              DateTime     @updatedAt
 
   quote    Quote     @relation(fields: [quoteId], references: [id])
   customer Customer  @relation(fields: [customerId], references: [id])
   product  Product   @relation(fields: [productId], references: [id])
+}
+
+// D2 (contradiction #3): the schedule is the live money truth from
+// acceptance onward. Integer minor units with an explicit remainder rule
+// (D2.4); a Payment is anchored to the INSTALLMENT it settles, never to the
+// Policy (which does not exist until first capture — contradiction #5).
+model PaymentSchedule {
+  id                String                @id @default(cuid())
+  quoteId           String
+  customerId        String
+  frequency         String
+  status            PaymentScheduleStatus @default(PENDING_FIRST_CAPTURE)
+  totalInstallments Int
+  currency          String                @default("RON")
+  supersededById    String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  quote        Quote         @relation(fields: [quoteId], references: [id])
+  customer     Customer      @relation(fields: [customerId], references: [id])
+  installments Installment[]
+
+  @@index([quoteId, status])
+}
+
+model Installment {
+  id          String            @id @default(cuid())
+  scheduleId  String
+  sequence    Int
+  dueAt       DateTime
+  amountMinor Int
+  status      InstallmentStatus @default(PENDING)
+  paidAt      DateTime?
+
+  schedule PaymentSchedule @relation(fields: [scheduleId], references: [id])
   payments Payment[]
+
+  @@unique([scheduleId, sequence])
 }
 
 model Payment {
   id                String        @id @default(cuid())
-  policyId          String
+  installmentId     String
   customerId        String
-  amount            Float
+  amountMinor       Int
   currency          String        @default("RON")
   provider          PaymentProvider
-  providerPaymentId String?
+  providerPaymentId String?       @unique
   status            PaymentStatus @default(PENDING)
   paidAt            DateTime?
   failureReason     String?
@@ -575,10 +1006,65 @@ model Payment {
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
-  policy   Policy   @relation(fields: [policyId], references: [id])
-  customer Customer @relation(fields: [customerId], references: [id])
+  installment Installment @relation(fields: [installmentId], references: [id])
+  customer    Customer    @relation(fields: [customerId], references: [id])
+}
 
-  @@index([providerPaymentId])
+// D2 (T8.D3): the transactional settlement inbox — provider events are
+// deduplicated on (provider, providerEventId); processing is exactly-once.
+model PaymentEvent {
+  id                String          @id @default(cuid())
+  provider          PaymentProvider
+  providerEventId   String
+  providerPaymentId String?
+  kind              String
+  payload           Json
+  processedAt       DateTime        @default(now())
+
+  @@unique([provider, providerEventId])
+}
+
+// D2 (T7.D2): disclosure acknowledgements bound to the exact document
+// identity (kind, version, language) per quote — scalar FKs by design.
+model DisclosureAck {
+  id             String       @id @default(cuid())
+  quoteId        String
+  customerId     String
+  documentId     String
+  kind           DocumentKind
+  version        Int
+  language       String
+  actor          String
+  sourceCommitId String?
+  acknowledgedAt DateTime     @default(now())
+
+  @@unique([quoteId, kind, version, language])
+}
+
+// ==========================================
+// DOMAIN: COMMIT LEDGER (A2)
+// ==========================================
+
+model CommitLedger {
+  id                     String   @id @default(cuid())
+  conversationId         String
+  customerId             String
+  actor                  String
+  tool                   String
+  targetRef              String?
+  argsHash               String
+  outcome                String
+  effects                String[]
+  reasonCode             String?
+  phaseFrom              String?
+  phaseTo                String?
+  idempotencyDisposition String   @default("fresh")
+  contentVersions        Json?
+  envelope               Json
+  createdAt              DateTime @default(now())
+
+  @@index([conversationId, tool, argsHash])
+  @@index([customerId, createdAt])
 }
 
 // ==========================================
@@ -598,27 +1084,13 @@ model Agent {
   maxTokens        Int         @default(4096)
   systemPrompt     String?     @db.Text
   constraints      String?     @db.Text
+  // E1: phase-/turn-scoped prompt sections keyed by SECTION_REGISTRY key
+  // (firstTurnRules, discoveryConduct). One Json column instead of one
+  // migration per section; systemPrompt stays the always-on constitution.
+  promptSections   Json?
   isActive         Boolean     @default(true)
-  skillPacks       SkillPack[]
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
-}
-
-model SkillPack {
-  id             String   @id @default(cuid())
-  slug           String   @unique
-  name           String
-  category       String   // PRODUCT, WORKFLOW_PHASE, POST_SALE
-  description    String
-  promptSections Json     // { sectionKey: content }
-  allowedTools   String[]
-  constraints    String?  @db.Text
-  flags          Json?    // { persuasive: boolean, ... }
-  isActive       Boolean  @default(true)
-  priority       Int      @default(0)
-  agents         Agent[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
 }
 
 model ModelCatalog {
@@ -647,6 +1119,10 @@ model TurnTrace {
   anomalies      Json?
   inputTokens    Int?
   outputTokens   Int?
+  // A1 cache telemetry: prompt tokens served from / written to the provider
+  // prompt cache, summed across the turn's LLM rounds. Null on pre-A1 rows.
+  cacheReadTokens  Int?
+  cacheWriteTokens Int?
   cost           Float?
   latencyMs      Int?
   provider       String?
@@ -761,8 +1237,19 @@ model ConversationScore {
   totalCost            Float
   totalLatencyMs       Int
   anomalyCount         Int
+  // Task 5.5 (D12): quality signals — re-asks, unexplained tool errors,
+  // rejected insight emissions, and whether channel verification completed.
+  reaskedKnownFactCount     Int     @default(0)
+  unexplainedToolErrorCount Int     @default(0)
+  insightRejectedCount      Int     @default(0)
+  verificationCompleted     Boolean @default(false)
   mode                 String
   skillPackSlugs       String[]
+  // A1 cache aggregates from TurnTrace rows; null when the conversation
+  // predates the telemetry (no trace carries token counts).
+  totalPromptTokens    Int?
+  totalCachedTokens    Int?
+  avgCacheHitRate      Float?
   scoredAt             DateTime @default(now())
   createdAt            DateTime @default(now())
 

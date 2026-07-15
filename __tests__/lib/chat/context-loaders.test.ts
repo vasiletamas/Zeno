@@ -7,6 +7,9 @@ vi.mock('@/lib/db', () => ({
     customerInsight: { findMany: vi.fn() },
     agentKnowledge: { findMany: vi.fn() },
     product: { findUnique: (...a: unknown[]) => findUniqueSpy(...a) },
+    // E1.8: loadProductContext reads published content — none in these unit specs
+    productContent: { findMany: async () => [] },
+    coverageAmount: { findMany: async () => [] },
   },
 }))
 
@@ -94,21 +97,21 @@ describe('loadAgentKnowledge', () => {
 describe('loadProductContext', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
-  it('renders the product premium RANGE and omits per-level premium numbers', async () => {
+  it('E1.8: renders ONE derived example span (base-only labeled) and omits off-grid per-level numbers', async () => {
     findUniqueSpy.mockResolvedValueOnce({
       id: 'prod-1', code: 'protect', name: { en: 'Protect', ro: 'Protect' }, description: { en: 'x', ro: 'x' },
-      insuranceType: 'LIFE', subType: 'TERM', features: [],
-      premiumRange: { min: 290, max: 640, currency: 'RON', frequency: 'annual' },
-      pricingTiers: [{ name: { en: 'Basic', ro: 'Bază' }, isActive: true, orderIndex: 0, levels: [
-        { name: { en: 'Level 1', ro: 'Nivel 1' }, premiumAnnual: 290, currency: 'RON', isActive: true },
-        { name: { en: 'Level 2', ro: 'Nivel 2' }, premiumAnnual: 350, currency: 'RON', isActive: true },
+      insuranceType: 'LIFE', subType: 'TERM', quoteValidityDays: 30,
+      pricingExampleGrid: { parameter: 'age', samplePoints: [30], tiers: ['basic'], levels: ['level_1'], includeAddonDelta: false },
+      pricingTiers: [{ code: 'basic', name: { en: 'Basic', ro: 'Bază' }, isActive: true, orderIndex: 0, levels: [
+        { code: 'level_1', name: { en: 'Level 1', ro: 'Nivel 1' }, premiumAnnual: 290, currency: 'RON', isActive: true },
+        { code: 'level_2', name: { en: 'Level 2', ro: 'Nivel 2' }, premiumAnnual: 350, currency: 'RON', isActive: true },
       ] }], addons: [],
     })
     const result = await loadProductContext('prod-1', 'en')
     expect(result).not.toBeNull()
     expect(result).toContain('Pricing:')
-    expect(result).toContain('Premium range: 290-640 RON/annual') // the range renders from {min,max,currency,frequency}
-    expect(result).not.toContain('350') // a per-level-only price must NOT leak
-    expect(result).not.toMatch(/\d+\s*RON\/year/) // old per-level format must be gone
+    expect(result).toContain('Example premiums (BASE product only): 290-290 RON/year') // derived, labeled base-only
+    expect(result).not.toContain('350') // an off-grid per-level price must NOT leak
+    expect(result).not.toContain('Premium range') // the authored range surface is gone
   })
 })

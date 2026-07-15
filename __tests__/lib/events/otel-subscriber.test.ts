@@ -92,8 +92,6 @@ describe('OtelSubscriber', () => {
     bus.emit({ type: 'mode:transition', traceId: 't5', from: 'SALES', to: 'SUPPORT', conversationId: 'conv-1' })
     expect(mockAddEvent).toHaveBeenCalledWith('mode.transition', expect.objectContaining({ from: 'SALES', to: 'SUPPORT' }))
 
-    bus.emit({ type: 'skillpack:activated', traceId: 't5', slugs: ['post-sale-support'], conversationId: 'conv-1' })
-    expect(mockAddEvent).toHaveBeenCalledWith('skillpack.activated', expect.objectContaining({ slugs: 'post-sale-support' }))
 
     bus.emit({ type: 'compliance:result', traceId: 't5', passed: true, gaps: [], conversationId: 'conv-1' })
     expect(mockAddEvent).toHaveBeenCalledWith('compliance.result', expect.objectContaining({ passed: true }))

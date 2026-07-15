@@ -7,9 +7,8 @@
  * Three layers:
  * - CONSTITUTION: loadAgentIdentity, loadCapabilityManifest, loadConstraints
  * - REASONING:    situationalBriefing (passed through from gate output)
- * - DYNAMIC:      loadProductContext, loadCoachingBriefing, loadWorkflowInstructions,
- *                 loadQuestionnaireContext, loadCustomerContext, loadCustomerMemory,
- *                 loadAgentKnowledge
+ * - DYNAMIC:      loadProductContext, loadCoachingBriefing, loadQuestionnaireContext,
+ *                 loadCustomerContext, loadCustomerMemory, loadAgentKnowledge
  */
 
 import { prisma } from '@/lib/db'
@@ -17,30 +16,35 @@ import { getToolDefinition } from '@/lib/tools/registry'
 import { estimateTokens } from '@/lib/chat/token-budget'
 import { LRUCache } from '@/lib/cache/lru-cache'
 import { findContextHit, type ContextHit } from '@/lib/insights/context-hits'
+import { resolveGroupCodes } from '@/lib/engines/question-groups'
+import { getNextQuestion, calculateProgress } from '@/lib/engines/questionnaire-engine'
 import { logInfo } from '@/lib/errors/logger'
 import { calculateAge } from './age'
+import { workflowStepCodeFor } from './phase-sections-map'
+import { getPublishedProductContent, collectPublishedContentIds, registerPublishFlushHook } from '@/lib/products/product-content'
+import { derivePricingExamples, type PricingExampleGrid } from '@/lib/engines/pricing-examples'
 import type { PromptSections } from './prompt-builder'
+import type { DerivedStateV3 } from '@/lib/engines/domain-types'
 
 // ==============================================
 // CACHES
 // ==============================================
 
-const productContextCache = new LRUCache<string, string | null>(5, 10 * 60 * 1000) // 10 min
+const productContextCache = new LRUCache<string, { text: string | null; contentVersions: string[] }>(5, 10 * 60 * 1000) // 10 min
 const coachingBriefingCache = new LRUCache<string, string | null>(5, 10 * 60 * 1000)
 const catalogOverviewCache = new LRUCache<string, string>(2, 10 * 60 * 1000) // keyed by language
+
+// E1.3/E1.8 (erratum 6): a ProductContent publish flushes EVERY prompt-side
+// cache — a compliance retraction must never serve retired claims until TTL.
+registerPublishFlushHook(() => {
+  productContextCache.clear()
+  coachingBriefingCache.clear()
+  catalogOverviewCache.clear()
+})
 
 // ==============================================
 // TYPES
 // ==============================================
-
-/** Shape of workflow session data passed in from orchestrator */
-export interface WorkflowSessionData {
-  currentStepCode: string
-  currentStepName: string
-  agentInstructions: string | null
-  allowedTools: string[]
-  data: unknown
-}
 
 /** Shape for Json fields with en/ro keys */
 interface LocalizedText {
@@ -111,10 +115,6 @@ export function loadConstraints(
  * Input shape for loadStateGrounding. Comes from already-loaded turn context.
  */
 export interface StateGroundingInput {
-  workflowSession: {
-    currentStep: { code: string; name: string }
-    status: string
-  } | null
   application: {
     id: string
     status: string
@@ -153,13 +153,6 @@ function formatStateDate(d: Date): string {
 export function loadStateGrounding(input: StateGroundingInput): string {
   const lines: string[] = []
   lines.push('=== CURRENT SYSTEM STATE (ground truth — do not contradict) ===')
-
-  if (input.workflowSession) {
-    const s = input.workflowSession
-    lines.push(`✓ Active workflow: ${s.currentStep.code} (${s.currentStep.name})`)
-  } else {
-    lines.push('✗ No workflow is active')
-  }
 
   if (input.application) {
     const a = input.application
@@ -203,8 +196,26 @@ export function loadStateGrounding(input: StateGroundingInput): string {
 // ==============================================
 
 /**
+ * E1.8 (erratum 8, M8 pin 1): the ProductContent version ids injected into
+ * the most recent productContext load — the turn-debug writer stamps them
+ * so prompt-injected claims are as traceable as tool-returned ones.
+ * HAND-OFF: the TurnDebug reducer consumes this when M8's stamping lands
+ * (observability block F2).
+ */
+let lastInjectedProductContentVersions: string[] = []
+export function getLastInjectedProductContentVersions(): string[] {
+  return lastInjectedProductContentVersions
+}
+
+/**
  * Load product context section.
  * Fetches product with pricing tiers, levels, and addons.
+ *
+ * E1.8 (T11.D5): claims come from PUBLISHED ProductContent key points (the
+ * retired EN-only features column is gone) and the pricing anchor is ONE
+ * derived example span — min/max base premium labeled base-only vs
+ * base+addon (closing the anchoring gap where the base range read as the
+ * full price), every number out of the same calculateQuote arithmetic.
  */
 export async function loadProductContext(
   productId: string,
@@ -212,7 +223,10 @@ export async function loadProductContext(
 ): Promise<string | null> {
   const cacheKey = `${productId}:${language}`
   const cached = productContextCache.get(cacheKey)
-  if (cached !== undefined) return cached
+  if (cached !== undefined) {
+    lastInjectedProductContentVersions = cached.contentVersions
+    return cached.text
+  }
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
@@ -238,43 +252,63 @@ export async function loadProductContext(
   })
 
   if (!product) {
-    productContextCache.set(cacheKey, null)
+    productContextCache.set(cacheKey, { text: null, contentVersions: [] })
+    lastInjectedProductContentVersions = []
     return null
   }
 
   const name = (product.name as unknown as LocalizedText)[language]
   const description = (product.description as unknown as LocalizedText)[language]
 
+  const published = await getPublishedProductContent(product.id)
+  const contentVersions = collectPublishedContentIds(published)
+
   const parts: string[] = []
   parts.push(`Product: ${name}`)
   parts.push(`Type: ${product.insuranceType} / ${product.subType}`)
   parts.push(`Description: ${description}`)
 
-  // Key features
-  if (product.features.length > 0) {
+  // Key points — published authored claims only (T11.D2)
+  const points = published.fields.KEY_VALUE_PRODUCT_POINTS
+  const localizedPoints = points ? ((language === 'ro' ? points.ro : points.en) as string[] | null) : null
+  if (localizedPoints && localizedPoints.length > 0) {
     parts.push('')
-    parts.push('Key Features:')
-    for (const feature of product.features) {
-      parts.push(`- ${feature}`)
+    parts.push('Key points (published content):')
+    for (const point of localizedPoints) {
+      parts.push(`- ${point}`)
     }
   }
 
-  // Pricing tiers and levels — show only the product-level premium RANGE, never per-level numbers.
+  // Pricing anchor — ONE derived example span, base-only vs base+addon
   if (product.pricingTiers.length > 0) {
     parts.push('')
     parts.push('Pricing:')
-    const pr = product.premiumRange as unknown
-    let range: string | undefined
-    if (typeof pr === 'string') {
-      range = pr
-    } else if (pr && typeof pr === 'object') {
-      const o = pr as Record<string, unknown>
-      if (typeof o[language] === 'string') range = o[language] as string
-      else if (typeof o.en === 'string' || typeof o.ro === 'string') range = (o[language] ?? o.en ?? o.ro) as string
-      else if (typeof o.min === 'number' && typeof o.max === 'number') range = `${o.min}-${o.max} ${o.currency ?? 'RON'}/${o.frequency ?? 'year'}`
+    const grid = product.pricingExampleGrid as unknown as PricingExampleGrid | null
+    const examples = grid
+      ? derivePricingExamples(
+          {
+            quoteValidityDays: product.quoteValidityDays,
+            tiers: product.pricingTiers.map((t) => ({
+              code: t.code,
+              name: t.name as { en: string; ro: string },
+              levels: t.levels.map((l) => ({ code: l.code, name: l.name as { en: string; ro: string }, premiumAnnual: l.premiumAnnual })),
+            })),
+            addonRules: (product.addons[0]?.pricingRules ?? []).map((r) => ({ minAge: r.minAge, maxAge: r.maxAge, premiumAnnual: r.premiumAnnual })),
+          },
+          grid,
+        )
+      : []
+    if (examples.length > 0) {
+      const bases = examples.map((e) => e.base.premiumAnnual)
+      const withAddon = examples
+        .map((e) => e.withAddon)
+        .filter((w): w is { premiumAnnual: number; premiumMonthly: number; addonDelta: number } => !!w && 'premiumAnnual' in w)
+        .map((w) => w.premiumAnnual)
+      const addonSpan = withAddon.length > 0 ? `; with the ${product.addons[0]?.code ?? 'addon'} addon the same examples run ${Math.min(...withAddon)}-${Math.max(...withAddon)} RON/year` : ''
+      parts.push(`Example premiums (BASE product only): ${Math.min(...bases)}-${Math.max(...bases)} RON/year across the sampled ages/packages${addonSpan}. Full per-age grid: get_product_info pricing_examples. Customer-specific price: generate_quote only.`)
+    } else {
+      parts.push('Exact pricing is available only via generate_quote, after the application is complete.')
     }
-    if (range) parts.push(`Premium range: ${range}`)
-    else parts.push('Exact pricing is available only via generate_quote, after the application is complete.')
   }
 
   // Addons
@@ -295,7 +329,8 @@ export async function loadProductContext(
   }
 
   const result = parts.join('\n')
-  productContextCache.set(cacheKey, result)
+  productContextCache.set(cacheKey, { text: result, contentVersions })
+  lastInjectedProductContentVersions = contentVersions
   return result
 }
 
@@ -376,38 +411,25 @@ export function flushCatalogOverviewCache(): void {
 }
 
 /**
- * Load coaching briefing section.
- *
- * Prefers WorkflowStep.salesPlaybook when a workflow step is active
- * (subsystem B). Falls back to Product.defaultPlaybook when no workflow
- * is active OR when the active step has no playbook. Returns null when
- * neither source provides content — including the case where productId
- * is null and workflowStepCode is null.
- *
- * Cache key includes both inputs because the same product can be hit
- * with different workflow steps in the same conversation.
+ * E1.3 (erratum 6): publish must invalidate ALL product-content caches —
+ * publishProductContent calls this so a compliance retraction never keeps
+ * serving retired claims from the prompt-side cache until TTL expiry.
+ */
+export function flushProductContextCache(): void {
+  productContextCache.clear()
+}
+
+/**
+ * Load coaching briefing section from Product.defaultPlaybook (the
+ * per-step playbook source died with the machine, A5.3).
  */
 export async function loadCoachingBriefing(
   productId: string | null,
-  workflowStepCode: string | null,
 ): Promise<string | null> {
-  const cacheKey = `${productId ?? 'null'}:${workflowStepCode ?? 'null'}`
+  const cacheKey = productId ?? 'null'
   const cached = coachingBriefingCache.get(cacheKey)
   if (cached !== undefined) return cached
 
-  // Prefer WorkflowStep.salesPlaybook
-  if (workflowStepCode) {
-    const step = await prisma.workflowStep.findFirst({
-      where: { code: workflowStepCode },
-      select: { salesPlaybook: true },
-    })
-    if (step?.salesPlaybook) {
-      coachingBriefingCache.set(cacheKey, step.salesPlaybook)
-      return step.salesPlaybook
-    }
-  }
-
-  // Fallback: Product.defaultPlaybook
   if (productId) {
     const product = await prisma.product.findUnique({
       where: { id: productId },
@@ -430,104 +452,77 @@ export function flushCoachingBriefingCache(): void {
 }
 
 /**
- * Load workflow instructions section.
- * Formats current step, agent instructions, and available tools.
+ * Task 1.2 (D2): the questionnaire surface keyed on the ENGINE's derived
+ * (phase, subphase) — the orchestrator patches this after the gate, same
+ * pattern as dntContext. The DNT stage's surface is dntContext's job; this
+ * wrapper only wakes the APPLICATION questionnaire surface.
  */
-export function loadWorkflowInstructions(
-  workflowSession: WorkflowSessionData | null,
-): string | null {
-  if (!workflowSession) return null
-
-  const parts: string[] = []
-  parts.push(
-    `Workflow step: ${workflowSession.currentStepName} (${workflowSession.currentStepCode})`,
-  )
-
-  if (workflowSession.agentInstructions) {
-    parts.push('')
-    parts.push('YOUR INSTRUCTIONS FOR THIS STEP:')
-    parts.push(workflowSession.agentInstructions)
-  }
-
-  if (workflowSession.allowedTools.length > 0) {
-    parts.push('')
-    parts.push('TOOLS YOU CAN USE NOW:')
-    for (const tool of workflowSession.allowedTools) {
-      parts.push(`- ${tool}`)
-    }
-  }
-
-  // Include collected data if available
-  if (workflowSession.data) {
-    const data = workflowSession.data as unknown as Record<string, unknown>
-    const entries = Object.entries(data).filter(
-      ([, v]) => v != null && v !== '',
-    )
-    if (entries.length > 0) {
-      parts.push('')
-      parts.push('DATA COLLECTED SO FAR:')
-      for (const [key, value] of entries) {
-        parts.push(`- ${key}: ${String(value)}`)
-      }
-    }
-  }
-
-  return parts.join('\n')
+export async function loadQuestionnaireContextForState(
+  state: Pick<DerivedStateV3, 'phase' | 'subphase'>,
+  conversationId: string,
+  customerId: string,
+  language: 'en' | 'ro',
+): Promise<string | null> {
+  if (workflowStepCodeFor(state.phase, state.subphase) !== 'application_fill') return null
+  return loadQuestionnaireContext(conversationId, customerId, language)
 }
 
 /**
- * Load questionnaire context section.
- * Determines active questionnaire from workflowStepCode and finds current question.
+ * Load questionnaire context section (P0-7 rebuild, 2026-07-06).
+ *
+ * Previously keyed on a workflowStepCode that every caller passed as null
+ * ("dead input") — the APPLICATION/QUESTIONNAIRE stage had NO current-
+ * question surface (the same bug the DNT stage had before dntContext). Now
+ * derived entirely from the conversation's active application through the
+ * SAME engine path the tools use: canonical group codes (bd_medical rides
+ * only while the addon is selected, mirroring appGroupCodesFor), the
+ * engine's next visible unanswered question, and its progress counts —
+ * one visible-set computation, never a parallel one (C1.7).
  */
 export async function loadQuestionnaireContext(
   conversationId: string,
   customerId: string,
-  workflowStepCode: string | null,
   language: 'en' | 'ro',
 ): Promise<string | null> {
-  if (!workflowStepCode) return null
+  const conv = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { activeApplicationId: true, productId: true, candidateProductId: true },
+  })
+  if (!conv?.activeApplicationId) return null
+  const application = await prisma.application.findUnique({ where: { id: conv.activeApplicationId } })
+  // no surface for terminal or frozen applications — post-quote the
+  // questionnaire is engine-illegal to mutate (D1/T7.D1)
+  if (!application || application.status === 'CANCELLED' || application.frozenAt !== null) return null
 
-  const groupCodes = resolveQuestionGroupCodes(workflowStepCode)
+  const groupCodes = ((await resolveGroupCodes(application.productId, 'application')) ?? [])
+    .filter((c) => application.includesAddon || c !== 'bd_medical')
   if (groupCodes.length === 0) return null
 
-  const questionnaireType = resolveQuestionnaireType(workflowStepCode)
-
-  const questions = await prisma.question.findMany({
-    where: { group: { code: { in: groupCodes } } },
-    include: { group: true },
-    orderBy: [
-      { group: { orderIndex: 'asc' } },
-      { orderIndex: 'asc' },
-    ],
-  })
-
-  if (questions.length === 0) return null
-
-  const questionIds = questions.map((q) => q.id)
-  const answers = await prisma.answer.findMany({
-    where: { conversationId, questionId: { in: questionIds } },
-  })
-
-  const answeredIds = new Set(answers.map((a) => a.questionId))
-  const currentQuestion = questions.find((q) => !answeredIds.has(q.id))
-  const answeredCount = answeredIds.size
-  const totalCount = questions.length
+  const scope = { kind: 'application' as const, applicationId: application.id }
+  const next = await getNextQuestion(groupCodes, scope)
 
   const parts: string[] = []
-  parts.push(`[ACTIVE QUESTIONNAIRE - ${questionnaireType}]`)
-  parts.push(`Progress: ${answeredCount}/${totalCount}`)
+  parts.push('[ACTIVE QUESTIONNAIRE - APPLICATION]')
 
-  if (!currentQuestion) {
+  if (!next) {
+    const progress = await calculateProgress(groupCodes, scope)
+    if (progress.total === 0) return null
+    parts.push(`Progress: ${progress.answered}/${progress.total}`)
     parts.push('')
-    parts.push('All questions answered. Questionnaire complete.')
+    parts.push('All questions answered — the questionnaire is complete. If sensitive medical answers were collected, sign_medical_declarations (one card) comes next; otherwise generate_quote.')
     return parts.join('\n')
   }
 
+  parts.push(`Progress: ${next.progress.answered}/${next.progress.total}`)
+  const currentQuestion = next.question
   const questionText = (currentQuestion.text as unknown as LocalizedText)[language]
   parts.push('')
-  parts.push(`Current question (${currentQuestion.group.code}):`)
+  parts.push(`Current question (${currentQuestion.groupCode}${currentQuestion.code ? `, code ${currentQuestion.code}` : ''}):`)
   parts.push(questionText)
   parts.push(`Type: ${currentQuestion.type}`)
+  if (currentQuestion.code) {
+    parts.push(`Question code: ${currentQuestion.code} — pass this EXACT code to write_question_answer.`)
+  }
 
   if (currentQuestion.options) {
     const options = currentQuestion.options as unknown as Array<{
@@ -542,23 +537,24 @@ export async function loadQuestionnaireContext(
     }
   }
 
-  // Context hit lookup
+  // Context hit lookup — insightKey is not part of the engine's QuestionData
+  const meta = await prisma.question.findUnique({ where: { id: currentQuestion.id }, select: { insightKey: true } })
   const hit = await findContextHit(
     customerId,
     {
       id: currentQuestion.id,
-      insightKey: currentQuestion.insightKey,
+      insightKey: meta?.insightKey ?? null,
       options: currentQuestion.options,
-      group: { code: currentQuestion.group.code },
+      group: { code: currentQuestion.groupCode },
     },
     conversationId,
   )
 
   if (hit) {
     parts.push('')
-    parts.push(renderContextHitBlock(hit, currentQuestion.group.code))
+    parts.push(renderContextHitBlock(hit, currentQuestion.groupCode))
 
-    if (currentQuestion.group.code === 'bd_medical' && hit.category === 'RISK_FACTOR') {
+    if (currentQuestion.groupCode === 'bd_medical' && hit.category === 'RISK_FACTOR') {
       logInfo({
         layer: 'compliance',
         category: 'context_hit_medical',
@@ -605,45 +601,13 @@ function renderContextHitBlock(hit: ContextHit, groupCode: string): string {
   return lines.join('\n')
 }
 
-/**
- * Resolve question group codes from workflow step code.
- */
-function resolveQuestionGroupCodes(workflowStepCode: string): string[] {
-  if (workflowStepCode === 'dnt_questionnaire') {
-    return [
-      'dnt_consent',
-      'dnt_general',
-      'dnt_life_type',
-      'dnt_life_financial',
-      'dnt_life_investment',
-      'dnt_sustainability',
-    ]
-  }
-
-  if (workflowStepCode === 'application_fill') {
-    return ['application']
-  }
-
-  if (workflowStepCode.includes('bd')) {
-    return ['bd_medical']
-  }
-
-  return []
-}
-
-/**
- * Resolve questionnaire type label from workflow step code.
- */
-function resolveQuestionnaireType(workflowStepCode: string): string {
-  if (workflowStepCode === 'dnt_questionnaire') return 'DNT'
-  if (workflowStepCode === 'application_fill') return 'APPLICATION'
-  if (workflowStepCode.includes('bd')) return 'BD MEDICAL'
-  return 'UNKNOWN'
-}
+// resolveQuestionGroupCodes / resolveQuestionnaireType retired with the P0-7
+// rebuild — the questionnaire surface derives from the active application,
+// not a workflow step code.
 
 /**
  * Load customer context section.
- * Formats basic customer info and extracted profile data.
+ * Formats basic customer info (profile facts live in the B0 provenance store).
  */
 export async function loadCustomerContext(
   customerId: string,
@@ -671,49 +635,6 @@ export async function loadCustomerContext(
     parts.push('Status: Anonymous visitor')
   }
 
-  // Extracted profile (from profile-extractor agent)
-  if (customer.extractedProfile) {
-    const profile = customer.extractedProfile as unknown as Record<
-      string,
-      unknown
-    >
-
-    // Demographics
-    if (profile.occupation && typeof profile.occupation === 'string') {
-      parts.push(`Occupation: ${profile.occupation}`)
-    }
-    if (profile.incomeLevel && typeof profile.incomeLevel === 'string') {
-      parts.push(`Income level: ${profile.incomeLevel}`)
-    }
-    if (profile.education && typeof profile.education === 'string') {
-      parts.push(`Education: ${profile.education}`)
-    }
-
-    // Family
-    if (profile.familySize != null) {
-      parts.push(`Family size: ${String(profile.familySize)}`)
-    }
-    if (profile.hasSpouse != null) {
-      parts.push(`Has spouse: ${String(profile.hasSpouse)}`)
-    }
-    if (profile.hasChildren != null) {
-      parts.push(`Has children: ${String(profile.hasChildren)}`)
-    }
-    if (profile.minorChildren != null) {
-      parts.push(`Minor children: ${String(profile.minorChildren)}`)
-    }
-
-    // Motivations and interests
-    if (Array.isArray(profile.motivations) && profile.motivations.length > 0) {
-      parts.push(
-        `Motivations: ${(profile.motivations as string[]).join(', ')}`,
-      )
-    }
-    if (Array.isArray(profile.interests) && profile.interests.length > 0) {
-      parts.push(`Interests: ${(profile.interests as string[]).join(', ')}`)
-    }
-  }
-
   return parts.length > 0 ? parts.join('\n') : null
 }
 
@@ -721,7 +642,6 @@ export async function loadCustomerContext(
 export interface PrefetchedCustomer {
   name: string | null
   dateOfBirth: Date | null
-  extractedProfile: Record<string, unknown>
   language: string
   isAnonymous: boolean
 }
@@ -749,44 +669,6 @@ export function loadCustomerContextFromData(
 
   if (data.isAnonymous) {
     parts.push('Status: Anonymous visitor')
-  }
-
-  // Extracted profile
-  const profile = data.extractedProfile
-
-  // Demographics
-  if (profile.occupation && typeof profile.occupation === 'string') {
-    parts.push(`Occupation: ${profile.occupation}`)
-  }
-  if (profile.incomeLevel && typeof profile.incomeLevel === 'string') {
-    parts.push(`Income level: ${profile.incomeLevel}`)
-  }
-  if (profile.education && typeof profile.education === 'string') {
-    parts.push(`Education: ${profile.education}`)
-  }
-
-  // Family
-  if (profile.familySize != null) {
-    parts.push(`Family size: ${String(profile.familySize)}`)
-  }
-  if (profile.hasSpouse != null) {
-    parts.push(`Has spouse: ${String(profile.hasSpouse)}`)
-  }
-  if (profile.hasChildren != null) {
-    parts.push(`Has children: ${String(profile.hasChildren)}`)
-  }
-  if (profile.minorChildren != null) {
-    parts.push(`Minor children: ${String(profile.minorChildren)}`)
-  }
-
-  // Motivations and interests
-  if (Array.isArray(profile.motivations) && profile.motivations.length > 0) {
-    parts.push(
-      `Motivations: ${(profile.motivations as string[]).join(', ')}`,
-    )
-  }
-  if (Array.isArray(profile.interests) && profile.interests.length > 0) {
-    parts.push(`Interests: ${(profile.interests as string[]).join(', ')}`)
   }
 
   return parts.length > 0 ? parts.join('\n') : null
@@ -827,13 +709,26 @@ export async function loadCustomerInsights(
  * formats insights by category. Marks insights older than 30 days as
  * (unverified).
  */
+/**
+ * Task 3.3 (D3): category priority for the returning-customer block —
+ * PREFERENCE ("te interesa Optim") and RISK_FACTOR are what the agent must
+ * not lose mid-funnel; the token-cap truncation drops the tail, so these
+ * render FIRST.
+ */
+const MEMORY_CATEGORY_PRIORITY: Record<string, number> = { PREFERENCE: 0, RISK_FACTOR: 1, BUYING_SIGNAL: 2, DEMOGRAPHIC: 3 }
+
 export async function loadCustomerMemory(
   customerId: string,
   preloadedInsights?: RawCustomerInsight[],
 ): Promise<string | null> {
-  const insights = preloadedInsights ?? (await loadCustomerInsights(customerId))
+  const loaded = preloadedInsights ?? (await loadCustomerInsights(customerId))
 
-  if (insights.length === 0) return null
+  if (loaded.length === 0) return null
+
+  // PREFERENCE first, then by freshest confirmation within each category.
+  const insights = [...loaded].sort((a, b) =>
+    (MEMORY_CATEGORY_PRIORITY[a.category] ?? 9) - (MEMORY_CATEGORY_PRIORITY[b.category] ?? 9)
+    || b.lastConfirmedAt.getTime() - a.lastConfirmedAt.getTime())
 
   const now = Date.now()
   const byCategory = new Map<string, string[]>()
@@ -909,6 +804,54 @@ export async function loadAgentKnowledge(
 }
 
 // ==============================================
+// PER-(PHASE,SUBPHASE) SECTIONS (A4.2 — pure renderers from DerivedStateV3)
+// ==============================================
+
+export function loadDntContext(state: DerivedStateV3): string | null {
+  // Keyed on the ACTIVE session, not only APPLICATION/DNT: the engine legally
+  // opens DNT sessions during DISCOVERY (pre-application), and the model needs
+  // this surface there too (2026-07-06 debug report).
+  const inDntSubphase = state.phase === 'APPLICATION' && state.subphase === 'DNT'
+  if (!inDntSubphase && !state.dnt.sessionActive) return null
+  return [
+    ...(state.dnt.pendingCode ? [`Current question code: ${state.dnt.pendingCode} — pass this EXACT code to write_dnt_answer for the current answer. To correct an already-answered question use THAT question's own code (write-or-change).`] : []),
+    `DNT progress: ${state.dnt.answeredCount}/${state.dnt.totalCount}`,
+    `DNT signed: ${state.dnt.signed ? 'yes (valid until ' + state.dnt.validUntil + ')' : 'no'}`,
+    `GDPR consent: ${state.consents.gdprProcessing ? 'granted' : 'missing'}`,
+    `AI disclosure: ${state.consents.aiDisclosure ? 'acknowledged' : 'missing'}`,
+    'The needs analysis (DNT) is a regulatory requirement: complete the remaining questions, then obtain explicit signature via sign_dnt. Consent is captured at signing — never claim consent that is not recorded in state.',
+    'NEVER call write_dnt_answer with a value the customer did not explicitly state: if their reply does not answer the pending question (e.g. a bare "da" to a numeric or choice question), re-ask listing the options — do NOT pick a plausible value for them. This is a regulatory record they will sign.',
+    // Salvaged questionnaire-facilitation guidance (A5.1 audit):
+    'If the customer interrupts with a question or concern, answer it fully FIRST, then offer to resume — never force resumption.',
+    'Medical/health questions: frame them before asking (needed for the insurance assessment, treated confidentially), keep a neutral non-judgmental tone, never comment on the answers.',
+    // Task 2.2 (D1): the CARD collects, the agent narrates.
+    'Active DNT and questionnaire questions render as UI CARDS with tappable option buttons — the card collects the answer. NEVER enumerate the options in prose (no "Opțiuni:" lists — the card already shows them); briefly frame the question in one warm sentence and invite the customer to tap an option on the card.',
+    'If the customer TYPES an answer instead of tapping, map it to the EXACT option value from the tool result (e.g. "da, sunt sănătos" on a yes/no question → value "yes"; "lucrez la stat" on the occupation question → value "employee") and pass THAT value to write_dnt_answer — NEVER pass raw free text as the value of an option question.',
+  ].join('\n')
+}
+
+export function loadPaymentContext(state: DerivedStateV3): string | null {
+  if (state.phase !== 'PAYMENT') return null
+  return [
+    `Schedule: ${state.schedule.exists ? 'active' : 'none'}; next due: ${state.schedule.nextDueAt ?? 'n/a'}`,
+    `Last payment status: ${state.schedule.lastPaymentStatus ?? 'none'}`,
+    'The sale is closed — no selling, no upgrades. Focus on completing or recovering the payment. If a payment failed, state the failure factually and offer the retry action exposed by the engine.',
+  ].join('\n')
+}
+
+export function loadPolicyContext(state: DerivedStateV3): string | null {
+  if (state.phase !== 'POLICY' || !state.policy) return null
+  return [
+    `Policy status: ${state.policy.status}`,
+    'Language is engine-gated: never describe the policy as active or in force unless status is ACTIVE. Between payment and activation say it is paid and being processed.',
+    // Salvaged post-sale guidance (A5.1 audit):
+    'The sale is closed — no upsell or cross-sell; the customer needs to feel secure, not pressured.',
+    'Claims: lead with empathy and acknowledge the situation before any process talk. You may explain the general process and confirm policy status; you may NOT approve/assess a claim or promise payout amounts or timelines — say plainly that Allianz-Țiriac specialists decide those.',
+    'Policy modifications and payment problems are handled by the human Allianz-Țiriac team — offer to route the customer there.',
+  ].join('\n')
+}
+
+// ==============================================
 // CONVENIENCE: LOAD ALL SECTIONS
 // ==============================================
 
@@ -917,13 +860,11 @@ export async function loadAgentKnowledge(
  * Calls individual loaders in parallel where possible.
  */
 export async function loadAllSections(params: {
-  agentConfig: { systemPrompt: string | null; constraints: string | null }
+  agentConfig: { systemPrompt: string | null; constraints: string | null; promptSections?: Record<string, string> | null }
   allowedTools: string[]
   productId: string | null
   conversationId: string
   customerId: string
-  workflowSession: WorkflowSessionData | null
-  workflowStepCode: string | null
   situationalBriefing: string | null
   language: 'en' | 'ro'
   prefetchedCustomer?: PrefetchedCustomer
@@ -936,8 +877,6 @@ export async function loadAllSections(params: {
     productId,
     conversationId,
     customerId,
-    workflowSession,
-    workflowStepCode,
     situationalBriefing,
     language,
     prefetchedCustomer,
@@ -949,7 +888,6 @@ export async function loadAllSections(params: {
   const agentIdentity = loadAgentIdentity(agentConfig.systemPrompt)
   const capabilityManifest = loadCapabilityManifest(allowedTools)
   const constraints = loadConstraints(agentConfig.constraints)
-  const workflowInstructions = loadWorkflowInstructions(workflowSession)
   const stateGrounding = loadStateGrounding(stateGroundingInput)
 
   // Async loaders — run in parallel
@@ -964,17 +902,22 @@ export async function loadAllSections(params: {
   ] = await Promise.all([
     loadCatalogOverview(language),
     productId ? loadProductContext(productId, language) : null,
-    (productId || workflowStepCode) ? loadCoachingBriefing(productId, workflowStepCode) : null,
-    loadQuestionnaireContext(conversationId, customerId, workflowStepCode, language),
+    productId ? loadCoachingBriefing(productId) : null,
+    loadQuestionnaireContext(conversationId, customerId, language), // P0-7: derived from the active application (was a dead null step-code)
     prefetchedCustomer
       ? Promise.resolve(loadCustomerContextFromData(prefetchedCustomer))
       : loadCustomerContext(customerId),
     loadCustomerMemory(customerId, preloadedInsights),
-    loadAgentKnowledge(productId, workflowStepCode),
+    loadAgentKnowledge(productId, null),
   ])
 
   return {
     agentIdentity,
+    // E1: raw seeded content; the orchestrator's post-gate patch nulls these
+    // when out of scope (detectFirstTurn / includeDiscoveryConduct) — the
+    // same content-nullness gating dntContext uses.
+    firstTurnRules: params.agentConfig.promptSections?.firstTurnRules ?? null,
+    discoveryConduct: params.agentConfig.promptSections?.discoveryConduct ?? null,
     capabilityManifest,
     constraints,
     stateGrounding,
@@ -984,10 +927,15 @@ export async function loadAllSections(params: {
     agentKnowledge,
     customerContext,
     coachingBriefing,
-    domainGuidance: null, // populated by mergeSkillPackSections from active packs
-    workflowInstructions,
-    questionnaireContext,
+    domainGuidance: null, // former pack-injection slot; the pack subsystem died in A5.2
     productContext,
     catalogOverview,
+    // P0-7: eagerly derived from the active application; the orchestrator
+    // re-patches it after the gate from the derived (phase, subphase) —
+    // Task 1.2 (D2) — suppressing it outside the questionnaire stage.
+    questionnaireContext,
+    dntContext: null,
+    paymentContext: null,
+    policyContext: null,
   }
 }

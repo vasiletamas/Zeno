@@ -5,23 +5,23 @@
  * See docs/superpowers/specs/2026-05-26-zeno-phase-model-design.md.
  */
 
-import { prisma } from '@/lib/db'
 import type { ToolHandler } from '@/lib/tools/types'
 import { resolveProductRef, listAvailableProductRefs } from '@/lib/tools/resolve-product'
 
 export const setCandidateProduct: ToolHandler = async (args, context) => {
   const productId = args.productId as string
-  const confidence = args.confidence as number
+  // B4.ADD-1: soft addon interest replaces the confidence pseudo-metric
+  const addonIds = Array.isArray(args.addonIds) ? (args.addonIds as string[]) : []
 
   if (typeof productId !== 'string' || !productId) {
     return { success: false, error: 'productId is required.' }
   }
-  if (typeof confidence !== 'number' || confidence < 0 || confidence > 100) {
-    return { success: false, error: 'confidence must be an integer 0-100.' }
-  }
 
   try {
-    const ref = await resolveProductRef({ productId })
+    // The agent passes codes, ids, and (live runs cmr99s5cb/cmr9cq7e5) even
+    // foreign cuids in this one slot — feed BOTH resolver paths so a code
+    // resolves via code-exact/alias while a real id resolves via id.
+    const ref = await resolveProductRef({ productId, productCode: productId })
     if (!ref) {
       const available = await listAvailableProductRefs()
       return {
@@ -33,7 +33,7 @@ export const setCandidateProduct: ToolHandler = async (args, context) => {
       }
     }
 
-    const product = await prisma.product.findUnique({
+    const product = await context.db.product.findUnique({
       where: { id: ref.id },
       select: { id: true, name: true },
     })
@@ -41,9 +41,9 @@ export const setCandidateProduct: ToolHandler = async (args, context) => {
       return { success: false, error: `Product not found: ${ref.id}` }
     }
 
-    const current = await prisma.conversation.findUnique({
+    const current = await context.db.conversation.findUnique({
       where: { id: context.conversationId },
-      select: { candidateProductId: true, candidateConfidence: true },
+      select: { candidateProductId: true, candidateAddonIds: true },
     })
 
     const productLabel =
@@ -53,38 +53,38 @@ export const setCandidateProduct: ToolHandler = async (args, context) => {
 
     if (
       current?.candidateProductId === ref.id &&
-      current?.candidateConfidence === confidence
+      JSON.stringify(current?.candidateAddonIds ?? []) === JSON.stringify(addonIds)
     ) {
       return {
         success: true,
-        data: { candidateProductId: ref.id, candidateConfidence: confidence, unchanged: true },
-        message: `Candidate already set to ${productLabel} (confidence ${confidence}). No change.`,
+        data: { candidateProductId: ref.id, candidateAddonIds: addonIds, unchanged: true },
+        message: `Candidate already set to ${productLabel}. No change.`,
         confirmation: {
           category: 'lifecycle',
           label: 'Candidate product set',
-          value: `${productLabel} (confidence ${confidence})`,
+          value: productLabel,
           timestamp: new Date().toISOString(),
         },
       }
     }
 
-    await prisma.conversation.update({
+    await context.db.conversation.update({
       where: { id: context.conversationId },
       data: {
         candidateProductId: ref.id,
-        candidateConfidence: confidence,
+        candidateAddonIds: addonIds,
         candidateSetAt: new Date(),
       },
     })
 
     return {
       success: true,
-      data: { candidateProductId: ref.id, candidateConfidence: confidence },
-      message: `Candidate product set to ${productLabel} with confidence ${confidence}.`,
+      data: { candidateProductId: ref.id, candidateAddonIds: addonIds },
+      message: `Candidate product set to ${productLabel}${addonIds.length ? ` (addon interest: ${addonIds.join(', ')})` : ''}.`,
       confirmation: {
         category: 'lifecycle',
         label: 'Candidate product set',
-        value: `${productLabel} (confidence ${confidence})`,
+        value: productLabel,
         timestamp: new Date().toISOString(),
       },
     }

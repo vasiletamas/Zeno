@@ -23,6 +23,46 @@ function getStripeClient(): Stripe {
   return new Stripe(secretKey)
 }
 
+/**
+ * D2.7: the pure event mapping, exported for testability. Unknown types are
+ * the EXPLICIT 'ignored' variant (never masquerading as payment_succeeded);
+ * every variant carries stripe's event.id as the inbox identity.
+ */
+export function mapStripeEvent(event: Stripe.Event): WebhookEvent {
+  const paymentIntent = event.data.object as Stripe.PaymentIntent
+  // P1-6: the captured amount (amount_received on success, else the intent
+  // amount) + currency, uppercased to match Zeno's stored currency codes.
+  const amountMinor = paymentIntent.amount_received ?? paymentIntent.amount ?? null
+  const currency = paymentIntent.currency ? paymentIntent.currency.toUpperCase() : null
+  switch (event.type) {
+    case 'payment_intent.succeeded':
+      return {
+        event: 'payment_succeeded',
+        eventId: event.id,
+        providerPaymentId: paymentIntent.id,
+        amountMinor,
+        currency,
+        metadata: (paymentIntent.metadata ?? {}) as Record<string, unknown>,
+      }
+    case 'payment_intent.payment_failed':
+      return {
+        event: 'payment_failed',
+        eventId: event.id,
+        providerPaymentId: paymentIntent.id,
+        amountMinor,
+        currency,
+        metadata: (paymentIntent.metadata ?? {}) as Record<string, unknown>,
+      }
+    default:
+      return {
+        event: 'ignored',
+        eventId: event.id,
+        providerPaymentId: '',
+        metadata: { originalEventType: event.type },
+      }
+  }
+}
+
 export class StripePaymentProvider implements PaymentProvider {
   name = 'stripe'
 
@@ -36,7 +76,7 @@ export class StripePaymentProvider implements PaymentProvider {
     amount: number
     currency: string
     customerId: string
-    policyId: string
+    referenceId: string
     description: string
   }): Promise<PaymentIntent> {
     const paymentIntent = await this.stripe.paymentIntents.create({
@@ -45,7 +85,7 @@ export class StripePaymentProvider implements PaymentProvider {
       description: input.description,
       metadata: {
         customerId: input.customerId,
-        policyId: input.policyId,
+        referenceId: input.referenceId,
       },
     })
 
@@ -83,6 +123,23 @@ export class StripePaymentProvider implements PaymentProvider {
     }
   }
 
+  async retrievePaymentIntent(providerPaymentId: string): Promise<{ clientSecret: string | null; redirectUrl: string | null; usable: boolean }> {
+    const pi = await this.stripe.paymentIntents.retrieve(providerPaymentId)
+    // usable while the customer can still complete it; terminal states demand
+    // a fresh intent (P1-5).
+    const usable = ['requires_payment_method', 'requires_confirmation', 'requires_action', 'processing'].includes(pi.status)
+    return { clientSecret: pi.client_secret ?? null, redirectUrl: null, usable }
+  }
+
+  async cancelPaymentIntent(providerPaymentId: string): Promise<void> {
+    await this.stripe.paymentIntents.cancel(providerPaymentId)
+  }
+
+  async refundPayment(providerPaymentId: string, amountMinor: number): Promise<{ providerRefundId: string }> {
+    const refund = await this.stripe.refunds.create({ payment_intent: providerPaymentId, amount: amountMinor })
+    return { providerRefundId: refund.id }
+  }
+
   async handleWebhook(
     payload: unknown,
     signature: string,
@@ -100,29 +157,6 @@ export class StripePaymentProvider implements PaymentProvider {
       webhookSecret,
     )
 
-    const paymentIntent = event.data.object as Stripe.PaymentIntent
-
-    switch (event.type) {
-      case 'payment_intent.succeeded':
-        return {
-          event: 'payment_succeeded',
-          providerPaymentId: paymentIntent.id,
-          metadata: (paymentIntent.metadata ?? {}) as Record<string, unknown>,
-        }
-      case 'payment_intent.payment_failed':
-        return {
-          event: 'payment_failed',
-          providerPaymentId: paymentIntent.id,
-          metadata: (paymentIntent.metadata ?? {}) as Record<string, unknown>,
-        }
-      default:
-        // Return as succeeded with the ID so callers can decide what to do.
-        // The webhook routes should filter for known event types.
-        return {
-          event: 'payment_succeeded',
-          providerPaymentId: paymentIntent.id ?? '',
-          metadata: { originalEventType: event.type },
-        }
-    }
+    return mapStripeEvent(event)
   }
 }

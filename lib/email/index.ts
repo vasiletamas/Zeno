@@ -6,6 +6,7 @@
  */
 
 import type { EmailProvider } from './types'
+import { MockEmailProvider } from './providers/mock'
 
 let instance: EmailProvider | null = null
 
@@ -25,9 +26,8 @@ export function getEmailProvider(): EmailProvider {
       break
     }
     case 'mock': {
-      const { MockEmailProvider } = require('./providers/mock') as {
-        MockEmailProvider: new () => EmailProvider
-      }
+      // Static import (unlike resend below): dependency-free, and the lazy
+      // require() path does not resolve under the ESM test runner.
       instance = new MockEmailProvider()
       break
     }

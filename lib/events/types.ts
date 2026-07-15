@@ -21,12 +21,14 @@ export type ZenoEvent =
   | { type: 'phase:end'; traceId: string; phase: string; durationMs: number; metadata?: Record<string, unknown> }
   | { type: 'llm:call:start'; traceId: string; provider: string; model: string; agentSlug: string }
   | { type: 'llm:call:end'; traceId: string; provider: string; model: string; inputTokens: number; outputTokens: number; durationMs: number }
+  // P1-10: REAL retry/failover signals from the registry — the retired
+  // call-count heuristic fired on every normal tool round (100% FP)
+  | { type: 'llm:call:retry'; traceId: string | null; provider: string; model: string; attempt: number; delayMs: number; errorClass: string }
+  | { type: 'llm:failover'; traceId: string | null; fromModel: string; toModel: string; errorClass: string }
   | { type: 'tool:start'; traceId: string; toolName: string; args: Record<string, unknown> }
   | { type: 'tool:end'; traceId: string; toolName: string; durationMs: number; success: boolean; cached: boolean }
   // Business events (4)
   | { type: 'mode:transition'; traceId: string; from: string; to: string; conversationId: string }
-  | { type: 'skillpack:activated'; traceId: string; slugs: string[]; conversationId: string }
-  | { type: 'skillpack:deactivated'; traceId: string; slugs: string[]; conversationId: string }
   | { type: 'compliance:result'; traceId: string; passed: boolean; gaps: string[]; conversationId: string }
   | { type: 'side_effect:invalid'; traceId: string; conversationId: string; violations: Array<{ category: string; matchedPhrase: string }> }
   | { type: 'tool_narration:detected'; traceId: string; conversationId: string; violations: Array<{ category: string; matchedPhrase: string }> }

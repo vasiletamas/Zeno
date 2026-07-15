@@ -22,20 +22,12 @@ async function main() {
           id: true,
           name: true,
           language: true,
-          extractedProfile: true,
-          gdprConsentAt: true,
-          gdprConsentScope: true,
-          aiDisclosureAcknowledgedAt: true,
-        },
-      },
-      workflowSession: {
-        include: {
-          currentStep: {
-            select: { code: true, name: true, salesPlaybook: true },
+          consentEvents: {
+            select: { kind: true, action: true, scope: true, createdAt: true },
+            orderBy: { createdAt: "asc" },
           },
         },
       },
-      application: { select: { id: true, status: true, tierId: true, levelId: true } },
       messages: { orderBy: { createdAt: "asc" } },
       turnTraces: { orderBy: { messageIndex: "asc" } },
       score: true,
@@ -47,9 +39,17 @@ async function main() {
     process.exit(1);
   }
 
+  // B4: the application hangs off the activeApplicationId pointer
+  const application = convo.activeApplicationId
+    ? await prisma.application.findUnique({
+        where: { id: convo.activeApplicationId },
+        select: { id: true, status: true, tierId: true, levelId: true },
+      })
+    : null
+
   const phase = convo.mode === 'POST_SALE'
     ? 'post_sale'
-    : (convo.application && convo.application.status !== 'COMPLETED'
+    : (application && application.status !== 'COMPLETED'
         ? 'application'
         : 'presentation')
 
@@ -64,24 +64,16 @@ async function main() {
       productId: convo.candidateProductId,
       productCode: convo.candidateProduct?.code,
       productName: convo.candidateProduct?.name,
-      confidence: convo.candidateConfidence,
-      setAt: convo.candidateSetAt,
+            setAt: convo.candidateSetAt,
     } : null,
     status: convo.status,
     mode: convo.mode,
-    activeSkillPacks: convo.activeSkillPacks,
     language: convo.language,
     messageCount: convo.messageCount,
     startedAt: convo.startedAt,
-    completedAt: convo.completedAt,
+    archivedAt: convo.archivedAt,
     customer: convo.customer,
-    workflow: convo.workflowSession ? {
-      status: convo.workflowSession.status,
-      currentStep: convo.workflowSession.currentStep?.code,
-      currentStepHasSalesPlaybook: convo.workflowSession.currentStep?.salesPlaybook != null,
-      data: convo.workflowSession.data,
-    } : null,
-    application: convo.application,
+    application,
     metadata: convo.metadata,
   }, null, 2));
 

@@ -1,51 +1,125 @@
-import type { DerivedState, Phase } from '@/lib/chat/derive-state'
+import type { Phase, AppSubphase, DerivedStateV3, ExposedActions } from '@/lib/engines/domain-types'
+import { maskVerificationTarget } from '@/lib/customer/verification-service'
 
-/**
- * Deterministic phase → required prompt sections. Replaces the reasoning gate's
- * section selection. The alwaysInclude sections are always present; phaseSpecific
- * adds per-phase sections. All keys must exist in prompt-builder's SECTION_REGISTRY.
- */
-export function getRequiredSectionsForPhase(phase: Phase): string[] {
-  const alwaysIncluded = [
-    'agentIdentity',
-    'constraints',
-    'stateGrounding',
-    'catalogOverview',
-    'situationalBriefing',
-    'workflowInstructions',
-  ]
-  const phaseSpecific: Record<Phase, string[]> = {
-    DISCOVERY: ['capabilityManifest', 'customerContext', 'customerMemory', 'agentKnowledge'],
-    SELECTION: ['productContext', 'coachingBriefing', 'customerContext'],
-    CONSENT: ['complianceGuidance'],
-    QUESTIONNAIRE: ['questionnaireContext', 'complianceGuidance'],
-    QUOTE: ['productContext', 'coachingBriefing', 'complianceGuidance'],
-    CLOSING: ['productContext', 'complianceGuidance'],
-  }
-  return [...new Set([...alwaysIncluded, ...phaseSpecific[phase]])]
+// TARGET map (A4.3, T10.D4). Every removal from the A1 content-preserving map
+// carries its 'retired because X' note in
+// docs/superpowers/notes/2026-06-zeno-prompt-section-inventory.md:
+// the workflow-instructions section retired (dead machine, row 14); coachingBriefing off
+// the QUOTE surfaces (row 7); productContext/complianceGuidance off
+// PAYMENT/POLICY, replaced by the dedicated per-state sections (rows 6, 9 —
+// the compliance CHECKER still runs there).
+const ALWAYS = ['agentIdentity', 'constraints', 'stateGrounding', 'catalogOverview', 'situationalBriefing']
+// Task 3.3 (D3): customerMemory survives the phase transition — the
+// returning-customer block (PREFERENCE + RISK_FACTOR first) rides
+// APPLICATION and QUOTE, not just DISCOVERY; the fast path still excludes
+// it (FAST_PATH_GATE), so questionnaire latency is unchanged.
+const BY_PHASE: Record<Phase, string[]> = {
+  DISCOVERY: ['discoveryConduct', 'capabilityManifest', 'customerContext', 'customerMemory', 'agentKnowledge', 'productContext', 'coachingBriefing'],
+  APPLICATION: [], // subphase-driven
+  // discoveryConduct (E1): pricing/catalog guardrails still bind on QUOTE.
+  // customerMemory (Task 3.3, D3): returning-customer block rides QUOTE too.
+  QUOTE: ['discoveryConduct', 'productContext', 'complianceGuidance', 'customerMemory'],
+  PAYMENT: ['paymentContext'],
+  POLICY: ['policyContext'],
+}
+
+// E1: the discovery-conduct prose (guardrails 1–6, single-match, product
+// knowledge, pacing) binds where products are presented and priced —
+// DISCOVERY and QUOTE. On APPLICATION/PAYMENT/POLICY turns it is noise and
+// pathology surface. The orchestrator nulls the section content by this
+// predicate (the dntContext pattern — content nullness is what excludes,
+// requiredSections alone never does).
+export function includeDiscoveryConduct(phase: Phase): boolean {
+  return phase === 'DISCOVERY' || phase === 'QUOTE'
+}
+const BY_SUBPHASE: Record<AppSubphase, string[]> = {
+  DNT: ['dntContext', 'complianceGuidance', 'customerMemory'],
+  QUESTIONNAIRE: ['questionnaireContext', 'complianceGuidance', 'customerMemory'],
+  QUOTE_GENERATION: ['productContext', 'complianceGuidance', 'customerMemory'],
+}
+export function getRequiredSectionsFor(phase: Phase, subphase: AppSubphase | null): string[] {
+  const extras = phase === 'APPLICATION' && subphase ? BY_SUBPHASE[subphase] : BY_PHASE[phase]
+  return [...new Set([...ALWAYS, ...extras])]
 }
 
 /**
- * Deterministic replacement for the gate's situational briefing. Surfaces the
- * derived phase + next best action (+ selection / remaining questions) so the
- * model is grounded in where the conversation is and what to do next. The
- * "=== SITUATIONAL ANALYSIS ===" header is added by the section renderer.
+ * Task 1.2 (D2): the derived (phase, subphase) IS the questionnaire step —
+ * the workflowStepCode input died with the workflow machine, so the
+ * orchestrator maps the engine state to the loader's step vocabulary here.
  */
-export function formatDerivedBriefing(state: DerivedState): string {
+export function workflowStepCodeFor(phase: Phase, subphase: AppSubphase | null): 'application_fill' | 'dnt_questionnaire' | null {
+  if (phase !== 'APPLICATION') return null
+  if (subphase === 'QUESTIONNAIRE') return 'application_fill'
+  if (subphase === 'DNT') return 'dnt_questionnaire'
+  return null
+}
+
+// B1: the objective renders as facts the model reasons over — never as a
+// command it obeys. "Next best action: call X" trained the model to follow
+// wrong engine hints (D5: re-sent the verification code because the hint said
+// set_candidate_product while accept_quote sat blocked on requires_identity).
+const GOAL_DESCRIPTIONS: Record<import('@/lib/engines/domain-types').FunnelGoal, string> = {
+  payment: 'collect the due installment',
+  quote_acceptance: 'get the issued quote accepted',
+  quote_generation: 'generate the quote',
+  application_completion: 'complete the application (remaining answers and coverage selection)',
+  needs_analysis: 'complete the needs analysis (DNT)',
+  discovery: 'understand the need and converge on a product',
+  post_sale: 'serve the customer post-sale (the sale is closed — no selling)',
+}
+
+export function formatDerivedBriefing(state: DerivedStateV3, actions: ExposedActions): string {
   const lines: string[] = []
-  lines.push(`Phase: ${state.phase}`)
-  lines.push(`Next best action: ${state.nextBestAction}`)
-  if (state.product) lines.push(`Product: ${state.product.code}`)
-  if (state.selection.tier) {
-    const parts = [`tier ${state.selection.tier}`]
-    if (state.selection.level) parts.push(`level ${state.selection.level}`)
-    if (state.selection.addon) parts.push('add-on included')
-    lines.push(`Selection: ${parts.join(', ')}`)
+  lines.push(`Phase: ${state.phase}${state.subphase ? '/' + state.subphase : ''}`)
+  lines.push(`Open objective: ${GOAL_DESCRIPTIONS[state.objective.goal]}.`)
+  if (state.objective.achievableNow) {
+    lines.push(`Achievable now via: ${state.objective.achievableNow}.`)
+  } else if (state.objective.missingPreconditions.length > 0) {
+    for (const b of state.objective.missingPreconditions) {
+      lines.push(`Not yet achievable — ${b.action} is blocked: ${b.reason}${b.params ? ' ' + JSON.stringify(b.params) : ''}. Resolve this precondition first; never push a different funnel commit to get around it.`)
+    }
   }
-  if (state.application.exists && state.application.missing.length > 0) {
-    const shown = state.application.missing.slice(0, 5).join(', ')
-    const more = state.application.missing.length > 5 ? ', …' : ''
-    lines.push(`Remaining questions: ${shown}${more}`)
+  // P0-5: a confirm card is on screen — override any push toward the tool.
+  for (const tool of state.pendingConfirmationTools ?? []) {
+    lines.push(`AWAITING CUSTOMER CONFIRMATION: ${tool} — a confirmation card is displayed in the chat; do NOT call ${tool} again yourself, invite the customer to tap Confirm on the card (their tap completes it).`)
+  }
+  if (state.product) lines.push(`Product: ${state.product.code}`)
+  if (state.selection.tier) lines.push(`Selection: tier ${state.selection.tier}${state.selection.level ? ', level ' + state.selection.level : ''}${state.selection.addon ? ', add-on included' : ''}`)
+  if (state.application && state.application.missingCodes.length > 0) lines.push(`Remaining questions: ${state.application.missingCodes.slice(0, 5).join(', ')}${state.application.missingCodes.length > 5 ? ', …' : ''}`)
+  // Sub-stage facts (A4.4): one load-bearing number per stage.
+  if (state.phase === 'APPLICATION' && state.subphase === 'DNT') lines.push(`DNT remaining: ${state.dnt.totalCount - state.dnt.answeredCount}`)
+  // Phase-INDEPENDENT: DNT sessions legally run in DISCOVERY too (pre-application),
+  // and tool results are not replayed across turns — this line is the model's only
+  // durable source for the exact code (2026-07-06 debug report).
+  if (state.dnt.sessionActive && state.dnt.pendingCode) lines.push(`DNT current question code: ${state.dnt.pendingCode} — pass this EXACT code to write_dnt_answer for the current answer. To correct an already-answered DNT question, call write_dnt_answer with THAT question's own code instead (answers are write-or-change; get_dnt_questions lists all codes) — never write the correction into the current question.`)
+  // The re-ask lapse (2026-07-06 battery): show what is ON FILE, not just
+  // what is missing — the model occasionally re-asked a collected field when
+  // it could only see the needs list.
+  const knownFields = Object.keys(state.identity.fields ?? {}).filter((f) => state.identity.fields[f] !== undefined)
+  if (knownFields.length > 0) {
+    lines.push(`Identity on file: ${knownFields.join(', ')} — these are already recorded; do NOT ask the customer for them again and do NOT re-collect them.`)
+  }
+  // Task 1.1 (D5): the endgame that killed the recorded sale — while a code
+  // is in flight the ONE correct move is confirming the digits the customer
+  // supplies; a re-send silently invalidates the code they are reading.
+  if (state.identity.pendingChallenge) {
+    const pc = state.identity.pendingChallenge
+    const to = pc.target ? maskVerificationTarget(pc.channel, pc.target) : `the customer's ${pc.channel}`
+    const attempts = pc.attemptsRemaining !== undefined && pc.attemptsRemaining < 5 ? ` ${pc.attemptsRemaining} attempts remaining.` : ''
+    lines.push(`Verification: code sent via ${pc.channel} to ${to}, awaiting the 6-digit code.${attempts} When the customer supplies digits, call confirm_channel_verification with them. Do NOT resend — a new send invalidates the code already in their inbox; only if the customer explicitly asks for a new code, call start_channel_verification with resend: true.`)
+  }
+  if (state.phase === 'QUOTE' && state.quote) lines.push(`Quote valid until: ${state.quote.validUntil.slice(0, 10)}`)
+  if (state.phase === 'PAYMENT') lines.push(`Payment status: ${state.schedule.lastPaymentStatus ?? 'pending'}`)
+  if (state.flagsForReview.length > 0) lines.push(`Flags for review: ${state.flagsForReview.join(', ')}`)
+  lines.push(`Available actions: ${actions.available.join(', ')}`)
+  if (actions.blocked.length > 0) {
+    lines.push('Blocked actions:')
+    for (const b of actions.blocked) lines.push(`- ${b.action} (${b.reason}${b.params ? ' ' + JSON.stringify(b.params) : ''})`)
+    lines.push('If the customer asks for a blocked action, explain WHY using the reason above. NEVER work around a blocked action or invent an alternative path.')
+    // Task 1.3 (D8): the loop-breaker's explain-and-escalate instruction.
+    if (actions.blocked.some((b) => b.reason === 'repeated_failure')) {
+      lines.push('A tool above is blocked after repeated failures on our side: do NOT attempt it again this conversation. Apologize, say plainly that something went wrong at our end, and offer to retry later or hand off to a human colleague (escalate_to_human).')
+    }
   }
   return lines.join('\n')
 }

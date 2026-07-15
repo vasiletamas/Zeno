@@ -10,6 +10,7 @@
  */
 
 import crypto from 'crypto'
+import { appBaseUrl } from '@/lib/app-url'
 import type {
   PaymentProvider,
   PaymentIntent,
@@ -59,20 +60,20 @@ export class PayUPaymentProvider implements PaymentProvider {
     amount: number
     currency: string
     customerId: string
-    policyId: string
+    referenceId: string
     description: string
   }): Promise<PaymentIntent> {
     const { merchantId, secretKey } = getPayUConfig()
     const accessToken = await getAccessToken(merchantId, secretKey)
 
-    const appUrl = process.env.APP_URL ?? 'http://localhost:3001'
+    const appUrl = appBaseUrl()
 
     const orderPayload = {
       merchantPosId: merchantId,
       description: input.description,
       currencyCode: input.currency,
       totalAmount: String(input.amount), // PayU expects string amount in smallest unit
-      extOrderId: `${input.policyId}_${Date.now()}`,
+      extOrderId: `${input.referenceId}_${Date.now()}`,
       continueUrl: `${appUrl}/api/payments/confirm?provider=payu`,
       notifyUrl: `${appUrl}/api/webhooks/payu`,
       products: [
@@ -171,29 +172,70 @@ export class PayUPaymentProvider implements PaymentProvider {
     }
   }
 
+  async retrievePaymentIntent(providerPaymentId: string): Promise<{ clientSecret: string | null; redirectUrl: string | null; usable: boolean }> {
+    // PayU cannot re-issue the hosted-page redirect URL after order creation —
+    // the caller falls back to the persisted create-time redirectUrl. Here we
+    // only report whether the order is still open (usable) so a terminal one is
+    // superseded (P1-5).
+    const status = await this.getPaymentStatus(providerPaymentId)
+    return { clientSecret: null, redirectUrl: null, usable: status.status === 'pending' }
+  }
+
+  async cancelPaymentIntent(providerPaymentId: string): Promise<void> {
+    const { merchantId, secretKey } = getPayUConfig()
+    const accessToken = await getAccessToken(merchantId, secretKey)
+    const response = await fetch(`${PAYU_API_BASE}/api/v2_1/orders/${providerPaymentId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    if (!response.ok) {
+      throw new Error(`PayU order cancel failed: ${response.status} ${response.statusText}`)
+    }
+  }
+
+  async refundPayment(providerPaymentId: string, amountMinor: number): Promise<{ providerRefundId: string }> {
+    const { merchantId, secretKey } = getPayUConfig()
+    const accessToken = await getAccessToken(merchantId, secretKey)
+    const response = await fetch(`${PAYU_API_BASE}/api/v2_1/orders/${providerPaymentId}/refunds`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ refund: { description: 'Free-look / pre-activation refund', amount: String(amountMinor) } }),
+    })
+    if (!response.ok) {
+      throw new Error(`PayU refund failed: ${response.status} ${response.statusText}`)
+    }
+    const data = (await response.json()) as { refund?: { refundId?: string } }
+    return { providerRefundId: data.refund?.refundId ?? `payu_refund_${providerPaymentId}` }
+  }
+
   async handleWebhook(
     payload: unknown,
     signature: string,
   ): Promise<WebhookEvent> {
-    const { secretKey } = getPayUConfig()
-
     // Validate IPN signature: PayU sends OpenPayU-Signature header
     // Format: "signature=<hash>;algorithm=<alg>;sender=checkout"
+    // D2.7 (T8.D3): an UNSIGNED payload is a hard reject — the old code
+    // skipped verification when the segment was absent (live forgery flaw).
+    // The check runs before the config read so the reject is unconditional.
     const signatureParts = signature.split(';')
     const hashPart = signatureParts.find((p) => p.startsWith('signature='))
     const expectedHash = hashPart?.split('=')?.[1]
+    if (!expectedHash) {
+      throw new Error('Missing PayU webhook signature')
+    }
 
-    if (expectedHash) {
-      const payloadString =
-        typeof payload === 'string' ? payload : JSON.stringify(payload)
-      const computedHash = crypto
-        .createHmac('md5', secretKey)
-        .update(payloadString)
-        .digest('hex')
+    const { secretKey } = getPayUConfig()
+    const payloadString =
+      typeof payload === 'string' ? payload : JSON.stringify(payload)
+    // NOTE: the HMAC-MD5 scheme must be validated against the OpenPayU IPN
+    // spec before production (flagged per T8.D3) — sandbox-verified only.
+    const computedHash = crypto
+      .createHmac('md5', secretKey)
+      .update(payloadString)
+      .digest('hex')
 
-      if (computedHash !== expectedHash) {
-        throw new Error('Invalid PayU webhook signature')
-      }
+    if (computedHash !== expectedHash) {
+      throw new Error('Invalid PayU webhook signature')
     }
 
     const body = (
@@ -203,6 +245,8 @@ export class PayUPaymentProvider implements PaymentProvider {
         orderId: string
         status: string
         extOrderId?: string
+        totalAmount?: string
+        currencyCode?: string
       }
     }
 
@@ -211,17 +255,41 @@ export class PayUPaymentProvider implements PaymentProvider {
       throw new Error('Invalid PayU webhook payload: missing order')
     }
 
+    // PayU IPNs carry no event id — the (orderId, status) pair is the
+    // stable identity feeding the inbox dedup key.
+    const eventId = `${order.orderId}:${order.status}`
+    // P1-6: PayU reports the captured total in minor units as a string.
+    const amountMinor = order.totalAmount != null && order.totalAmount !== '' ? Number(order.totalAmount) : null
+    const currency = order.currencyCode ?? null
+
     if (order.status === 'COMPLETED') {
       return {
         event: 'payment_succeeded',
+        eventId,
         providerPaymentId: order.orderId,
+        amountMinor,
+        currency,
         metadata: { extOrderId: order.extOrderId },
+      }
+    }
+
+    if (order.status === 'PENDING' || order.status === 'WAITING_FOR_CONFIRMATION') {
+      return {
+        event: 'ignored',
+        eventId,
+        providerPaymentId: order.orderId,
+        amountMinor,
+        currency,
+        metadata: { status: order.status, extOrderId: order.extOrderId },
       }
     }
 
     return {
       event: 'payment_failed',
+      eventId,
       providerPaymentId: order.orderId,
+      amountMinor,
+      currency,
       metadata: { status: order.status, extOrderId: order.extOrderId },
     }
   }

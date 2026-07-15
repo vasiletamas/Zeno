@@ -47,7 +47,6 @@ const mockConversation = {
   status: 'ACTIVE',
   messageCount: 2,
   mode: 'SALES',
-  activeSkillPacks: [],
   productId: null,
   customerId: 'cust-bench-1',
   language: 'ro',
@@ -62,7 +61,6 @@ const mockCustomer = {
   id: 'cust-bench-1',
   name: 'Test Customer',
   dateOfBirth: new Date('1990-01-01'),
-  extractedProfile: {},
   language: 'ro',
   isAnonymous: false,
 }
@@ -112,6 +110,7 @@ vi.mock('@/lib/db', () => {
   const productFindUnique = vi.fn()
   const questionFindMany = vi.fn()
   const answerFindMany = vi.fn()
+  const consentEventFindMany = vi.fn().mockResolvedValue([])
 
   return {
     prisma: {
@@ -125,6 +124,8 @@ vi.mock('@/lib/db', () => {
         findUnique: conversationFindUnique,
         findUniqueOrThrow: conversationFindUniqueOrThrow,
         update: conversationUpdate,
+        // D2.9: reactivate-on-turn probes ARCHIVED status at the pipeline top
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       message: {
         create: messageCreate,
@@ -158,6 +159,9 @@ vi.mock('@/lib/db', () => {
       },
       answer: {
         findMany: answerFindMany,
+      },
+      consentEvent: {
+        findMany: consentEventFindMany,
       },
     },
   }
@@ -236,7 +240,6 @@ vi.mock('@/lib/errors/logger', () => ({
 vi.mock('@/lib/tools/registry', () => ({
   getToolDefinition: vi.fn(() => null),
   getToolsForLLM: vi.fn(() => []),
-  isAlwaysAllowed: vi.fn(() => false),
   registerTool: vi.fn(),
 }))
 
@@ -248,21 +251,6 @@ vi.mock('@/lib/tools/pipeline', () => ({
   executeToolWithPipeline: vi.fn(async () => ({
     toolResult: { success: true, data: {} },
   })),
-}))
-
-// ============================================================
-// MOCK: @/lib/skills/skill-pack-loader
-// ============================================================
-
-vi.mock('@/lib/skills/skill-pack-loader', () => ({
-  getActiveSkillPacks: vi.fn(async () => []),
-  mergeSkillPackSections: vi.fn(
-    (sections: Record<string, unknown>) => sections,
-  ),
-  computeAllowedTools: vi.fn(
-    (stepTools: string[]) => stepTools,
-  ),
-  flushSkillPackCache: vi.fn(),
 }))
 
 // ============================================================
@@ -343,7 +331,6 @@ function setupDefaultPrismaMocks(overrides?: {
   vi.mocked(prisma.conversation.findUniqueOrThrow).mockResolvedValue(conversation as never)
   vi.mocked(prisma.customer.findUnique).mockResolvedValue(mockCustomer as never)
   vi.mocked(prisma.message.findMany).mockResolvedValue(messages as never)
-  vi.mocked(prisma.skillPack.findMany).mockResolvedValue([] as never)
 
   // Save user message
   vi.mocked(prisma.message.create).mockResolvedValue({ ...mockMessage, id: `msg-new-${Date.now()}` } as never)

@@ -1,27 +1,31 @@
 /**
- * Payment Confirmation API
+ * Payment Confirmation API (D2.6 — settlement-inbox path)
  *
- * POST /api/payments/confirm — Client-side confirmation after payment
+ * POST /api/payments/confirm — client-side confirmation after payment
  * GET  /api/payments/confirm — PayU redirect return URL
  *
- * Both call runPostPaymentFlow() which is idempotent (atomic CAS).
+ * Neither settles on the client's say-so: the provider's getPaymentStatus
+ * is verified first (a payment without a providerPaymentId cannot be
+ * verified → 409), then the VERIFIED outcome flows through the same
+ * transactional inbox as webhooks, with a stable derived eventId so a
+ * refresh/double-confirm replays instead of double-settling. Internal
+ * failure → 5xx (never a swallowed 200).
  */
 
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
 import { getPaymentProvider } from '@/lib/payments'
-import { runPostPaymentFlow } from '@/lib/payments/post-payment'
+import { settlePaymentEvent } from '@/lib/payments/settlement'
 
 const confirmBodySchema = z.object({
   paymentId: z.string(),
 })
 
+const PROVIDER_ENUM = { stripe: 'STRIPE', payu: 'PAYU', mock: 'MOCK' } as const
+
 /**
- * POST handler — Client-side confirmation
- *
- * Called by PaymentCard after Stripe.confirmPayment() succeeds
- * or after mock provider simulates payment.
+ * POST handler — client-side confirmation, provider verification mandatory.
  */
 export async function POST(request: Request) {
   try {
@@ -36,67 +40,61 @@ export async function POST(request: Request) {
     }
 
     const { paymentId } = parsed.data
+    const payment = await prisma.payment.findUnique({ where: { id: paymentId } })
+    if (!payment) {
+      return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
+    }
+    // T8.D3: never settle unverified — no provider reference, no settlement
+    if (!payment.providerPaymentId) {
+      return NextResponse.json(
+        { error: 'Payment has no provider reference and cannot be verified' },
+        { status: 409 },
+      )
+    }
 
-    // Load payment record
-    const payment = await prisma.payment.findUnique({
-      where: { id: paymentId },
+    const provider = getPaymentProvider()
+    const providerStatus = await provider.getPaymentStatus(payment.providerPaymentId)
+
+    if (providerStatus.status === 'pending') {
+      return NextResponse.json(
+        { success: false, message: 'Payment still processing' },
+        { status: 200 },
+      )
+    }
+
+    const providerEnum = PROVIDER_ENUM[provider.name as keyof typeof PROVIDER_ENUM] ?? 'MOCK'
+    if (providerStatus.status === 'failed') {
+      await settlePaymentEvent({
+        provider: providerEnum,
+        // stable per (payment, outcome): a re-confirm replays, never re-marks
+        eventId: `confirm:${payment.providerPaymentId}:failed`,
+        event: 'payment_failed',
+        providerPaymentId: payment.providerPaymentId,
+        failureReason: providerStatus.failureReason ?? 'Payment failed at provider',
+      })
+      return NextResponse.json(
+        { error: 'Payment failed', failureReason: providerStatus.failureReason },
+        { status: 400 },
+      )
+    }
+
+    // verified completed — settle through the inbox
+    await settlePaymentEvent({
+      provider: providerEnum,
+      eventId: `confirm:${payment.providerPaymentId}:succeeded`,
+      event: 'payment_succeeded',
+      providerPaymentId: payment.providerPaymentId,
     })
 
-    if (!payment) {
-      return NextResponse.json(
-        { error: 'Payment not found' },
-        { status: 404 },
-      )
-    }
-
-    // Verify status with payment provider
-    const provider = getPaymentProvider()
-
-    if (payment.providerPaymentId) {
-      const providerStatus = await provider.getPaymentStatus(
-        payment.providerPaymentId,
-      )
-
-      if (providerStatus.status === 'pending') {
-        return NextResponse.json(
-          { success: false, message: 'Payment still processing' },
-          { status: 200 },
-        )
-      }
-
-      if (providerStatus.status === 'failed') {
-        await prisma.payment.update({
-          where: { id: paymentId },
-          data: {
-            status: 'FAILED',
-            failureReason:
-              providerStatus.failureReason ?? 'Payment failed at provider',
-          },
-        })
-
-        return NextResponse.json(
-          {
-            error: 'Payment failed',
-            failureReason: providerStatus.failureReason,
-          },
-          { status: 400 },
-        )
-      }
-    }
-
-    // Provider says completed (or mock) — run post-payment flow
-    const result = await runPostPaymentFlow(paymentId)
-
-    // Load updated policy status
+    // policy status via the installment chain (created at first capture)
     const updatedPayment = await prisma.payment.findUnique({
       where: { id: paymentId },
-      include: { policy: { select: { status: true } } },
+      include: { installment: { include: { schedule: { include: { quote: { include: { policy: { select: { status: true } } } } } } } } },
     })
 
     return NextResponse.json({
       success: true,
-      policyStatus: updatedPayment?.policy.status ?? 'SUBMITTED',
-      emailSent: result.emailSent,
+      policyStatus: updatedPayment?.installment.schedule.quote.policy?.status ?? 'PENDING_SUBMISSION',
     })
   } catch (error) {
     console.error('[PaymentConfirm] POST error:', error)
@@ -115,15 +113,13 @@ export async function POST(request: Request) {
  *
  * PayU redirects the customer back here after payment on their hosted page.
  * URL format: /api/payments/confirm?provider=payu&orderId=...
- *
- * This triggers side effects (post-payment flow), but idempotency guard
- * makes it safe for duplicate/refresh calls.
+ * Same verified settlement path; safe for duplicate/refresh calls (the
+ * derived eventId replays).
  */
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url)
     const orderId = url.searchParams.get('orderId')
-    const providerParam = url.searchParams.get('provider')
 
     if (!orderId) {
       return NextResponse.json(
@@ -133,52 +129,57 @@ export async function GET(request: Request) {
     }
 
     // Find payment by provider payment ID
-    const payment = await prisma.payment.findFirst({
+    const payment = await prisma.payment.findUnique({
       where: { providerPaymentId: orderId },
     })
 
+    const appUrl = process.env.APP_URL ?? 'http://localhost:3001'
     if (!payment) {
-      console.error(
-        `[PaymentConfirm] GET: Payment not found for orderId=${orderId}`,
-      )
+      console.error(`[PaymentConfirm] GET: Payment not found for orderId=${orderId}`)
       // Redirect to home with error — don't expose internal details
-      const appUrl = process.env.APP_URL ?? 'http://localhost:3001'
       return NextResponse.redirect(`${appUrl}/?payment=error`)
     }
 
-    // Verify status with payment provider
-    if (providerParam === 'payu' || providerParam === 'stripe') {
-      const provider = getPaymentProvider()
-      const providerStatus = await provider.getPaymentStatus(orderId)
+    // Verify status with the payment provider — the redirect itself proves
+    // nothing (T8.D3)
+    const provider = getPaymentProvider()
+    const providerStatus = await provider.getPaymentStatus(orderId)
+    const providerEnum = PROVIDER_ENUM[provider.name as keyof typeof PROVIDER_ENUM] ?? 'MOCK'
 
-      if (providerStatus.status === 'failed') {
-        await prisma.payment.update({
-          where: { id: payment.id },
-          data: {
-            status: 'FAILED',
-            failureReason:
-              providerStatus.failureReason ?? 'Payment failed at provider',
-          },
-        })
-
-        const appUrl = process.env.APP_URL ?? 'http://localhost:3001'
-        return NextResponse.redirect(`${appUrl}/?payment=failed`)
-      }
+    if (providerStatus.status === 'failed') {
+      await settlePaymentEvent({
+        provider: providerEnum,
+        eventId: `confirm:${orderId}:failed`,
+        event: 'payment_failed',
+        providerPaymentId: orderId,
+        failureReason: providerStatus.failureReason ?? 'Payment failed at provider',
+      })
+      return NextResponse.redirect(`${appUrl}/?payment=failed`)
+    }
+    if (providerStatus.status === 'pending') {
+      return NextResponse.redirect(`${appUrl}/?payment=pending`)
     }
 
-    // Run post-payment flow (idempotent — safe for duplicates)
-    await runPostPaymentFlow(payment.id)
+    await settlePaymentEvent({
+      provider: providerEnum,
+      eventId: `confirm:${orderId}:succeeded`,
+      event: 'payment_succeeded',
+      providerPaymentId: orderId,
+    })
 
-    // Find conversationId via Payment → Policy → Quote → Application → conversationId
+    // Find conversationId via Payment → Installment → Schedule → Quote →
+    // Application → originConversationId
     const paymentWithRelations = await prisma.payment.findUnique({
       where: { id: payment.id },
       include: {
-        policy: {
+        installment: {
           include: {
-            quote: {
+            schedule: {
               include: {
-                application: {
-                  select: { conversationId: true },
+                quote: {
+                  include: {
+                    application: { select: { originConversationId: true } },
+                  },
                 },
               },
             },
@@ -188,9 +189,7 @@ export async function GET(request: Request) {
     })
 
     const conversationId =
-      paymentWithRelations?.policy?.quote?.application?.conversationId
-
-    const appUrl = process.env.APP_URL ?? 'http://localhost:3001'
+      paymentWithRelations?.installment.schedule.quote.application?.originConversationId
 
     if (conversationId) {
       return NextResponse.redirect(
@@ -202,7 +201,12 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${appUrl}/?payment=success`)
   } catch (error) {
     console.error('[PaymentConfirm] GET error:', error)
-    const appUrl = process.env.APP_URL ?? 'http://localhost:3001'
-    return NextResponse.redirect(`${appUrl}/?payment=error`)
+    return NextResponse.json(
+      {
+        error: 'Internal server error',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 },
+    )
   }
 }

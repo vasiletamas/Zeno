@@ -1,115 +1,75 @@
 'use client'
 
 /**
- * Document List
+ * Document List (D4.6 — registry-backed)
  *
- * Lists policy documents: Polita PDF, Raport suitabilitate (DNT), Chitanta plata.
- * DNT report links to real PDF download when suitabilityReportPath exists.
- * Other documents remain placeholders for now.
+ * Renders the customer's Document-registry rows with real download links
+ * through the single serving route. Kind labels are localized here (M6 —
+ * the registry stores codes only); the alert() placeholders died.
  */
 
 import { FileText, Download } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/language-context'
-import { t } from '@/lib/i18n/translations'
 
-interface DocumentListProps {
-  policyActive: boolean
-  policyId?: string | null
-  suitabilityReportPath?: string | null
+export interface DocumentRow {
+  id: string
+  kind: string
+  version: number
+  language: string
+  generatedAt: string
 }
 
-interface DocumentItem {
-  key: string
-  labelKey: string
+const KIND_LABELS: Record<string, { ro: string; en: string }> = {
+  IPID: { ro: 'Document de informare (IPID)', en: 'Product information (IPID)' },
+  TERMS: { ro: 'Termeni și condiții', en: 'Terms and conditions' },
+  SUITABILITY_REPORT: { ro: 'Raport de suitabilitate (DNT)', en: 'Suitability report (DNT)' },
+  PAYMENT_RECEIPT: { ro: 'Chitanță de plată', en: 'Payment receipt' },
+  POLICY_SCHEDULE: { ro: 'Specificația poliței', en: 'Policy schedule' },
 }
 
-const DOCUMENTS: DocumentItem[] = [
-  { key: 'policy', labelKey: 'document_policy' },
-  { key: 'dnt', labelKey: 'document_dnt' },
-  { key: 'receipt', labelKey: 'document_receipt' },
-]
-
-export default function DocumentList({
-  policyActive,
-  policyId,
-  suitabilityReportPath,
-}: DocumentListProps) {
+export default function DocumentList({ documents }: { documents: DocumentRow[] }) {
   const { lang } = useLanguage()
 
-  function renderAction(doc: DocumentItem) {
-    // DNT report: link to real download if available
-    if (doc.key === 'dnt' && policyId && suitabilityReportPath) {
-      return (
-        <a
-          href={`/api/documents/dnt-report/${policyId}`}
-          download
-          className="flex min-h-[44px] items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-sage transition-colors hover:bg-sage/10"
-        >
-          <Download size={16} />
-          Download
-        </a>
-      )
-    }
-
-    // DNT report: not yet generated
-    if (doc.key === 'dnt' && policyActive && !suitabilityReportPath) {
-      return (
-        <span className="text-xs text-muted">
-          {lang === 'ro'
-            ? 'Documentul va fi disponibil in curand'
-            : 'Document will be available soon'}
-        </span>
-      )
-    }
-
-    // Other documents: placeholder
-    if (policyActive) {
-      return (
-        <button
-          onClick={() =>
-            alert(
-              lang === 'ro'
-                ? 'Descarcarea va fi disponibila in curand'
-                : 'Download will be available soon',
-            )
-          }
-          className="min-h-[44px] rounded-lg px-3 py-2 text-sm font-medium text-sage transition-colors hover:bg-sage/10"
-        >
-          Download
-        </button>
-      )
-    }
-
+  if (documents.length === 0) {
     return (
-      <span className="text-xs text-muted">
-        {t('document_unavailable', lang)}
-      </span>
+      <div className="rounded-xl border border-warm-border bg-linen px-6 py-8 text-center">
+        <p className="text-sm text-muted">
+          {lang === 'ro'
+            ? 'Nu ai documente disponibile încă.'
+            : 'No documents available yet.'}
+        </p>
+      </div>
     )
   }
 
   return (
-    <div>
-      <h3 className="mb-3 text-lg font-medium text-night">
-        {t('dashboard_documents', lang)}
-      </h3>
-
-      <div className="divide-y divide-warm-border rounded-xl border border-warm-border bg-soft-white">
-        {DOCUMENTS.map((doc) => (
-          <div
-            key={doc.key}
-            className="flex items-center justify-between px-4 py-3"
-          >
-            <div className="flex items-center gap-3">
-              <FileText size={20} className="shrink-0 text-muted" />
-              <span className="text-sm font-medium text-night">
-                {t(doc.labelKey, lang)}
-              </span>
-            </div>
-
-            {renderAction(doc)}
-          </div>
-        ))}
-      </div>
+    <div className="rounded-xl border border-warm-border bg-white">
+      <ul className="divide-y divide-warm-border">
+        {documents.map((doc) => {
+          const label = KIND_LABELS[doc.kind]?.[lang === 'ro' ? 'ro' : 'en'] ?? doc.kind
+          return (
+            <li key={doc.id} className="flex items-center justify-between gap-3 px-4 py-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <FileText size={18} className="shrink-0 text-sage" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-night">{label}</p>
+                  <p className="text-xs text-muted">
+                    v{doc.version} · {doc.language.toUpperCase()} · {new Date(doc.generatedAt).toLocaleDateString(lang === 'ro' ? 'ro-RO' : 'en-GB')}
+                  </p>
+                </div>
+              </div>
+              <a
+                href={`/api/documents/${doc.id}`}
+                download
+                className="flex min-h-[44px] items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-sage transition-colors hover:bg-sage/10"
+              >
+                <Download size={16} />
+                Download
+              </a>
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }
