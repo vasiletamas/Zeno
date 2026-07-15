@@ -59,6 +59,21 @@ function isReasoningModel(model: string): boolean {
 
 const MIN_REASONING_COMPLETION_TOKENS = 4096
 
+/**
+ * Models whose /v1/chat/completions rejects function tools while reasoning
+ * is active — including the DEFAULT effort applied when the param is omitted
+ * (400: "Function tools with reasoning_effort are not supported for
+ * gpt-5.6-sol in /v1/chat/completions. To use function tools, use
+ * /v1/responses or set reasoning_effort to 'none'."). Tool-bearing calls to
+ * these models must send reasoning_effort: 'none' explicitly; non-tool calls
+ * are unaffected.
+ */
+const MODELS_REQUIRING_REASONING_NONE_WITH_TOOLS = ['gpt-5.6-sol']
+
+function requiresReasoningNoneWithTools(model: string): boolean {
+  return MODELS_REQUIRING_REASONING_NONE_WITH_TOOLS.some(m => model.startsWith(m))
+}
+
 function adjustTokensForReasoning(
   maxTokens: number | undefined,
   reasoning: boolean,
@@ -207,6 +222,17 @@ export class OpenAIProvider implements LLMProviderInterface {
     return { reasoning_effort: reasoning.effort }
   }
 
+  /**
+   * Tool-bearing calls to quirked models (see
+   * MODELS_REQUIRING_REASONING_NONE_WITH_TOOLS) must force
+   * reasoning_effort: 'none' — spread AFTER buildReasoningParam so it wins
+   * over any requested effort, which the API would reject anyway.
+   */
+  private buildToolsReasoningOverride(model: string): Record<string, unknown> {
+    if (!requiresReasoningNoneWithTools(model)) return {}
+    return { reasoning_effort: 'none' }
+  }
+
   // ==============================================
   // chat()
   // ==============================================
@@ -256,6 +282,7 @@ export class OpenAIProvider implements LLMProviderInterface {
       temperature: reasoning ? undefined : request.temperature,
       ...this.buildTokenParam(request.model, request.maxTokens),
       ...this.buildReasoningParam(request.model, request.reasoning),
+      ...this.buildToolsReasoningOverride(request.model),
       stream: false,
     })
 
@@ -352,6 +379,7 @@ export class OpenAIProvider implements LLMProviderInterface {
       tool_choice: this.convertToolChoice(request.toolChoice),
       temperature: reasoning ? undefined : request.temperature,
       ...this.buildTokenParam(request.model, request.maxTokens),
+      ...this.buildToolsReasoningOverride(request.model),
       stream: true,
       stream_options: { include_usage: true },
     })

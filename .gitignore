@@ -58,3 +58,4 @@ turn*.yml
 
 # D2 document storage (FS provider)
 /storage/
+/backups/
