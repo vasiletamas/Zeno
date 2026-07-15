@@ -95,6 +95,17 @@ const REPLAY_EXEMPT = new Set([
  */
 export const OPERATOR_TOOLS = new Set(['resolve_referral', 'resolve_work_item', 'mark_submitted', 'activate_policy', 'cancel_submission', 'approve_erasure', 'approve_export'])
 
+/**
+ * P0-3: money commits take an ADDITIONAL customer-scoped advisory lock. The
+ * per-conversation lock does not serialize two conversations bound to the same
+ * customer's application (resume_application leaves both pointing at it), so
+ * without this each could observe no open payment attempt and create a
+ * duplicate provider intent + Payment (or two schedules on a shared quote).
+ * The customer lock is always taken AFTER the conversation lock (constant
+ * order → no deadlock), and only these tools take it.
+ */
+const MONEY_TOOLS = new Set(['ensure_payment_session', 'change_payment_option', 'accept_quote'])
+
 export function resolveTargetRef(tool: string, args: Record<string, unknown>, state: DerivedStateV3, conversationId: string): string {
   // repeatable commits — addressed entity from ARGS (erratum 4)
   if (tool === 'collect_customer_field') return `field:${String(args.field ?? 'unknown')}`
@@ -354,6 +365,12 @@ async function runApplyTransactionInner(req: CommitRequest, requiresConfirmation
     // ::text cast because pg_advisory_xact_lock returns void, which the
     // client cannot deserialize.
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${req.conversationId}))::text`
+    // P0-3: money commits ALSO serialize per customer (constant order: after
+    // the conversation lock) so two conversations sharing one application
+    // cannot each open a payment attempt / accept the same quote.
+    if (MONEY_TOOLS.has(req.tool)) {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${'customer:' + req.customerId}))::text`
+    }
     // Replay re-check INSIDE the lock (erratum 2): two genuinely concurrent
     // identical commits both pass the pre-lock check; the loser replays here.
     const lockedPrior = REPLAY_EXEMPT.has(req.tool) ? null : await findFreshApplied(tx, req.conversationId, req.tool, { argsHash })

@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db'
+import { ensurePartialUniqueIndexes } from '@/prisma/seeds/partial-indexes'
 import { seedProduct } from '@/prisma/seeds/seed-product'
 import { seedProductContent } from '@/prisma/seeds/seed-product-content'
 import { seedQuestions } from '@/prisma/seeds/seed-questions'
@@ -63,6 +64,9 @@ export async function resetFunnelTables(): Promise<void> {
  */
 export async function resetDb(): Promise<void> {
   await resetFunnelTables()
+  // partial unique indexes the runtime relies on (idempotent) — guarantees the
+  // ring has them regardless of how this test DB was bootstrapped (P0-3).
+  await ensurePartialUniqueIndexes(prisma)
   await seedProduct(prisma)
   await seedProductContent(prisma)
   await seedQuestions(prisma)
