@@ -33,6 +33,81 @@ export interface DisplayCoverage {
   amountRange?: { min: number; max: number }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// T15: quote-card coverage rows — every number the seed carries
+// ─────────────────────────────────────────────────────────────────────────
+
+export type CoverageUnit = 'per_day' | 'lump_sum'
+export type CapPeriod = 'per_year' | 'per_event'
+
+/**
+ * CoverageType has no capPeriod column — the period a maxUnits cap applies
+ * to lives only in the seed's prose descriptions. Encode it by coverage
+ * code: HOSPITALIZATION_ABROAD's 60 days are "Per eveniment"; everything
+ * else (HOSPITALIZATION_ACCIDENT: "Maxim: 90 zile pe an de asigurare")
+ * defaults to per insurance YEAR.
+ */
+const CAP_PERIOD_BY_COVERAGE_CODE: Record<string, CapPeriod> = {
+  HOSPITALIZATION_ABROAD: 'per_event',
+}
+
+export function capPeriodForCoverage(code: string): CapPeriod {
+  return CAP_PERIOD_BY_COVERAGE_CODE[code] ?? 'per_year'
+}
+
+/**
+ * One coverage line of a quote (payload + persisted quote.coverages JSON).
+ * Qualifier keys exist only when meaningful: per_day rows carry their cap
+ * (maxUnits + capPeriod) and franchise (deductibleDays) when the catalog
+ * defines them; lump sums carry none.
+ */
+export interface QuoteCoverageRow {
+  code: string
+  name: LocalizedString
+  amount: number
+  currency: string
+  unit: CoverageUnit
+  maxUnits?: number
+  deductibleDays?: number
+  capPeriod?: CapPeriod
+}
+
+/**
+ * Map a CoverageAmount row (with its CoverageType included) to the quote
+ * coverage line. "Spitalizare: 20 RON" was a 20 RON/DAY coverage with a
+ * 90-day/year cap and a 3-day franchise — this is where those qualifiers
+ * stop being dropped.
+ */
+export function toQuoteCoverageRow(ca: {
+  amount: number
+  currency: string
+  coverageType: {
+    code: string
+    name: LocalizedString
+    unit?: string | null
+    maxUnits?: number | null
+    deductibleDays?: number | null
+  }
+}): QuoteCoverageRow {
+  const ct = ca.coverageType
+  const unit: CoverageUnit = ct.unit === 'per_day' ? 'per_day' : 'lump_sum'
+  const row: QuoteCoverageRow = {
+    code: ct.code,
+    name: ct.name,
+    amount: ca.amount,
+    currency: ca.currency,
+    unit,
+  }
+  if (unit === 'per_day') {
+    if (ct.maxUnits != null) {
+      row.maxUnits = ct.maxUnits
+      row.capPeriod = capPeriodForCoverage(ct.code)
+    }
+    if (ct.deductibleDays != null) row.deductibleDays = ct.deductibleDays
+  }
+  return row
+}
+
 function inBand(row: RawCoverageRow, age: number): boolean {
   return (
     (row.minAge === null || age >= row.minAge) &&

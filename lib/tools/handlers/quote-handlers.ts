@@ -11,6 +11,7 @@ import { canQuoteTransition, effectiveQuoteStatus, type QuoteStatusV3 } from '@/
 import { disclosuresRequired, type DisclosureRef } from '@/lib/engines/disclosures'
 import { buildSchedule, type PaymentFrequency } from '@/lib/engines/payment-schedule'
 import { getProductDisclosureDocuments } from '@/lib/documents/registry'
+import { toQuoteCoverageRow, type QuoteCoverageRow } from '@/lib/products/coverage-display'
 import { evaluateEligibility } from '@/lib/engines/eligibility'
 import { deriveSuitability } from '@/lib/engines/derive-and-expose'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
@@ -131,15 +132,22 @@ export const generateQuote: ToolHandler = async (_args, context) => {
         }
         return true
       })
-      .map(ca => ({
-        code: ca.coverageType.code,
-        name: ca.coverageType.name as { en: string; ro: string },
+      // T15: toQuoteCoverageRow threads unit/maxUnits/deductibleDays (+ the
+      // code-mapped capPeriod) through — the card must carry ALL the numbers.
+      .map(ca => toQuoteCoverageRow({
         amount: ca.amount,
         currency: ca.currency,
+        coverageType: {
+          code: ca.coverageType.code,
+          name: ca.coverageType.name as { en: string; ro: string },
+          unit: ca.coverageType.unit,
+          maxUnits: ca.coverageType.maxUnits,
+          deductibleDays: ca.coverageType.deductibleDays,
+        },
       }))
 
     let addonPricingRule: { premiumAnnual: number } | null = null
-    let addonCoverages: { code: string; name: { en: string; ro: string }; amount: number; currency: string }[] = []
+    let addonCoverages: QuoteCoverageRow[] = []
     if (application.includesAddon) {
       const addon = await context.db.addon.findFirst({
         where: { productId: application.productId, isActive: true },
@@ -148,11 +156,16 @@ export const generateQuote: ToolHandler = async (_args, context) => {
       if (addon) {
         const matchingRule = addon.pricingRules.find(r => customerAge >= r.minAge && customerAge <= r.maxAge)
         if (matchingRule) addonPricingRule = { premiumAnnual: matchingRule.premiumAnnual }
-        addonCoverages = addon.coverageAmounts.map(ca => ({
-          code: ca.coverageType.code,
-          name: ca.coverageType.name as { en: string; ro: string },
+        addonCoverages = addon.coverageAmounts.map(ca => toQuoteCoverageRow({
           amount: ca.amount,
           currency: ca.currency,
+          coverageType: {
+            code: ca.coverageType.code,
+            name: ca.coverageType.name as { en: string; ro: string },
+            unit: ca.coverageType.unit,
+            maxUnits: ca.coverageType.maxUnits,
+            deductibleDays: ca.coverageType.deductibleDays,
+          },
         }))
       }
     }
@@ -232,7 +245,10 @@ export const generateQuote: ToolHandler = async (_args, context) => {
         validUntil: result.validUntil.toISOString(),
         applicationFrozen: true,
       },
-      message: `Quote issued: ${result.premiumAnnual} RON/year (${result.premiumMonthly} RON/month), valid until ${result.validUntil.toISOString().split('T')[0]}. The application is now frozen — changes require cancelling the quote and re-applying.`,
+      // T15 conduct line: the card informs, prose sells — the factual lead
+      // stays for the model's own grounding, the instruction stops it from
+      // re-listing the card's numbers above the card.
+      message: `Quote issued: ${result.premiumAnnual} RON/year (${result.premiumMonthly} RON/month), valid until ${result.validUntil.toISOString().split('T')[0]}. The application is now frozen — changes require cancelling the quote and re-applying. A quote card with ALL the numbers is shown — in prose do NOT repeat prices or coverage figures; give ONE short personalized reason to act, anchored to what you know about this customer, leading with the strongest benefit.`,
       uiAction: {
         type: 'show_quote',
         payload: {
@@ -242,6 +258,7 @@ export const generateQuote: ToolHandler = async (_args, context) => {
           includesAddon: application.includesAddon,
           premiumAnnual: result.premiumAnnual,
           premiumMonthly: result.premiumMonthly,
+          currency: quote.currency, // T15: the quote's currency, top level
           baseCoverages: result.baseCoverages,
           addonCoverages: result.addonCoverages,
           validUntil: result.validUntil.toISOString(),

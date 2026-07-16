@@ -47,6 +47,47 @@ describe('generate_quote commit (D1.4)', () => {
     expect(await prisma.quote.findUnique({ where: { applicationId: fx.applicationId } })).toBeNull()
   })
 
+  it('T15: show_quote payload carries unit/caps/franchise per coverage + top-level currency; message sells instead of repeating numbers', async () => {
+    const fx = await buildReadyApplication()
+    const res = await gq(fx)
+    expect(res.outcome).toBe('applied')
+    const data = res.data as Record<string, unknown>
+
+    const ui = data._uiAction as { type: string; payload: Record<string, unknown> }
+    expect(ui.type).toBe('show_quote')
+    const p = ui.payload
+
+    // existing fields stay byte-identical
+    expect(p.quoteId).toBeTruthy()
+    expect(p.tierName).toEqual({ en: 'Standard', ro: 'Standard' })
+    expect(p.levelName).toEqual({ en: 'Level I', ro: 'Nivelul I' })
+    expect(p.includesAddon).toBe(false)
+    expect(p.premiumAnnual).toBe(190)
+    expect(p.premiumMonthly).toBe(15.83)
+    expect(typeof p.validUntil).toBe('string')
+
+    // NEW: the quote's currency at top level
+    expect(p.currency).toBe('RON')
+
+    // NEW: per-day coverages carry every qualifier the seed already had
+    const base = p.baseCoverages as Array<Record<string, unknown>>
+    const hosp = base.find((c) => c.code === 'HOSPITALIZATION_ACCIDENT')
+    expect(hosp).toMatchObject({ amount: 20, currency: 'RON', unit: 'per_day', maxUnits: 90, deductibleDays: 3, capPeriod: 'per_year' })
+    const death = base.find((c) => c.code === 'DEATH_ANY_CAUSE')!
+    expect(death.unit).toBe('lump_sum')
+    expect(death).not.toHaveProperty('maxUnits')
+    expect(death).not.toHaveProperty('deductibleDays')
+    expect(death).not.toHaveProperty('capPeriod')
+
+    // conduct line: the factual lead stays for grounding; prose must not re-list the card
+    const msg = data._message as string
+    expect(msg).toContain('Quote issued: 190 RON/year (15.83 RON/month)')
+    expect(msg).toContain('The application is now frozen')
+    expect(msg).toContain('A quote card with ALL the numbers is shown')
+    expect(msg).toContain('do NOT repeat prices or coverage figures')
+    expect(msg).toContain('ONE short personalized reason to act')
+  })
+
   it('a quote row in ANY state makes generate_quote illegal (one-app-one-quote; no P2002 path)', async () => {
     const fx = await buildReadyApplication()
     await gq(fx)

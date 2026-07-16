@@ -2,11 +2,12 @@
 
 import { Check, Loader2 } from 'lucide-react'
 import { t, type Language } from '@/lib/i18n/translations'
+import { formatCoverage, type FormattableCoverage } from '@/lib/products/coverage-format'
 
-interface Coverage {
+// T15: coverage rows carry every qualifier the catalog has (unit, caps,
+// franchise) — formatCoverage renders them; the name stays local.
+interface Coverage extends FormattableCoverage {
   name: { en: string; ro: string }
-  amount: number
-  currency: string
 }
 
 interface QuoteCardProps {
@@ -24,14 +25,6 @@ interface QuoteCardProps {
   language: Language
   isAnswered?: boolean
   isLoading?: boolean
-}
-
-function formatAmount(amount: number, currency: string): string {
-  if (amount >= 1_000_000) {
-    const millions = amount / 1_000_000
-    return `${millions % 1 === 0 ? millions.toFixed(0) : millions.toFixed(1)}M ${currency}`
-  }
-  return `${amount.toLocaleString('ro-RO')} ${currency}`
 }
 
 function formatDateRo(isoDate: string): string {
@@ -107,7 +100,7 @@ export function QuoteCard({
               <li key={idx} className="flex items-start gap-2 text-[13px] text-night">
                 <Check className="w-4 h-4 text-sage flex-shrink-0 mt-0.5" />
                 <span>
-                  {covName}: {formatAmount(cov.amount, cov.currency)}
+                  {covName}: {formatCoverage(cov, language)}
                 </span>
               </li>
             )

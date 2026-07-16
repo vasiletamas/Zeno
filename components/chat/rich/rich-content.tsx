@@ -44,6 +44,11 @@ interface CoveragePayload {
   amount: number
   currency: string
   amountRange?: { min: number; max: number }
+  // T15: quote-card rows carry unit/caps/franchise (product cards ignore them)
+  unit?: 'per_day' | 'lump_sum'
+  maxUnits?: number
+  deductibleDays?: number
+  capPeriod?: 'per_year' | 'per_event'
 }
 
 interface TierLevel {

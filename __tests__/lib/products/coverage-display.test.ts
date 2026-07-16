@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { collapseCoveragesForDisplay } from '@/lib/products/coverage-display'
+import { capPeriodForCoverage, collapseCoveragesForDisplay, toQuoteCoverageRow } from '@/lib/products/coverage-display'
 
 const DEATH = {
   code: 'DEATH_ANY_CAUSE',
@@ -86,5 +86,92 @@ describe('collapseCoveragesForDisplay', () => {
     expect(result[0]).toMatchObject({
       amountRange: { min: 30000, max: 40000 },
     })
+  })
+})
+
+/**
+ * T15: CoverageType has no capPeriod column — the period a maxUnits cap
+ * applies to lives only in seed prose ("Maxim: 90 zile pe an" vs "Per
+ * eveniment"), so it is encoded by coverage code with a per_year default.
+ */
+describe('capPeriodForCoverage', () => {
+  it('HOSPITALIZATION_ABROAD caps per event (seed description: "Per eveniment")', () => {
+    expect(capPeriodForCoverage('HOSPITALIZATION_ABROAD')).toBe('per_event')
+  })
+
+  it('defaults to per_year for every other code (HOSPITALIZATION_ACCIDENT: "Maxim: 90 zile pe an")', () => {
+    expect(capPeriodForCoverage('HOSPITALIZATION_ACCIDENT')).toBe('per_year')
+    expect(capPeriodForCoverage('SOME_FUTURE_COVERAGE')).toBe('per_year')
+  })
+})
+
+describe('toQuoteCoverageRow', () => {
+  const name = { en: 'x', ro: 'x' }
+
+  it('HOSPITALIZATION_ACCIDENT seed shape: per_day row carries maxUnits, deductibleDays and capPeriod', () => {
+    const row = toQuoteCoverageRow({
+      amount: 20,
+      currency: 'RON',
+      coverageType: { code: 'HOSPITALIZATION_ACCIDENT', name, unit: 'per_day', maxUnits: 90, deductibleDays: 3 },
+    })
+    expect(row).toEqual({
+      code: 'HOSPITALIZATION_ACCIDENT',
+      name,
+      amount: 20,
+      currency: 'RON',
+      unit: 'per_day',
+      maxUnits: 90,
+      deductibleDays: 3,
+      capPeriod: 'per_year',
+    })
+  })
+
+  it('HOSPITALIZATION_ABROAD seed shape: per_day + per_event cap, NO deductibleDays key', () => {
+    const row = toQuoteCoverageRow({
+      amount: 100,
+      currency: 'EUR',
+      coverageType: { code: 'HOSPITALIZATION_ABROAD', name, unit: 'per_day', maxUnits: 60, deductibleDays: null },
+    })
+    expect(row).toEqual({
+      code: 'HOSPITALIZATION_ABROAD',
+      name,
+      amount: 100,
+      currency: 'EUR',
+      unit: 'per_day',
+      maxUnits: 60,
+      capPeriod: 'per_event',
+    })
+    expect(row).not.toHaveProperty('deductibleDays')
+  })
+
+  it('lump_sum rows carry NO qualifier keys at all', () => {
+    const row = toQuoteCoverageRow({
+      amount: 16000,
+      currency: 'RON',
+      coverageType: { code: 'DEATH_ANY_CAUSE', name, unit: 'lump_sum', maxUnits: null, deductibleDays: null },
+    })
+    expect(row).toEqual({ code: 'DEATH_ANY_CAUSE', name, amount: 16000, currency: 'RON', unit: 'lump_sum' })
+    expect(row).not.toHaveProperty('maxUnits')
+    expect(row).not.toHaveProperty('capPeriod')
+  })
+
+  it('a null/unknown unit defaults to lump_sum', () => {
+    const row = toQuoteCoverageRow({
+      amount: 4000,
+      currency: 'RON',
+      coverageType: { code: 'SURGICAL_INTERVENTION_ACCIDENT', name, unit: null, maxUnits: null, deductibleDays: null },
+    })
+    expect(row.unit).toBe('lump_sum')
+  })
+
+  it('per_day without maxUnits carries no capPeriod (nothing to qualify)', () => {
+    const row = toQuoteCoverageRow({
+      amount: 20,
+      currency: 'RON',
+      coverageType: { code: 'HOSPITALIZATION_ACCIDENT', name, unit: 'per_day', maxUnits: null, deductibleDays: 3 },
+    })
+    expect(row).not.toHaveProperty('maxUnits')
+    expect(row).not.toHaveProperty('capPeriod')
+    expect(row.deductibleDays).toBe(3)
   })
 })

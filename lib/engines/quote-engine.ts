@@ -11,6 +11,22 @@
 // TYPES
 // ==========================================
 
+/**
+ * One coverage line, passed through untouched. The qualifier fields (T15:
+ * unit/caps/franchise) are optional so callers with pure lump-sum data
+ * stay valid; the quote handler always supplies them from the catalog.
+ */
+export interface QuoteCoverage {
+  code: string
+  name: { en: string; ro: string }
+  amount: number
+  currency: string
+  unit?: 'per_day' | 'lump_sum'
+  maxUnits?: number
+  deductibleDays?: number
+  capPeriod?: 'per_year' | 'per_event'
+}
+
 export interface QuoteInput {
   tierCode: string
   levelCode: string
@@ -19,19 +35,9 @@ export interface QuoteInput {
   paymentFrequency: 'annual' | 'semi_annual' | 'quarterly'
   pricingLevel: { premiumAnnual: number; name: { en: string; ro: string } }
   pricingTier: { name: { en: string; ro: string } }
-  baseCoverages: {
-    code: string
-    name: { en: string; ro: string }
-    amount: number
-    currency: string
-  }[]
+  baseCoverages: QuoteCoverage[]
   addonPricingRule: { premiumAnnual: number } | null
-  addonCoverages: {
-    code: string
-    name: { en: string; ro: string }
-    amount: number
-    currency: string
-  }[]
+  addonCoverages: QuoteCoverage[]
   quoteValidityDays: number
 }
 
@@ -42,18 +48,8 @@ export interface QuoteResult {
   premiumQuarterly: number
   basePremiumAnnual: number
   addonPremiumAnnual: number
-  baseCoverages: {
-    code: string
-    name: { en: string; ro: string }
-    amount: number
-    currency: string
-  }[]
-  addonCoverages: {
-    code: string
-    name: { en: string; ro: string }
-    amount: number
-    currency: string
-  }[]
+  baseCoverages: QuoteCoverage[]
+  addonCoverages: QuoteCoverage[]
   pricingTierLabel: { en: string; ro: string }
   pricingLevelLabel: { en: string; ro: string }
   validUntil: Date
