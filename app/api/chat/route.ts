@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { handleChatTurn } from '@/lib/chat/orchestrator'
 import { adaptAction } from '@/lib/chat/action-adapter'
+import { ACTION_MESSAGE_PREFIX, actionLabel } from '@/lib/chat/action-labels'
 import { logError, logFatal } from '@/lib/errors/logger'
 
 // ==============================================
@@ -80,7 +81,9 @@ export async function POST(request: NextRequest) {
           { status: 400 },
         )
       }
-      message = message || `[Action: ${parsed.action.type}]`
+      // T22: the persisted user row is what the customer sees after reload —
+      // a localized, PII-safe summary, never the raw "[Action: type]" marker.
+      message = message || ACTION_MESSAGE_PREFIX + actionLabel(parsed.action, parsed.language ?? 'ro')
     }
 
     const debugEnabled = request.headers.get('x-zeno-debug') === '1'

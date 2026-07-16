@@ -2,11 +2,13 @@
 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { GENERIC_INTERACTION_LABELS, renderKind } from '@/lib/chat/action-labels'
 
 interface MessageBubbleProps {
   role: 'user' | 'assistant'
   content: string
   isStreaming?: boolean
+  language?: 'en' | 'ro'
 }
 
 // Render markdown inline in the chat bubble with brand-appropriate styling.
@@ -50,8 +52,25 @@ const markdownComponents = {
   ),
 }
 
-export function MessageBubble({ role, content, isStreaming }: MessageBubbleProps) {
+export function MessageBubble({ role, content, isStreaming, language = 'ro' }: MessageBubbleProps) {
   const isUser = role === 'user'
+
+  // T22: persisted action turns render as a muted chip — what the customer
+  // answered or signed — never a raw "[Action: type]" bubble. Classification
+  // lives in the exported pure helper renderKind (unit-tested in node env).
+  if (isUser) {
+    const kind = renderKind(content)
+    if (kind.kind !== 'text') {
+      const label = kind.kind === 'action' ? kind.label : GENERIC_INTERACTION_LABELS[language]
+      return (
+        <div className="flex justify-end animate-[message-appear_200ms_ease-out]">
+          <span className="inline-block rounded-full border border-warm-border bg-linen px-3 py-1 text-[13px] leading-[1.4] text-night/70">
+            {label}
+          </span>
+        </div>
+      )
+    }
+  }
 
   return (
     <div

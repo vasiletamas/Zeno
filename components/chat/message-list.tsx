@@ -99,6 +99,7 @@ export function MessageList({
                     role={message.role}
                     content={message.content}
                     isStreaming={message.isStreaming}
+                    language={language === 'en' ? 'en' : 'ro'}
                   />
                   {actionData && onAction && (
                     <RichContent
