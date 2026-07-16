@@ -13,6 +13,7 @@ import { PaymentCard } from './payment-card'
 import { DocumentUploadCard } from './document-upload-card'
 import { OtpEntryCard } from './otp-entry-card'
 import { DntReviewCard } from './dnt-review-card'
+import { MedicalReviewCard } from './medical-review-card'
 import { UnknownActionCard } from './unknown-action-card'
 
 /* ── Types ────────────────────────────────────────── */
@@ -412,6 +413,22 @@ export function RichContent({
           sessionId={p.sessionId as string}
           answers={p.answers as { code: string | null; question: LocalizedString; value: string; valueLabel: LocalizedString | null }[]}
           progress={p.progress as { answered: number; total: number }}
+          onAction={onAction}
+          language={language}
+          isAnswered={isAnswered}
+          isLoading={isLoading}
+        />
+      )
+    }
+
+    /* ── Medical declarations review/sign (T11 clauses 5-6: the completing
+          write_question_answer auto-emits this card; the Sign click is the
+          ONLY affirmation — no checkboxes, consents were captured at DNT) ── */
+    case 'show_medical_review': {
+      return (
+        <MedicalReviewCard
+          applicationId={p.applicationId as string}
+          declarations={p.declarations as { code: string; question: LocalizedString; value: string; valueLabel: LocalizedString | null }[]}
           onAction={onAction}
           language={language}
           isAnswered={isAnswered}

@@ -11,6 +11,7 @@ import * as verification from './checks-verification'
 import * as ui from './checks-ui'
 import * as paymentFunnel from './checks-payment-funnel'
 import { questionnaireAnswerFabricated, stateClaimWithoutCommit } from './checks-fabrication'
+import { hallucinatedUiReference } from './checks-cards'
 import { blockedActionAttempted, missingConsequences, recomputeDriftFindings, type RecomputeOptions } from './checks-envelope'
 
 const isCheck = (v: unknown): v is DiagnosticCheck =>
@@ -29,6 +30,8 @@ export const CHECK_CATALOG: DiagnosticCheck[] = [
   // P0-1 ratchet (2026-07-06): fabrication + false-claim nets
   questionnaireAnswerFabricated,
   stateClaimWithoutCommit,
+  // T11 ratchet (2026-07-15): card references with no emitted card that turn
+  hallucinatedUiReference,
 ]
 
 export function runDiagnostics(

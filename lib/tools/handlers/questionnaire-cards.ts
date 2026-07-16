@@ -98,11 +98,30 @@ export const DNT_COMPLETION_MESSAGE =
   'All DNT questions answered. A review card with consent checkboxes and a Sign button is shown — do NOT ask for confirmation in prose and do NOT call sign_dnt yourself; invite the customer to review and sign on the card in ONE short line.'
 
 /**
+ * Clause 5/7 (T11): the application completion `_message`s. When sensitive
+ * declarations are pending signature the review card rides the SAME result,
+ * so the message says the card is already shown and forbids BOTH the
+ * self-sign and referencing cards no tool emitted. Live evidence (conv
+ * cmrm3fgku00056g0y4eb2hsme msgs 54-56): the old message said a card "must
+ * confirm" the declarations while emitting nothing — the model narrated
+ * "pe cardul afișat" for a card that never existed and the customer was
+ * stranded until typing the confirmation.
+ */
+export const MEDICAL_COMPLETION_MESSAGE =
+  'Application questionnaire complete. A medical-declarations review card with a Sign button is shown to the customer — do NOT call sign_medical_declarations yourself and do NOT reference any card unless a tool result THIS turn emitted one; invite them to sign in ONE short line.'
+
+/** T11: the no-pending-medical completion — the old conditional sign_medical
+ * sentence is gone (the card decision is the handler's, never the model's). */
+export const APPLICATION_COMPLETION_MESSAGE =
+  'Application questionnaire complete. Generate the quote.'
+
+/**
  * Clause 2: the save-path `_message`. Has-next embeds CONDUCT_LINE (DNT
  * keeps its Next-question-code prefix and typed-fallback hint — B2.7 live
  * lesson: agents guess codes without it); DNT completion is the T7 review-
- * card message; the application completion string is untouched (T11 owns
- * its card).
+ * card message; the application completion is the NO-pending-medical
+ * variant — the T11 handler swaps in MEDICAL_COMPLETION_MESSAGE (and the
+ * card) when the declaration state says a signature is pending.
  */
 export function savedMessage(
   groupType: QuestionnaireGroupType,
@@ -112,7 +131,7 @@ export function savedMessage(
   if (!next) {
     return groupType === 'dnt'
       ? DNT_COMPLETION_MESSAGE
-      : 'Application questionnaire complete. If sensitive medical answers were collected, sign_medical_declarations must confirm them (one card) before the quote; otherwise generate the quote.'
+      : APPLICATION_COMPLETION_MESSAGE
   }
   const remaining = progress.total - progress.answered
   return groupType === 'dnt'
@@ -220,5 +239,51 @@ export async function buildDntReviewCard(sessionId: string, db: DbClient): Promi
   return {
     type: 'show_dnt_review',
     payload: { sessionId, answers, progress: { answered: answers.length, total } },
+  }
+}
+
+export interface MedicalReviewDeclaration {
+  code: string
+  /** Localized question text — the CARD localizes, never the server. */
+  question: { en: string; ro: string }
+  value: string
+  /** Da/Nu for the BOOLEAN declarations; null for anything else (card falls back to the raw value). */
+  valueLabel: { en: string; ro: string } | null
+}
+
+export interface MedicalReviewCardAction {
+  type: 'show_medical_review'
+  payload: {
+    applicationId: string
+    declarations: MedicalReviewDeclaration[]
+  }
+}
+
+/**
+ * Clause 5 (T11): the review/sign card the COMPLETING write_question_answer
+ * carries when `loadMedicalDeclarationState` says sensitive declarations are
+ * pending signature. The loader is the ONE place that decides WHICH answers
+ * the customer signs (medical-declaration-state.ts) and it already carries
+ * the localized question text per declaration — this builder only shapes it
+ * for the card. NO checkboxes ride the payload: the consents were captured
+ * at DNT, the Sign click is the single affirmation (clause 6).
+ */
+export function buildMedicalReviewCard(
+  applicationId: string,
+  state: { declarations: { code: string; text: { en: string; ro: string }; value: string }[] },
+): MedicalReviewCardAction {
+  return {
+    type: 'show_medical_review',
+    payload: {
+      applicationId,
+      declarations: state.declarations.map((d) => ({
+        code: d.code,
+        question: d.text,
+        value: d.value,
+        // the BD declarations are BOOLEAN — options never ride the loader
+        // state, so the boolean fallback is the whole label story here
+        valueLabel: resolveValueLabel(undefined, d.value),
+      })),
+    },
   }
 }

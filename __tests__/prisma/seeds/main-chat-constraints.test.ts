@@ -36,6 +36,24 @@ describe('main-chat agent constraints', () => {
     )
   })
 
+  // T11 clause 7 (2026-07-15, conv cmrm3fgku00056g0y4eb2hsme msgs 54-56):
+  // the model wrote "confirmi declarațiile medicale pe cardul afișat" while
+  // NO tool result had emitted a card — the customer was stranded confirming
+  // a control that never existed. Enforced offline by the
+  // hallucinated_ui_reference diagnostics check.
+  it('forbids referencing cards no tool result emitted THIS turn (T11 clause 7)', () => {
+    const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
+    const parsed = JSON.parse(mainChat!.constraints as string)
+    expect(parsed).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('ONLY when a tool result THIS turn emitted one'),
+      ]),
+    )
+    const rule = (parsed as string[]).find((c) => c.includes('THIS turn emitted one'))
+    expect(rule).toContain('ONE short invite line')
+    expect(rule).toContain('never claim one exists')
+  })
+
   // E1 (2026-07-07): the discovery guardrails moved from systemPrompt to
   // promptSections.discoveryConduct (ships on DISCOVERY + QUOTE turns).
   // These pins follow the content to its new home — see the inventory note §7.

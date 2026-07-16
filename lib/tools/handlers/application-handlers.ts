@@ -28,7 +28,7 @@ import { deriveIdentityTier } from '@/lib/engines/identity-rules'
 import { loadMedicalDeclarationState } from '@/lib/engines/medical-declaration-state'
 import type { GroundingOption } from '@/lib/engines/anti-fabrication'
 import { valueNotGroundedError } from './grounding-guard'
-import { CONDUCT_LINE, questionCard, rejectReemit, savedMessage } from './questionnaire-cards'
+import { CONDUCT_LINE, MEDICAL_COMPLETION_MESSAGE, buildMedicalReviewCard, questionCard, rejectReemit, savedMessage } from './questionnaire-cards'
 import type { ToolHandler, ToolContext } from '@/lib/tools/types'
 import { bumpInsightOnAnswer } from './insight-bump'
 
@@ -317,12 +317,24 @@ export const writeQuestionAnswer: ToolHandler = async (args, context) => {
     if (!nextResult) {
       // Completeness is DERIVED (missingCodes = []) — the status machine
       // stays OPEN; generate_quote exposure turns on from the derived state.
+      //
+      // T11 clause 5: when sensitive declarations are pending signature, the
+      // COMPLETING commit carries the review/sign card — never model-
+      // initiated. Live defect (conv cmrm3fgku00056g0y4eb2hsme msgs 54-56):
+      // the completion said a sign card "must confirm" while emitting
+      // nothing; the model narrated a card that never existed and the
+      // customer was stranded. context.db, not the global client — the walk
+      // must see the just-applied answer inside the gateway tx.
+      const medical = await loadMedicalDeclarationState(context.db, postApp)
+      const pendingSignature = medical.requiredCodes.length > 0 && !medical.signed
       return {
         success: true,
         effects: plan.effects,
         data: { answerSaved: true, isComplete: true, applicationId: application.id, readyForQuote: true, ...planData(plan) },
-        // T11 adds the review card on this completion path — not T9's business
-        message: savedMessage('application', null, { answered: 0, total: 0 }),
+        message: pendingSignature
+          ? MEDICAL_COMPLETION_MESSAGE
+          : savedMessage('application', null, { answered: 0, total: 0 }),
+        uiAction: pendingSignature ? buildMedicalReviewCard(application.id, medical) : undefined,
       }
     }
 

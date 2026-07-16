@@ -2,9 +2,12 @@ import { describe, it, expect } from 'vitest'
 import {
   CONDUCT_LINE,
   DNT_COMPLETION_MESSAGE,
+  MEDICAL_COMPLETION_MESSAGE,
+  APPLICATION_COMPLETION_MESSAGE,
   questionCard,
   savedMessage,
   rejectReemit,
+  buildMedicalReviewCard,
 } from '@/lib/tools/handlers/questionnaire-cards'
 
 // T9/T12 clause 2 wording — pinned verbatim: the conduct instruction is
@@ -91,10 +94,42 @@ describe('savedMessage', () => {
     expect(savedMessage('dnt', null, { answered: 7, total: 7 })).toBe(DNT_COMPLETION_MESSAGE)
   })
 
-  it('application completion string is the pre-existing one, untouched (T11 owns its card)', () => {
-    expect(savedMessage('application', null, { answered: 7, total: 7 })).toBe(
-      'Application questionnaire complete. If sensitive medical answers were collected, sign_medical_declarations must confirm them (one card) before the quote; otherwise generate the quote.',
+  it('application completion (no pending medical) drops the sign_medical sentence — T11: the card rides the commit, never the prose (pinned verbatim)', () => {
+    expect(APPLICATION_COMPLETION_MESSAGE).toBe('Application questionnaire complete. Generate the quote.')
+    expect(savedMessage('application', null, { answered: 7, total: 7 })).toBe(APPLICATION_COMPLETION_MESSAGE)
+  })
+
+  it('medical completion says the review card is ALREADY shown, forbids self-sign AND referencing cards no tool emitted (T11 clauses 5+7, pinned verbatim)', () => {
+    expect(MEDICAL_COMPLETION_MESSAGE).toBe(
+      'Application questionnaire complete. A medical-declarations review card with a Sign button is shown to the customer — do NOT call sign_medical_declarations yourself and do NOT reference any card unless a tool result THIS turn emitted one; invite them to sign in ONE short line.',
     )
+  })
+})
+
+describe('buildMedicalReviewCard', () => {
+  const state = {
+    declarations: [
+      { code: 'BD_CANCER_HISTORY', text: { en: 'Cancer?', ro: 'Cancer?' }, value: 'false' },
+      { code: 'BD_TRANSPLANT', text: { en: 'Transplant?', ro: 'Transplant?' }, value: 'true' },
+    ],
+  }
+
+  it('builds show_medical_review over the loader state — question text rides localized, boolean values gain Da/Nu labels', () => {
+    expect(buildMedicalReviewCard('app_1', state)).toEqual({
+      type: 'show_medical_review',
+      payload: {
+        applicationId: 'app_1',
+        declarations: [
+          { code: 'BD_CANCER_HISTORY', question: { en: 'Cancer?', ro: 'Cancer?' }, value: 'false', valueLabel: { en: 'No', ro: 'Nu' } },
+          { code: 'BD_TRANSPLANT', question: { en: 'Transplant?', ro: 'Transplant?' }, value: 'true', valueLabel: { en: 'Yes', ro: 'Da' } },
+        ],
+      },
+    })
+  })
+
+  it('a non-boolean value keeps a null valueLabel (the card falls back to the raw value)', () => {
+    const card = buildMedicalReviewCard('app_1', { declarations: [{ code: 'X', text: { en: 'x', ro: 'x' }, value: 'other' }] })
+    expect(card.payload.declarations[0].valueLabel).toBeNull()
   })
 })
 

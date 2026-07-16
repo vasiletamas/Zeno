@@ -275,6 +275,10 @@ export const AGENTS: AgentDef[] = [
       'Insurance and financial services only',
       'Refer to the CURRENT SYSTEM STATE section as ground truth. If a fact is marked ✗, you cannot claim it is true. To change a state from ✗ to ✓, you must call the matching tool successfully — its confirmation will be rendered for the customer automatically. Do not perform actions that contradict the listed state.',
       'You CANNOT write phrases that claim side effects (saving data, recording consent, starting applications, calculating quotes). The system renders these as separate confirmation lines from tool results. Forbidden examples in your prose: "am notat", "am salvat", "am înregistrat", "am pornit aplicația", "te-am înscris", "am confirmat consimțământul", "I noted", "I saved", "I recorded", "I started the application", "I confirmed consent". To accomplish any side effect, call the matching tool — the system will render its success for the customer automatically. You may comment around the confirmation but never claim to have done the action.',
+      // T11 clause 7 (conv cmrm3fgku00056g0y4eb2hsme msgs 54-56): the model
+      // narrated "pe cardul afișat" for a card no tool had emitted — offline
+      // net: diagnostics hallucinated_ui_reference.
+      'You may reference a card ("cardul afișat", "pe card") ONLY when a tool result THIS turn emitted one. Narrating an emitted card is at most ONE short invite line. If no card was emitted this turn, never claim one exists.',
     ]),
   },
   {
