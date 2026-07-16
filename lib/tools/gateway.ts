@@ -311,7 +311,17 @@ export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
   // `confirmed` context flag, so handlers whose consequence PLAN demands
   // confirmation (sensitivity, T6.D3) can honor the two-step without the
   // static def.requiresConfirmation gate.
-  const confirmed = !!confirmToken && verifyConfirmToken(confirmSecret(), confirmToken, req.conversationId, req.tool, argsHash, fp)
+  //
+  // T7 clause 6 (single-confirmation ruling): GUI-actor commits are confirmed
+  // BY CONSTRUCTION — a GUI post originates from a card that rendered exactly
+  // the args being committed, so the click IS the human confirmation
+  // (equivalent in safety to the confirmToken round-trip, which exists to
+  // prevent AGENT self-confirmation). The static gate below never mints a
+  // token for gui, and handlers see context.confirmed=true so the conditional
+  // (plan-driven) gate never round-trips either. Replay, exposure legality
+  // and the in-lock re-checks still apply to gui commits unchanged.
+  const confirmed = req.actor === 'gui'
+    || (!!confirmToken && verifyConfirmToken(confirmSecret(), confirmToken, req.conversationId, req.tool, argsHash, fp))
   if (def.requiresConfirmation) {
     if (!confirmed) {
       const envelope: CommitResult = {

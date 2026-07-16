@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   CONDUCT_LINE,
+  DNT_COMPLETION_MESSAGE,
   questionCard,
   savedMessage,
   rejectReemit,
@@ -83,10 +84,14 @@ describe('savedMessage', () => {
     expect(msg).toBe(`Answer saved. 4 questions remaining. ${EXPECTED_CONDUCT_LINE}`)
   })
 
-  it('completion strings are the pre-existing ones, untouched', () => {
-    expect(savedMessage('dnt', null, { answered: 7, total: 7 })).toBe(
-      'All DNT questions answered. Ready for signature (sign_dnt).',
+  it('dnt completion says the review card is ALREADY shown and forbids prose confirmation / self-sign (T7 clause 5, pinned verbatim)', () => {
+    expect(DNT_COMPLETION_MESSAGE).toBe(
+      'All DNT questions answered. A review card with consent checkboxes and a Sign button is shown — do NOT ask for confirmation in prose and do NOT call sign_dnt yourself; invite the customer to review and sign on the card in ONE short line.',
     )
+    expect(savedMessage('dnt', null, { answered: 7, total: 7 })).toBe(DNT_COMPLETION_MESSAGE)
+  })
+
+  it('application completion string is the pre-existing one, untouched (T11 owns its card)', () => {
     expect(savedMessage('application', null, { answered: 7, total: 7 })).toBe(
       'Application questionnaire complete. If sensitive medical answers were collected, sign_medical_declarations must confirm them (one card) before the quote; otherwise generate the quote.',
     )

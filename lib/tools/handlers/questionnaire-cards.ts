@@ -11,6 +11,11 @@
  * (ui-action-registry + diagnostics).
  */
 
+import { resolveGroupCodes } from '@/lib/engines/question-groups'
+import { computeVisibleSet } from '@/lib/engines/dependency-graph'
+import { loadDependencyGraph } from '@/lib/engines/dependency-graph-loader'
+import type { DbClient } from '@/lib/tools/types'
+
 export type QuestionnaireGroupType = 'dnt' | 'application'
 
 /**
@@ -82,10 +87,22 @@ export function questionCard(
 }
 
 /**
+ * Clause 5/6 (T7): the DNT completion `_message`. The review card is emitted
+ * in the SAME result, so the model must never re-open the confirmation in
+ * prose or sign on the customer's behalf — the ONLY confirmation is the
+ * customer's Sign click on the card (single-confirmation ruling). Live
+ * evidence for every clause of this wording: conv cmrm3fgku00056g0y4eb2hsme
+ * msgs 32-38, where one signature cost four customer interactions.
+ */
+export const DNT_COMPLETION_MESSAGE =
+  'All DNT questions answered. A review card with consent checkboxes and a Sign button is shown — do NOT ask for confirmation in prose and do NOT call sign_dnt yourself; invite the customer to review and sign on the card in ONE short line.'
+
+/**
  * Clause 2: the save-path `_message`. Has-next embeds CONDUCT_LINE (DNT
  * keeps its Next-question-code prefix and typed-fallback hint — B2.7 live
- * lesson: agents guess codes without it); completion strings are the
- * pre-existing ones, untouched (T7/T11 own the completion cards).
+ * lesson: agents guess codes without it); DNT completion is the T7 review-
+ * card message; the application completion string is untouched (T11 owns
+ * its card).
  */
 export function savedMessage(
   groupType: QuestionnaireGroupType,
@@ -94,7 +111,7 @@ export function savedMessage(
 ): string {
   if (!next) {
     return groupType === 'dnt'
-      ? 'All DNT questions answered. Ready for signature (sign_dnt).'
+      ? DNT_COMPLETION_MESSAGE
       : 'Application questionnaire complete. If sensitive medical answers were collected, sign_medical_declarations must confirm them (one card) before the quote; otherwise generate the quote.'
   }
   const remaining = progress.total - progress.answered
@@ -116,4 +133,92 @@ export function rejectReemit<T extends Record<string, unknown>>(
   card: QuestionCardAction | undefined,
 ): Record<string, unknown> {
   return { ...(data ?? {}), ...(card ? { _uiAction: card } : {}) }
+}
+
+export interface DntReviewAnswer {
+  code: string | null
+  /** Localized question text — the CARD localizes, never the server. */
+  question: { en: string; ro: string }
+  value: string
+  /** Resolved from the option list (or Yes/No for booleans); null for free text. */
+  valueLabel: { en: string; ro: string } | null
+}
+
+export interface DntReviewCardAction {
+  type: 'show_dnt_review'
+  payload: {
+    sessionId: string
+    answers: DntReviewAnswer[]
+    progress: CardProgress
+  }
+}
+
+const BOOLEAN_LABELS: Record<string, { en: string; ro: string }> = {
+  true: { en: 'Yes', ro: 'Da' },
+  false: { en: 'No', ro: 'Nu' },
+}
+
+function resolveValueLabel(options: unknown, value: string): { en: string; ro: string } | null {
+  if (Array.isArray(options)) {
+    const match = options.find((o) => o && typeof o === 'object' && (o as { value?: unknown }).value === value)
+    const label = (match as { label?: unknown } | undefined)?.label
+    if (label && typeof label === 'object' && 'en' in (label as object) && 'ro' in (label as object)) {
+      return label as { en: string; ro: string }
+    }
+  }
+  // BOOLEAN answers normalize to 'true'/'false' (questionnaire-engine) —
+  // a raw 'true' on a customer-facing recap is not legible.
+  return BOOLEAN_LABELS[value] ?? null
+}
+
+/**
+ * Clause 5 (T7): the review/sign card the COMPLETING commit carries — all of
+ * the session's product-scoped visible answers in question order, plus the
+ * two unchecked consent checkboxes and the Sign button (rendered client-side).
+ * Callers inside a gateway transaction MUST pass context.db so the walk sees
+ * the just-written answer. The CNP is shown exactly as STORED — the DntAnswer
+ * row holds the MASK (P0-3), never the raw identifier.
+ */
+export async function buildDntReviewCard(sessionId: string, db: DbClient): Promise<DntReviewCardAction> {
+  const session = await db.dntSession.findUniqueOrThrow({ where: { id: sessionId }, select: { productId: true } })
+  // scope to the SESSION's product, never the conversation's (a resumed
+  // conversation may point elsewhere; the session is the regulatory record)
+  const codes = await resolveGroupCodes(session.productId, 'dnt', db)
+  const groups = await db.questionGroup.findMany({ where: { code: { in: codes } }, orderBy: { orderIndex: 'asc' } })
+  const questions = await db.question.findMany({ where: { groupId: { in: groups.map((g) => g.id) } } })
+  const groupOrder = new Map(groups.map((g) => [g.id, g.orderIndex]))
+  questions.sort((a, b) => (groupOrder.get(a.groupId) ?? 0) - (groupOrder.get(b.groupId) ?? 0) || a.orderIndex - b.orderIndex)
+  const answerRows = await db.dntAnswer.findMany({ where: { sessionId }, select: { questionId: true, value: true } })
+  const answersById = new Map(answerRows.map((a) => [a.questionId, a.value]))
+
+  // visibility recompute — same store the handlers' session walk uses (C1.8)
+  const answersByCode: Record<string, string> = {}
+  const codeList: string[] = []
+  for (const q of questions) {
+    if (!q.code) continue
+    codeList.push(q.code)
+    const v = answersById.get(q.id)
+    if (v !== undefined) answersByCode[q.code] = v
+  }
+  const graph = await loadDependencyGraph(db)
+  const visibleSet = computeVisibleSet(graph, codeList, { answers: answersByCode, selection: { tier: null, level: null, addon: null } })
+
+  const answers: DntReviewAnswer[] = []
+  let total = 0
+  for (const q of questions) {
+    if (q.code && !visibleSet.has(q.code)) continue
+    total++
+    const value = answersById.get(q.id)
+    if (value === undefined) continue
+    answers.push({
+      code: q.code,
+      question: q.text as { en: string; ro: string },
+      value,
+      valueLabel: resolveValueLabel(q.options, value),
+    })
+  }
+  return {
+    type: 'show_dnt_review',
+    payload: { sessionId, answers, progress: { answered: answers.length, total } },
+  }
 }

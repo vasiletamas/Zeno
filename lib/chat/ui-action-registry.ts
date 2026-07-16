@@ -24,11 +24,11 @@ export const EMITTED_UI_ACTION_TYPES: readonly string[] = [
   'show_payment', // payment-handlers (started/resumed/retried)
   'show_quote', // quote-handlers generate path
   'show_quote_accepted', // quote-handlers accept path
-  'confirm_required', // orchestrator requires_confirmation envelopes
+  'confirm_required', // orchestrator requires_confirmation envelopes (agent-path only since T7: gui commits are confirmed by construction)
+  'show_dnt_review', // questionnaire-cards buildDntReviewCard (T7: DNT completion review/sign card)
   // Later tasks register here when their emitters land (comment only — the
-  // parity test fails on an unregistered emission): 'show_dnt_review' (T7),
-  // 'show_medical_review' (T11), 'show_medical_batch' (T10),
-  // 'show_acceptance' (T22).
+  // parity test fails on an unregistered emission): 'show_medical_review'
+  // (T11), 'show_medical_batch' (T10), 'show_acceptance' (T22).
 ]
 
 /**
@@ -62,6 +62,7 @@ export const RENDERED_UI_ACTION_TYPES: readonly string[] = [
   'show_payment_success',
   'show_document_upload',
   'show_otp_entry',
+  'show_dnt_review',
 ]
 
 /**

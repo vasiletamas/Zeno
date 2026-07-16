@@ -36,10 +36,10 @@ describe('set_application re-open after cancel (P1-4 state-guarded)', () => {
     expect(first.outcome).toBe('applied')
     const app1 = await prisma.application.findFirstOrThrow({ where: { customerId: c.id } })
 
-    // cancel_application is a two-step confirmation commit
-    const cancelAsk = await executeCommit({ tool: 'cancel_application', args: { reason: 'changed mind' }, actor: 'gui', customerId: c.id, conversationId: conv.id, toolContext: ctx(c.id, conv.id) })
-    expect(cancelAsk.outcome).toBe('requires_confirmation')
-    const cancel = await executeCommit({ tool: 'cancel_application', args: { reason: 'changed mind', confirmToken: cancelAsk.confirmToken }, actor: 'gui', customerId: c.id, conversationId: conv.id, toolContext: ctx(c.id, conv.id) })
+    // T7 clause 6: a GUI cancel click is confirmed by construction — ONE call
+    // applies (the agent path keeps the confirmToken two-step, pinned by
+    // cancel-application.test.ts).
+    const cancel = await executeCommit({ tool: 'cancel_application', args: { reason: 'changed mind' }, actor: 'gui', customerId: c.id, conversationId: conv.id, toolContext: ctx(c.id, conv.id) })
     expect(cancel.outcome).toBe('applied')
 
     const second = await executeCommit({ tool: 'set_application', args: {}, actor: 'agent', customerId: c.id, conversationId: conv.id, toolContext: ctx(c.id, conv.id) })

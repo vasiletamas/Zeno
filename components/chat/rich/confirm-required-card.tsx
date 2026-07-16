@@ -73,6 +73,9 @@ export function buildConfirmAction(tool: string, confirmToken: string, args: Rec
   if (!(CONFIRMABLE_TOOLS as readonly string[]).includes(tool)) return null
   // sign_dnt: clicking the consent-labelled CTA IS the explicit grant (B1.5) —
   // the consent object is material, so it must match the original call's args.
+  // Since T7 this card is the AGENT-PATH FALLBACK only: the primary flow is the
+  // auto-emitted show_dnt_review card (gui clicks are confirmed by construction,
+  // so a GUI sign never produces the requires_confirmation this card consumes).
   if (tool === 'sign_dnt') return { type: tool, payload: { ...args, confirmToken, consent: { gdpr: true, aiDisclosure: true } } }
   // D2.5: the token is bound to the material args hash — the original args
   // (e.g. accept_quote's paymentOption) must ride the confirm round-trip.

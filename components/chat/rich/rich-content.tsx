@@ -12,6 +12,7 @@ import { InlineDataForm } from './inline-data-form'
 import { PaymentCard } from './payment-card'
 import { DocumentUploadCard } from './document-upload-card'
 import { OtpEntryCard } from './otp-entry-card'
+import { DntReviewCard } from './dnt-review-card'
 import { UnknownActionCard } from './unknown-action-card'
 
 /* ── Types ────────────────────────────────────────── */
@@ -394,6 +395,23 @@ export function RichContent({
         <DocumentUploadCard
           kind={p.kind as string}
           uploadUrl={p.uploadUrl as string}
+          onAction={onAction}
+          language={language}
+          isAnswered={isAnswered}
+          isLoading={isLoading}
+        />
+      )
+    }
+
+    /* ── DNT review/sign (T7 clauses 5-6: completion auto-emits this card;
+          the Sign click behind the two unchecked consents is the ONLY
+          confirmation — gui commits are confirmed by construction) ── */
+    case 'show_dnt_review': {
+      return (
+        <DntReviewCard
+          sessionId={p.sessionId as string}
+          answers={p.answers as { code: string | null; question: LocalizedString; value: string; valueLabel: LocalizedString | null }[]}
+          progress={p.progress as { answered: number; total: number }}
           onAction={onAction}
           language={language}
           isAnswered={isAnswered}

@@ -21,7 +21,7 @@ import { validateCnpChecksum } from '@/lib/engines/cnp-validation'
 import { maskCnp } from '@/lib/security/encryption'
 import type { GroundingOption } from '@/lib/engines/anti-fabrication'
 import { valueNotGroundedError } from './grounding-guard'
-import { CONDUCT_LINE, questionCard, rejectReemit, savedMessage } from './questionnaire-cards'
+import { CONDUCT_LINE, DNT_COMPLETION_MESSAGE, buildDntReviewCard, questionCard, rejectReemit, savedMessage } from './questionnaire-cards'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackDntCompleted } from '@/lib/analytics/events'
 import { bumpInsightOnAnswer } from './insight-bump'
@@ -157,10 +157,14 @@ export const getDntNextQuestion: ToolHandler = async (_args, context) => {
     const next = await getNextQuestion(codes, { kind: 'dntSession', sessionId: session.id })
     if (!next) {
       const progress = await calculateProgress(codes, { kind: 'dntSession', sessionId: session.id })
+      // T7 clause 5: completion ALWAYS carries the review/sign card — this
+      // read is one of the three completion surfaces (an agent stepping the
+      // session may observe completeness here first).
       return {
         success: true,
         data: { sessionId: session.id, complete: true, question: null, progress },
-        message: 'All DNT questions answered. Ready for signature (sign_dnt).',
+        message: DNT_COMPLETION_MESSAGE,
+        uiAction: await buildDntReviewCard(session.id, context.db),
       }
     }
     const lang = context.language ?? 'ro'
@@ -272,10 +276,12 @@ export const openDntSession: ToolHandler = async (_args, context) => {
       },
       // T9/T12 clause 2: the conduct instruction is the shared CONDUCT_LINE
       // (server-owned canonical wording), same as every save-path message.
+      // T7 clause 5: an all-prefilled UPDATE session has no question to ask —
+      // the open itself is the completing commit, so it carries the review card.
       message: next
         ? `DNT session opened (${type}${type === 'UPDATE' ? `, ${prefilled} answers pre-filled` : ''}). First question code: ${next.code}. ${CONDUCT_LINE} If the customer types instead, call write_dnt_answer with questionCode "${next.code}".`
-        : `DNT session opened (${type}); all questions already answered — ready for sign_dnt.`,
-      uiAction: questionCard('dnt', next, progress),
+        : `DNT session opened (${type}${type === 'UPDATE' ? `, ${prefilled} answers pre-filled` : ''}). ${DNT_COMPLETION_MESSAGE}`,
+      uiAction: next ? questionCard('dnt', next, progress) : await buildDntReviewCard(session.id, context.db),
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -416,7 +422,11 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
         progress,
       },
       message: savedMessage('dnt', next, progress),
-      uiAction: questionCard('dnt', next, progress),
+      // T7 clause 5: the commit that answers the LAST question carries the
+      // review/sign card — built on context.db so the in-tx walk sees the
+      // just-written answer (never model-initiated, clause 6: the Sign click
+      // on this card is the ONLY confirmation).
+      uiAction: next ? questionCard('dnt', next, progress) : await buildDntReviewCard(session.id, context.db),
     }
   } catch (error) {
     return { success: false, error: String(error) }
