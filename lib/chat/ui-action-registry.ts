@@ -87,13 +87,14 @@ export const CLIENT_POSTED_ACTION_TYPES: readonly string[] = [
   'cancel_application',
   'change_payment_option',
   'request_cancellation',
-  // T30 adds payment_complete once the adapter case exists
+  // T30: settlement already ran server-side (/api/payments/confirm); the
+  // post injects a get_payment_status read so the orchestrator narrates it
+  'payment_complete',
 ]
 
 /**
  * Client-posted types with NO adapter case yet — each is a known gap a named
  * task removes; the parity test locks them as non-adapting until then.
+ * Empty since T30 adapted payment_complete.
  */
-export const KNOWN_UNADAPTED_CLIENT_ACTIONS: readonly string[] = [
-  'payment_complete', // T30 maps it to get_payment_status
-]
+export const KNOWN_UNADAPTED_CLIENT_ACTIONS: readonly string[] = []

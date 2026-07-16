@@ -108,6 +108,17 @@ export function adaptAction(action: UIAction): ToolCall | null {
         arguments: {},
       }
 
+    // T30: settlement already ran server-side (the card POSTs
+    // /api/payments/confirm before this action); the post injects the ONLY
+    // payment read so the orchestrator narrates the verified outcome + policy
+    // over the injected result — never settles on the client's say-so.
+    case 'payment_complete':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'get_payment_status',
+        arguments: {},
+      }
+
     // ── Identity verification (B3.ADD-2) ──
     case 'otp_submit':
       return {

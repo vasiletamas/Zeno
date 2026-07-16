@@ -39,6 +39,14 @@ const requestSchema = z
 const inFlightRequests = new Map<string, number>()
 const MAX_CONCURRENT_PER_CONVERSATION = 3
 
+// T30: EVERY exit after the increment must release its slot — the unknown-
+// action 400 used to leak one per post, permanently 429ing the conversation.
+function releaseInFlight(conversationId: string) {
+  const current = inFlightRequests.get(conversationId) ?? 1
+  if (current <= 1) inFlightRequests.delete(conversationId)
+  else inFlightRequests.set(conversationId, current - 1)
+}
+
 // ==============================================
 // ROUTE HANDLER
 // ==============================================
@@ -66,6 +74,7 @@ export async function POST(request: NextRequest) {
     if (parsed.action) {
       syntheticToolCall = adaptAction(parsed.action) ?? undefined
       if (!syntheticToolCall) {
+        if (conversationId) releaseInFlight(conversationId)
         return NextResponse.json(
           { error: 'Unknown action type' },
           { status: 400 },
@@ -94,11 +103,7 @@ export async function POST(request: NextRequest) {
         context: { conversationId },
         error: err,
       })
-      if (conversationId) {
-        const current = inFlightRequests.get(conversationId) ?? 1
-        if (current <= 1) inFlightRequests.delete(conversationId)
-        else inFlightRequests.set(conversationId, current - 1)
-      }
+      if (conversationId) releaseInFlight(conversationId)
       return Response.json(
         { error: 'Internal server error', errorId },
         { status: 500 },
@@ -108,9 +113,7 @@ export async function POST(request: NextRequest) {
     if (conversationId) {
       const cleanup = new TransformStream({
         flush() {
-          const current = inFlightRequests.get(conversationId) ?? 1
-          if (current <= 1) inFlightRequests.delete(conversationId)
-          else inFlightRequests.set(conversationId, current - 1)
+          releaseInFlight(conversationId)
         },
       })
       stream = stream.pipeThrough(cleanup)

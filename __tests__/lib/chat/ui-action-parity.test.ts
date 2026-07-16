@@ -52,6 +52,7 @@ const CLIENT_ACTION_FIXTURES: Record<string, Record<string, unknown>> = {
   cancel_application: { confirmToken: 't' },
   change_payment_option: { paymentOption: 'quarterly', confirmToken: 't' },
   request_cancellation: { confirmToken: 't' },
+  payment_complete: { paymentId: 'p1' },
 }
 
 describe('uiAction parity (T29)', () => {
@@ -86,7 +87,7 @@ describe('uiAction parity (T29)', () => {
     }
   })
 
-  it('known-unadapted actions do NOT adapt (locks the payment_complete gap until T30)', () => {
+  it('known-unadapted actions do NOT adapt (empty since T30 adapted payment_complete)', () => {
     for (const type of KNOWN_UNADAPTED_CLIENT_ACTIONS) {
       expect(adaptAction({ type, payload: { paymentId: 'p1' } })).toBeNull()
       expect(CLIENT_POSTED_ACTION_TYPES).not.toContain(type)

@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react'
 import { t, type Language } from '@/lib/i18n/translations'
 import { resolvePaymentCardState } from '@/lib/payments/card-state'
+import { confirmMockPayment } from '@/lib/payments/confirm-client'
 
 /* ── Stripe imports (loaded dynamically) ─────────────── */
 
@@ -160,8 +161,16 @@ function StripeCheckoutForm({
         setError(result.error.message ?? c.errorGeneric)
         setProcessing(false)
       } else if (result.paymentIntent?.status === 'succeeded') {
-        // Immediate success (no redirect needed)
-        onPaymentComplete(paymentId)
+        // Immediate success (no redirect) — T30: settle through the
+        // provider-verified confirm inbox BEFORE reporting completion (the
+        // derived eventId is idempotent; the webhook replay is harmless)
+        try {
+          await confirmMockPayment(paymentId, fetch)
+          onPaymentComplete(paymentId)
+        } catch {
+          setError(c.errorGeneric)
+          setProcessing(false)
+        }
       }
       // If redirect is needed, stripe handles it automatically
     },
@@ -422,8 +431,10 @@ export function PaymentCard({
     setError(null)
 
     try {
-      // Simulate 2-second processing delay
-      await new Promise((resolve) => setTimeout(resolve, 2000))
+      // T30: settlement runs server-side (the provider-verified inbox mints
+      // the Policy in-transaction); the provider's own status check carries
+      // the mock 2s delay — no client-side fake sleep
+      await confirmMockPayment(paymentId, fetch)
       onPaymentComplete(paymentId)
     } catch {
       setError(c.errorGeneric)

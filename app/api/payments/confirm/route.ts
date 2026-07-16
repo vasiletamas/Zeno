@@ -17,6 +17,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/db'
 import { getPaymentProvider } from '@/lib/payments'
 import { settlePaymentEvent } from '@/lib/payments/settlement'
+import { resolveReturnLookup } from '@/lib/payments/confirm-return-lookup'
 
 const confirmBodySchema = z.object({
   paymentId: z.string(),
@@ -109,49 +110,51 @@ export async function POST(request: Request) {
 }
 
 /**
- * GET handler — PayU redirect return URL
+ * GET handler — provider redirect return URL
  *
- * PayU redirects the customer back here after payment on their hosted page.
- * URL format: /api/payments/confirm?provider=payu&orderId=...
+ * PayU's hosted page returns ?provider=payu&orderId=<providerPaymentId>;
+ * the Stripe card's 3DS return_url sends ?provider=stripe&paymentId=<Payment
+ * row id> (T30 — orderId-only reading broke every Stripe redirect return).
  * Same verified settlement path; safe for duplicate/refresh calls (the
  * derived eventId replays).
  */
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url)
-    const orderId = url.searchParams.get('orderId')
+    const lookup = resolveReturnLookup(url.searchParams)
 
-    if (!orderId) {
+    if (lookup.by === 'none') {
       return NextResponse.json(
-        { error: 'Missing orderId parameter' },
+        { error: 'Missing orderId or paymentId parameter' },
         { status: 400 },
       )
     }
 
-    // Find payment by provider payment ID
-    const payment = await prisma.payment.findUnique({
-      where: { providerPaymentId: orderId },
-    })
+    const payment = lookup.by === 'orderId'
+      ? await prisma.payment.findUnique({ where: { providerPaymentId: lookup.providerPaymentId } })
+      : await prisma.payment.findUnique({ where: { id: lookup.paymentId } })
 
     const appUrl = process.env.APP_URL ?? 'http://localhost:3001'
-    if (!payment) {
-      console.error(`[PaymentConfirm] GET: Payment not found for orderId=${orderId}`)
+    // T8.D3: no provider reference, no settlement — same wall as POST
+    if (!payment?.providerPaymentId) {
+      console.error(`[PaymentConfirm] GET: no verifiable payment for ${lookup.by}=${lookup.by === 'orderId' ? lookup.providerPaymentId : lookup.paymentId}`)
       // Redirect to home with error — don't expose internal details
       return NextResponse.redirect(`${appUrl}/?payment=error`)
     }
+    const providerPaymentId = payment.providerPaymentId
 
     // Verify status with the payment provider — the redirect itself proves
     // nothing (T8.D3)
     const provider = getPaymentProvider()
-    const providerStatus = await provider.getPaymentStatus(orderId)
+    const providerStatus = await provider.getPaymentStatus(providerPaymentId)
     const providerEnum = PROVIDER_ENUM[provider.name as keyof typeof PROVIDER_ENUM] ?? 'MOCK'
 
     if (providerStatus.status === 'failed') {
       await settlePaymentEvent({
         provider: providerEnum,
-        eventId: `confirm:${orderId}:failed`,
+        eventId: `confirm:${providerPaymentId}:failed`,
         event: 'payment_failed',
-        providerPaymentId: orderId,
+        providerPaymentId,
         failureReason: providerStatus.failureReason ?? 'Payment failed at provider',
       })
       return NextResponse.redirect(`${appUrl}/?payment=failed`)
@@ -162,9 +165,9 @@ export async function GET(request: Request) {
 
     await settlePaymentEvent({
       provider: providerEnum,
-      eventId: `confirm:${orderId}:succeeded`,
+      eventId: `confirm:${providerPaymentId}:succeeded`,
       event: 'payment_succeeded',
-      providerPaymentId: orderId,
+      providerPaymentId,
     })
 
     // Find conversationId via Payment → Installment → Schedule → Quote →
