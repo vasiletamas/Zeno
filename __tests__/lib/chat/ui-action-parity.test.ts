@@ -39,6 +39,7 @@ const emittedInSource = () => {
 const CLIENT_ACTION_FIXTURES: Record<string, Record<string, unknown>> = {
   select_tier: { tierCode: 'standard', levelCode: 'l1' },
   answer_question: { answer: 'da', questionId: 'q1', questionCode: 'DNT_CNP', groupType: 'application' },
+  medical_batch: { answers: { BD_CANCER_HISTORY: 'false', BD_CARDIOVASCULAR: 'true' } },
   accept_quote: { paymentOption: 'annual' },
   cancel_quote: {},
   submit_field: { field: 'email', value: 'a@b.ro' },

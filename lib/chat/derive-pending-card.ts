@@ -14,16 +14,17 @@
  *     (write_question_answer is DNT-gated: requires_consent) → null.
  *  2. Else an OPEN application with a next visible question → the
  *     application card (same walk the handlers use: appGroupCodesFor +
- *     getNextQuestion).
+ *     getNextQuestion); a BD_* next question re-derives the T10 medical
+ *     BATCH card, exactly what the live commit emitted.
  *  3. Else null.
  */
 import { prisma } from '@/lib/db'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { getNextQuestion } from '@/lib/engines/questionnaire-engine'
 import { appGroupCodesFor } from '@/lib/tools/handlers/application-handlers'
-import { questionCard, type QuestionCardAction } from '@/lib/tools/handlers/questionnaire-cards'
+import { medicalBatchCard, questionCard, type MedicalBatchCardAction, type QuestionCardAction } from '@/lib/tools/handlers/questionnaire-cards'
 
-export async function derivePendingCard(conversationId: string): Promise<QuestionCardAction | null> {
+export async function derivePendingCard(conversationId: string): Promise<QuestionCardAction | MedicalBatchCardAction | null> {
   const snapshot = await loadDomainSnapshot(conversationId)
 
   if (snapshot.dnt.sessionActive) {
@@ -45,7 +46,10 @@ export async function derivePendingCard(conversationId: string): Promise<Questio
     // the snapshot type allows null; the column is NOT NULL @default(false)
     const codes = await appGroupCodesFor({ conversationId }, app.addon ?? false)
     const next = await getNextQuestion(codes, { kind: 'application', applicationId: app.id })
-    if (next) return questionCard('application', next.question, next.progress) ?? null
+    if (next) {
+      if (next.question.code?.startsWith('BD_')) return medicalBatchCard(prisma, app.id, next.progress)
+      return questionCard('application', next.question, next.progress) ?? null
+    }
   }
 
   return null

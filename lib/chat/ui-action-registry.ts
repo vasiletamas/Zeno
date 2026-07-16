@@ -27,9 +27,9 @@ export const EMITTED_UI_ACTION_TYPES: readonly string[] = [
   'confirm_required', // orchestrator requires_confirmation envelopes (agent-path only since T7: gui commits are confirmed by construction)
   'show_dnt_review', // questionnaire-cards buildDntReviewCard (T7: DNT completion review/sign card)
   'show_medical_review', // questionnaire-cards buildMedicalReviewCard (T11: medical completion review/sign card)
+  'show_medical_batch', // questionnaire-cards medicalBatchCard (T10: the ONE bulk BD-conditions card — "none of these apply" + toggles)
   // Later tasks register here when their emitters land (comment only — the
-  // parity test fails on an unregistered emission): 'show_medical_batch'
-  // (T10), 'show_acceptance' (T22).
+  // parity test fails on an unregistered emission): 'show_acceptance' (T22).
 ]
 
 /**
@@ -65,6 +65,7 @@ export const RENDERED_UI_ACTION_TYPES: readonly string[] = [
   'show_otp_entry',
   'show_dnt_review',
   'show_medical_review',
+  'show_medical_batch',
 ]
 
 /**
@@ -75,6 +76,7 @@ export const RENDERED_UI_ACTION_TYPES: readonly string[] = [
 export const CLIENT_POSTED_ACTION_TYPES: readonly string[] = [
   'select_tier',
   'answer_question',
+  'medical_batch', // T10: the batch card's "none of these apply" / Continuă posts
   'accept_quote',
   'cancel_quote',
   'submit_field',

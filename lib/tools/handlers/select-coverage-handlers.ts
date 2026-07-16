@@ -13,7 +13,7 @@ import { appGroupCodesFor, loadActiveApplication } from './application-handlers'
 import { computeConsequences, type Mutation } from '@/lib/engines/consequence-planner'
 import { applyConsequencePlan, buildPlannerSnapshot, loadDependencyGraph } from '@/lib/engines/consequence-applier'
 import { getNextQuestion } from '@/lib/engines/questionnaire-engine'
-import { CONDUCT_LINE, questionCard, type QuestionCardAction } from './questionnaire-cards'
+import { CONDUCT_LINE, medicalBatchCard, questionCard, type MedicalBatchCardAction, type QuestionCardAction } from './questionnaire-cards'
 import type { ToolHandler } from '@/lib/tools/types'
 
 export const selectCoverage: ToolHandler = async (args, context) => {
@@ -87,13 +87,17 @@ export const selectCoverage: ToolHandler = async (args, context) => {
     // no "undecided" representation, so the addon facet cannot gate
     // completeness (treating default-false as undecided would strand the
     // flow: no later commit would ever emit the entry card).
-    let entryCard: QuestionCardAction | undefined
+    let entryCard: QuestionCardAction | MedicalBatchCardAction | undefined
     if (post.tierId && post.levelId && post.status === 'OPEN') {
       const codes = await appGroupCodesFor(context, post.includesAddon)
       // context.db, NOT the global client: the walk must see the plan the
       // gateway tx just applied (addon-toggle invalidations, added questions)
       const next = await getNextQuestion(codes, { kind: 'application', applicationId: application.id }, undefined, context.db)
-      entryCard = questionCard('application', next?.question ?? null, next?.progress ?? { answered: 0, total: 0 })
+      // T10: a BD_* entry (the addon toggle re-opening the questionnaire)
+      // emits the ONE batch card instead of the single-question card.
+      entryCard = next?.question.code?.startsWith('BD_')
+        ? await medicalBatchCard(context.db, application.id, next.progress)
+        : questionCard('application', next?.question ?? null, next?.progress ?? { answered: 0, total: 0 })
     }
 
     return {

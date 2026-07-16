@@ -105,6 +105,15 @@ const modifyAnswerSchema = z.object({
   confirmToken: z.string().optional(),
 }).strict()
 
+// T10: the ONE-card bulk medical declaration — question code → option
+// literal. The value space is exactly the two BOOLEAN option literals, which
+// is why the handler skips the grounding guard (a batch entry ≡ an option
+// click). Key validity (visible BD_* question) is the handler's check.
+const writeMedicalBatchSchema = z.object({
+  answers: z.record(z.string(), z.enum(['true', 'false'])),
+  confirmToken: z.string().optional(),
+}).strict()
+
 const selectCoverageSchema = z.object({
   tier: z.string().optional(),
   level: z.string().optional(),
@@ -264,6 +273,7 @@ const toolSchemas: Record<string, ZodType> = {
   set_application: setApplicationSchema,
   get_next_question: getNextQuestionSchema,
   write_question_answer: writeQuestionAnswerSchema,
+  write_medical_batch: writeMedicalBatchSchema,
   modify_answer: modifyAnswerSchema,
   select_coverage: selectCoverageSchema,
   resume_application: resumeApplicationSchema,

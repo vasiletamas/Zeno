@@ -28,7 +28,7 @@ import { deriveIdentityTier } from '@/lib/engines/identity-rules'
 import { loadMedicalDeclarationState } from '@/lib/engines/medical-declaration-state'
 import type { GroundingOption } from '@/lib/engines/anti-fabrication'
 import { valueNotGroundedError } from './grounding-guard'
-import { CONDUCT_LINE, MEDICAL_COMPLETION_MESSAGE, buildMedicalReviewCard, questionCard, rejectReemit, savedMessage } from './questionnaire-cards'
+import { CONDUCT_LINE, applicationCompletion, medicalBatchCard, questionCard, rejectReemit, savedMessage } from './questionnaire-cards'
 import type { ToolHandler, ToolContext } from '@/lib/tools/types'
 import { bumpInsightOnAnswer } from './insight-bump'
 
@@ -320,21 +320,19 @@ export const writeQuestionAnswer: ToolHandler = async (args, context) => {
       //
       // T11 clause 5: when sensitive declarations are pending signature, the
       // COMPLETING commit carries the review/sign card — never model-
-      // initiated. Live defect (conv cmrm3fgku00056g0y4eb2hsme msgs 54-56):
-      // the completion said a sign card "must confirm" while emitting
-      // nothing; the model narrated a card that never existed and the
-      // customer was stranded. context.db, not the global client — the walk
-      // must see the just-applied answer inside the gateway tx.
-      const medical = await loadMedicalDeclarationState(context.db, postApp)
-      const pendingSignature = medical.requiredCodes.length > 0 && !medical.signed
+      // initiated (shared applicationCompletion so write_medical_batch
+      // cannot drift). Live defect (conv cmrm3fgku00056g0y4eb2hsme msgs
+      // 54-56): the completion said a sign card "must confirm" while
+      // emitting nothing; the model narrated a card that never existed and
+      // the customer was stranded. context.db, not the global client — the
+      // walk must see the just-applied answer inside the gateway tx.
+      const completion = await applicationCompletion(context.db, postApp)
       return {
         success: true,
         effects: plan.effects,
         data: { answerSaved: true, isComplete: true, applicationId: application.id, readyForQuote: true, ...planData(plan) },
-        message: pendingSignature
-          ? MEDICAL_COMPLETION_MESSAGE
-          : savedMessage('application', null, { answered: 0, total: 0 }),
-        uiAction: pendingSignature ? buildMedicalReviewCard(application.id, medical) : undefined,
+        message: completion.message,
+        uiAction: completion.uiAction,
       }
     }
 
@@ -372,8 +370,12 @@ export const writeQuestionAnswer: ToolHandler = async (args, context) => {
       },
       // T9/T12: shared builder — the message carries the conduct line and
       // the card gains validationRules (unified shape with the DNT family).
+      // T10: a BD_* next question renders as the ONE batch card instead of
+      // the single-question card (per-question cards retired for BD).
       message: savedMessage('application', nq, nextResult.progress),
-      uiAction: questionCard('application', nq, nextResult.progress),
+      uiAction: nq.code?.startsWith('BD_')
+        ? await medicalBatchCard(context.db, application.id, nextResult.progress)
+        : questionCard('application', nq, nextResult.progress),
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -580,10 +582,15 @@ export const resumeApplication: ToolHandler = async (args, context) => {
       },
       // T9/T12 clause 1: resume is a questionnaire entry point — the pending
       // question card rides the commit (with the clause-2 conduct line).
+      // T10: a pending BD_* question resumes on the batch card.
       message: next
         ? `Application resumed — continuing where the customer left off. ${CONDUCT_LINE}`
         : 'Application resumed. All questions already answered — ready for coverage selection / quote.',
-      uiAction: next ? questionCard('application', next.question, progress) : undefined,
+      uiAction: next
+        ? next.question.code?.startsWith('BD_')
+          ? await medicalBatchCard(context.db, application.id, progress)
+          : questionCard('application', next.question, progress)
+        : undefined,
     }
   } catch (error) {
     return { success: false, error: String(error) }

@@ -81,6 +81,35 @@ describe('deriveAndExpose — exposure over the FULL snapshot (contradiction #12
     expect(r2.actions.available).not.toContain('sign_medical_declarations')
     expect(r2.actions.blocked).toContainEqual(expect.objectContaining({ action: 'sign_medical_declarations', reason: 'already_applied' }))
   })
+  // T10: the batch write is exposed exactly when write_question_answer is
+  // exposed AND every pending question is a BD_* code (the bd_medical group
+  // closes the questionnaire, so all-missing-BD ⟺ the pending question is BD).
+  it('write_medical_batch exposed exactly while every missing code is BD_* and the questionnaire is writable', () => {
+    const bdPending = { ...doneApp, addon: true, answeredCount: 1, requiredCount: 7, missingCodes: ['BD_CANCER_HISTORY', 'BD_CARDIOVASCULAR', 'BD_NEUROLOGICAL', 'BD_TRANSPLANT', 'BD_CHRONIC_CONDITIONS', 'BD_HOSPITALIZATION_RECENT'] }
+    const r = deriveAndExpose(makeSnapshot({ application: bdPending, dnt: validDnt, consents: consented }))
+    expect(r.actions.available).toContain('write_medical_batch')
+    expect(r.actions.available).toContain('write_question_answer') // typed fallback stays
+
+    // a non-BD question still pending → the single-question flow, no batch
+    const mixedPending = { ...bdPending, missingCodes: ['HEALTH_DECLARATION_CONFIRM', ...bdPending.missingCodes] }
+    const r2 = deriveAndExpose(makeSnapshot({ application: mixedPending, dnt: validDnt, consents: consented }))
+    expect(r2.actions.available).not.toContain('write_medical_batch')
+    expect(r2.actions.blocked).not.toContainEqual(expect.objectContaining({ action: 'write_medical_batch' }))
+
+    // questionnaire complete → gone
+    const r3 = deriveAndExpose(makeSnapshot({ application: doneApp, dnt: validDnt, consents: consented }))
+    expect(r3.actions.available).not.toContain('write_medical_batch')
+  })
+  it('write_medical_batch mirrors write_question_answer blocks: requires_consent pre-DNT, application_frozen post-quote', () => {
+    const bdPending = { ...doneApp, addon: true, answeredCount: 1, requiredCount: 7, missingCodes: ['BD_CANCER_HISTORY'] }
+    const noDnt = deriveAndExpose(makeSnapshot({ application: bdPending, consents: consented }))
+    expect(noDnt.actions.available).not.toContain('write_medical_batch')
+    expect(noDnt.actions.blocked).toContainEqual(expect.objectContaining({ action: 'write_medical_batch', reason: 'requires_consent' }))
+
+    const frozen = deriveAndExpose(makeSnapshot({ application: { ...bdPending, frozen: true }, dnt: validDnt, consents: consented }))
+    expect(frozen.actions.available).not.toContain('write_medical_batch')
+    expect(frozen.actions.blocked).toContainEqual(expect.objectContaining({ action: 'write_medical_batch', reason: 'application_frozen' }))
+  })
   it('no sensitive questions in the visible set: gate and tool both absent (legacy snapshots unchanged)', () => {
     const r = deriveAndExpose(makeSnapshot({ application: doneApp, dnt: validDnt, identity: declaredId, consents: consented }))
     expect(r.actions.available).toContain('generate_quote')

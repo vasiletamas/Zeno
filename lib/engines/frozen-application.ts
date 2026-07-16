@@ -9,7 +9,7 @@
  * handlers directly).
  */
 export const MUTATING_APPLICATION_ACTIONS = [
-  'select_coverage', 'modify_answer', 'set_answer', 'write_question_answer',
+  'select_coverage', 'modify_answer', 'set_answer', 'write_question_answer', 'write_medical_batch',
 ] as const
 
 export interface FreezeFacts { frozenAt: Date | null; quoteExists: boolean }

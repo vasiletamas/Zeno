@@ -88,7 +88,7 @@ const appRule = (action: string): ActionRule => ({
  * produced a historical exposure (T14.D2). Bump on ANY change to derivePhase,
  * ACTION_RULES, or NEXT_BEST_PRIORITY.
  */
-export const engineVersion = '1.39.0' // 1.39.0: P2-8 cancel_quote gated on customer_intent_required — exposed only once the customer speaks after a quote is issued, blocking the model's unsolicited self-cancel → set_application loop (2026-07-09). 1.38.0: MERGE of the autonomy line into the sales-excellence line — carries the B1 structured funnel objective (goal + achievableNow + missingPreconditions derived from the priority ladder over available THEN blocked actions, so a blocked endgame like D5 accept_quote requires_identity surfaces as a stated precondition instead of a wrong imperative hint; nextBestAction unchanged for compat) ON TOP OF the 1.37.0 engine line; 1.37.0: sales-excellence line (verification endgame first-class + resend guard; repeated_failure loop-breaker — same (tool, argsHash) rejected/unavailable >= 3x blocks the tool; confirm_channel_verification leads NEXT_BEST_PRIORITY) and the batch-medical line (sign_medical_declarations exposed + generate_quote medical_declarations_unsigned gate, T6.D3 deviation; requires_identity needs DECOMPOSE into actionable gaps declared:<field>/verified_channel, valid:cnp fallback); 1.33.0: get_open_items read exposed (E4.3, M2 — the ONE list read); 1.32.0: request_erasure/request_data_export exposed (E3, M3) — erasure always offerable and consent-halt exempt, export behind the verified_channel identity row; 1.31.0: set_application ineligible block params carry the derived age bounds (E1.6, T11.D4); 1.30.0: request_cancellation exposed via the deterministic free-look rule (D4.5, T9.D2) — outside_free_look precise block; 1.29.0: get_policy_info customer-scoped read + POLICY phase derives from the customer-scoped policy (D4.4, T9.D5/D6); 1.28.0: change_payment_option exposed pre-capture only (D3.4, T8.D5); 1.27.0: ensure_payment_session replaces the legacy initiate tool (D3.3, T8.D4); 1.26.0: get_payment_status read exposed on schedule existence (D3.2); 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application; 1.23.0: acknowledge_disclosures exposed on the live issued quote (D2.3, T7.D2); 1.24.0: accept_quote legality through the pure acceptQuoteLegality predicate (D2.5, T7.D6) — expiry → transition → verified_channel identity → disclosure acks; 1.25.0: the payment commit rides the schedule (D2.8) — due PENDING installment exposes, settled answers no_due_installment, no Policy prerequisite
+export const engineVersion = '1.40.0' // 1.40.0: T10 write_medical_batch exposed while every missing question is BD_* (the one-card bulk medical declaration; blocks mirror write_question_answer's, typed fallback stays exposed beside it) (2026-07-16). 1.39.0: P2-8 cancel_quote gated on customer_intent_required — exposed only once the customer speaks after a quote is issued, blocking the model's unsolicited self-cancel → set_application loop (2026-07-09). 1.38.0: MERGE of the autonomy line into the sales-excellence line — carries the B1 structured funnel objective (goal + achievableNow + missingPreconditions derived from the priority ladder over available THEN blocked actions, so a blocked endgame like D5 accept_quote requires_identity surfaces as a stated precondition instead of a wrong imperative hint; nextBestAction unchanged for compat) ON TOP OF the 1.37.0 engine line; 1.37.0: sales-excellence line (verification endgame first-class + resend guard; repeated_failure loop-breaker — same (tool, argsHash) rejected/unavailable >= 3x blocks the tool; confirm_channel_verification leads NEXT_BEST_PRIORITY) and the batch-medical line (sign_medical_declarations exposed + generate_quote medical_declarations_unsigned gate, T6.D3 deviation; requires_identity needs DECOMPOSE into actionable gaps declared:<field>/verified_channel, valid:cnp fallback); 1.33.0: get_open_items read exposed (E4.3, M2 — the ONE list read); 1.32.0: request_erasure/request_data_export exposed (E3, M3) — erasure always offerable and consent-halt exempt, export behind the verified_channel identity row; 1.31.0: set_application ineligible block params carry the derived age bounds (E1.6, T11.D4); 1.30.0: request_cancellation exposed via the deterministic free-look rule (D4.5, T9.D2) — outside_free_look precise block; 1.29.0: get_policy_info customer-scoped read + POLICY phase derives from the customer-scoped policy (D4.4, T9.D5/D6); 1.28.0: change_payment_option exposed pre-capture only (D3.4, T8.D5); 1.27.0: ensure_payment_session replaces the legacy initiate tool (D3.3, T8.D4); 1.26.0: get_payment_status read exposed on schedule existence (D3.2); 1.22.0: modify_quote eliminated (D1.7, T13.D2) — mutating actions blocked application_frozen via the pure frozen-application predicate; recovery is cancel_quote + a new application; 1.23.0: acknowledge_disclosures exposed on the live issued quote (D2.3, T7.D2); 1.24.0: accept_quote legality through the pure acceptQuoteLegality predicate (D2.5, T7.D6) — expiry → transition → verified_channel identity → disclosure acks; 1.25.0: the payment commit rides the schedule (D2.8) — due PENDING installment exposes, settled answers no_due_installment, no Policy prerequisite
 
 export function derivePhase(s: DomainSnapshot): { phase: Phase; subphase: AppSubphase | null } {
   if (s.policy !== null) return { phase: 'POLICY', subphase: null }
@@ -213,6 +213,28 @@ export const ACTION_RULES: ActionRule[] = [
       : { reason: 'no_candidate_product' }) },
   // B4.2: lifecycle exposure comes from the pure application rules
   appRule('write_question_answer'),
+  // T10: the ONE-card bulk medical write — exposed exactly when
+  // write_question_answer is exposed AND every missing question is a BD_*
+  // code (the bd_medical group closes the questionnaire, so all-missing-BD ⟺
+  // the pending question is BD; order-independent over missingCodes). The
+  // typed per-question fallback stays exposed beside it. Blocks mirror
+  // write_question_answer's (freeze outranks, then the lifecycle reasons) —
+  // but only while the batch would otherwise be relevant, so a non-BD
+  // questionnaire never lists a spurious blocked batch tool.
+  { action: 'write_medical_batch', kind: 'commit',
+    exposedWhen: (s) =>
+      s.application !== null
+      && s.application.missingCodes.length > 0
+      && s.application.missingCodes.every((c) => c.startsWith('BD_'))
+      && appExposureFromSnapshot(s).available.includes('write_question_answer')
+      && mutationBlockedReason(freezeFacts(s), 'write_medical_batch') === null,
+    blockedReason: (s) => {
+      if (s.application === null || s.application.missingCodes.length === 0 || !s.application.missingCodes.every((c) => c.startsWith('BD_'))) return null
+      const frozen = mutationBlockedReason(freezeFacts(s), 'write_medical_batch')
+      if (frozen) return { reason: frozen }
+      const b = appExposureFromSnapshot(s).blocked.find((x) => x.action === 'write_question_answer')
+      return b ? { reason: b.reason as ReasonCode, params: b.params } : null
+    } },
   appRule('modify_answer'),
   appRule('select_coverage'),
   // resume works CROSS-conversation (T5.D4): a fresh conversation carries no

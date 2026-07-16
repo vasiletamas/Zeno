@@ -14,6 +14,8 @@
 import { resolveGroupCodes } from '@/lib/engines/question-groups'
 import { computeVisibleSet } from '@/lib/engines/dependency-graph'
 import { loadDependencyGraph } from '@/lib/engines/dependency-graph-loader'
+import { getActiveAnswers } from '@/lib/engines/answer-store'
+import { loadMedicalDeclarationState } from '@/lib/engines/medical-declaration-state'
 import type { DbClient } from '@/lib/tools/types'
 
 export type QuestionnaireGroupType = 'dnt' | 'application'
@@ -240,6 +242,104 @@ export async function buildDntReviewCard(sessionId: string, db: DbClient): Promi
     type: 'show_dnt_review',
     payload: { sessionId, answers, progress: { answered: answers.length, total } },
   }
+}
+
+export interface MedicalBatchCondition {
+  code: string
+  /** Localized question text — the CARD localizes, never the server. */
+  question: { en: string; ro: string }
+  /** The ACTIVE answer where one exists (a revisit renders pre-toggled); null = unanswered (the card defaults the toggle to Nu). */
+  value: 'true' | 'false' | null
+}
+
+export interface MedicalBatchCardAction {
+  type: 'show_medical_batch'
+  payload: {
+    applicationId: string
+    conditions: MedicalBatchCondition[]
+    progress: CardProgress
+  }
+}
+
+/** T10: the pure payload shape — the async loader below feeds it. */
+export function buildMedicalBatchCard(
+  applicationId: string,
+  conditions: MedicalBatchCondition[],
+  progress: CardProgress,
+): MedicalBatchCardAction {
+  return {
+    type: 'show_medical_batch',
+    payload: {
+      applicationId,
+      conditions,
+      // normalized like questionCard: exactly {answered, total}
+      progress: { answered: progress.answered, total: progress.total },
+    },
+  }
+}
+
+/**
+ * T10 (ruling: option c): the ONE medical card — every VISIBLE BD_* question
+ * in the engine's walk order (group orderIndex, question orderIndex) with the
+ * current ACTIVE value where answered (a revisit renders pre-toggled) and
+ * null otherwise. Emitted INSTEAD of the single-question card whenever the
+ * questionnaire's next question is a BD_* code (write_question_answer save
+ * path, select_coverage completing commit, resume_application, the batch
+ * handler itself, and the reload re-derive). Callers inside a gateway
+ * transaction MUST pass context.db so the walk sees the just-applied writes.
+ */
+export async function medicalBatchCard(
+  db: DbClient,
+  applicationId: string,
+  progress: CardProgress,
+): Promise<MedicalBatchCardAction> {
+  const application = await db.application.findUniqueOrThrow({
+    where: { id: applicationId },
+    select: { productId: true, includesAddon: true, tierId: true, levelId: true },
+  })
+  const groupCodes = (await resolveGroupCodes(application.productId, 'application', db)) ?? []
+  const groups = await db.questionGroup.findMany({ where: { code: { in: groupCodes } }, orderBy: { orderIndex: 'asc' } })
+  const questions = await db.question.findMany({ where: { groupId: { in: groups.map((g) => g.id) } } })
+  const groupOrder = new Map(groups.map((g) => [g.id, g.orderIndex]))
+  questions.sort((a, b) => (groupOrder.get(a.groupId) ?? 0) - (groupOrder.get(b.groupId) ?? 0) || a.orderIndex - b.orderIndex)
+
+  // sequential on purpose: db may be the gateway's single-connection tx client
+  const tier = application.tierId ? await db.pricingTier.findUnique({ where: { id: application.tierId }, select: { code: true } }) : null
+  const level = application.levelId ? await db.pricingLevel.findUnique({ where: { id: application.levelId }, select: { code: true } }) : null
+  const active = await getActiveAnswers(db, applicationId)
+  const graph = await loadDependencyGraph(db, application.productId)
+  const visible = computeVisibleSet(
+    graph,
+    questions.map((q) => q.code).filter((c): c is string => c !== null),
+    { answers: active, selection: { tier: tier?.code ?? null, level: level?.code ?? null, addon: application.includesAddon } },
+  )
+
+  const conditions: MedicalBatchCondition[] = questions
+    .filter((q): q is typeof q & { code: string } => q.code !== null && q.code.startsWith('BD_') && visible.has(q.code))
+    .map((q) => ({
+      code: q.code,
+      question: q.text as { en: string; ro: string },
+      value: active[q.code] === 'true' ? 'true' : active[q.code] === 'false' ? 'false' : null,
+    }))
+  return buildMedicalBatchCard(applicationId, conditions, progress)
+}
+
+/**
+ * Clause 5 (T11): the application questionnaire's SHARED completion result —
+ * when sensitive declarations are pending signature the medical review/sign
+ * card rides the completing commit; otherwise the plain completion message.
+ * Used by BOTH write_question_answer and write_medical_batch so the two
+ * write paths cannot drift. Callers inside the gateway tx pass context.db.
+ */
+export async function applicationCompletion(
+  db: DbClient,
+  application: { id: string; productId: string; includesAddon: boolean; tierId: string | null; levelId: string | null },
+): Promise<{ message: string; uiAction?: MedicalReviewCardAction }> {
+  const medical = await loadMedicalDeclarationState(db, application)
+  const pendingSignature = medical.requiredCodes.length > 0 && !medical.signed
+  return pendingSignature
+    ? { message: MEDICAL_COMPLETION_MESSAGE, uiAction: buildMedicalReviewCard(application.id, medical) }
+    : { message: savedMessage('application', null, { answered: 0, total: 0 }) }
 }
 
 export interface MedicalReviewDeclaration {

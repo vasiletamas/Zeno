@@ -161,6 +161,20 @@ export function adaptAction(action: UIAction): ToolCall | null {
         },
       }
 
+    // ── T10: the ONE-card bulk medical declaration — the primary button
+    // posts every visible BD condition as "false", the toggles post the
+    // exceptions; gui-actor commits are confirmed by construction, so the
+    // token only rides on the agent-path modify round-trip. ──
+    case 'medical_batch':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'write_medical_batch',
+        arguments: {
+          answers: (action.payload.answers ?? {}) as Record<string, string>,
+          ...(action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {}),
+        },
+      }
+
     // ── BD continue-without-addon: a selection fact, not an answer (B4.4) ──
     case 'bd_continue':
       return {

@@ -117,6 +117,10 @@ export function resolveTargetRef(tool: string, args: Record<string, unknown>, st
   // skipping the new write.
   if (tool === 'write_question_answer') return `app_answer:${state.application?.id ?? 'none'}:${String(args.questionCode ?? 'auto')}`
   if (tool === 'modify_answer') return `app_answer:${state.application?.id ?? 'none'}:${String(args.questionCode ?? 'unknown')}`
+  // T10: the bulk medical write addresses the application instance; the
+  // answers record rides the material hash, so an identical batch resubmit
+  // replays and a different toggle set is a fresh commit.
+  if (tool === 'write_medical_batch') return `app_answers_batch:${state.application?.id ?? 'none'}`
   if (tool === 'withdraw_consent') return `consent:${String(args.kind ?? 'unknown')}`
   // D4.2: policy-scoped operator commits key on the policy from ARGS
   if (OPERATOR_TOOLS.has(tool) && typeof args.policyId === 'string') return `policy:${args.policyId}`

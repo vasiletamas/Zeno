@@ -8,6 +8,7 @@ import {
   savedMessage,
   rejectReemit,
   buildMedicalReviewCard,
+  buildMedicalBatchCard,
 } from '@/lib/tools/handlers/questionnaire-cards'
 
 // T9/T12 clause 2 wording — pinned verbatim: the conduct instruction is
@@ -130,6 +131,32 @@ describe('buildMedicalReviewCard', () => {
   it('a non-boolean value keeps a null valueLabel (the card falls back to the raw value)', () => {
     const card = buildMedicalReviewCard('app_1', { declarations: [{ code: 'X', text: { en: 'x', ro: 'x' }, value: 'other' }] })
     expect(card.payload.declarations[0].valueLabel).toBeNull()
+  })
+})
+
+describe('buildMedicalBatchCard (T10)', () => {
+  const conditions = [
+    { code: 'BD_CANCER_HISTORY', question: { en: 'Cancer?', ro: 'Cancer?' }, value: null },
+    { code: 'BD_CARDIOVASCULAR', question: { en: 'Cardio?', ro: 'Cardio?' }, value: 'true' as const },
+  ]
+
+  it('shapes show_medical_batch: applicationId + ordered conditions + normalized progress', () => {
+    expect(buildMedicalBatchCard('app_1', conditions, { answered: 1, total: 7 })).toEqual({
+      type: 'show_medical_batch',
+      payload: {
+        applicationId: 'app_1',
+        conditions: [
+          { code: 'BD_CANCER_HISTORY', question: { en: 'Cancer?', ro: 'Cancer?' }, value: null },
+          { code: 'BD_CARDIOVASCULAR', question: { en: 'Cardio?', ro: 'Cardio?' }, value: 'true' },
+        ],
+        progress: { answered: 1, total: 7 },
+      },
+    })
+  })
+
+  it('normalizes progress to {answered,total} only (calculateProgress adds percentage)', () => {
+    const card = buildMedicalBatchCard('app_1', conditions, { answered: 2, total: 7, percentage: 29 } as unknown as { answered: number; total: number })
+    expect(card.payload.progress).toEqual({ answered: 2, total: 7 })
   })
 })
 

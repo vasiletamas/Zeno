@@ -14,6 +14,7 @@ import { DocumentUploadCard } from './document-upload-card'
 import { OtpEntryCard } from './otp-entry-card'
 import { DntReviewCard } from './dnt-review-card'
 import { MedicalReviewCard } from './medical-review-card'
+import { MedicalBatchCard } from './medical-batch-card'
 import { UnknownActionCard } from './unknown-action-card'
 
 /* ── Types ────────────────────────────────────────── */
@@ -429,6 +430,23 @@ export function RichContent({
         <MedicalReviewCard
           applicationId={p.applicationId as string}
           declarations={p.declarations as { code: string; question: LocalizedString; value: string; valueLabel: LocalizedString | null }[]}
+          onAction={onAction}
+          language={language}
+          isAnswered={isAnswered}
+          isLoading={isLoading}
+        />
+      )
+    }
+
+    /* ── Medical batch declarations (T10 clause: option c — the six BD
+          conditions on ONE card; "none of these apply" posts all-No in one
+          write_medical_batch commit, toggles post the exceptions) ── */
+    case 'show_medical_batch': {
+      return (
+        <MedicalBatchCard
+          applicationId={p.applicationId as string}
+          conditions={p.conditions as { code: string; question: LocalizedString; value: 'true' | 'false' | null }[]}
+          progress={p.progress as { answered: number; total: number }}
           onAction={onAction}
           language={language}
           isAnswered={isAnswered}

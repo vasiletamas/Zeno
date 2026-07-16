@@ -20,7 +20,7 @@ const ctx = (customerId: string, conversationId: string, actor: 'gui' | 'agent' 
 const commit = (tool: string, args: Record<string, unknown>, customerId: string, conversationId: string) =>
   executeCommit({ tool, args, actor: 'gui', customerId, conversationId, toolContext: ctx(customerId, conversationId) })
 
-type Card = { type: string; payload: { question?: { code?: string; validationRules?: unknown }; progress?: { answered: number; total: number }; groupType?: string } }
+type Card = { type: string; payload: { question?: { code?: string; validationRules?: unknown }; conditions?: { code: string; value: string | null }[]; progress?: { answered: number; total: number }; groupType?: string } }
 const cardOf = (r: { data?: unknown }): Card | undefined => (r.data as { _uiAction?: Card } | undefined)?._uiAction
 const msgOf = (r: { data?: unknown }): string => String((r.data as { _message?: string } | undefined)?._message ?? '')
 
@@ -71,12 +71,15 @@ it('selection complete but questionnaire ALREADY complete → no card, message u
   expect(cardOf(relevel)).toBeUndefined()
   expect(msgOf(relevel)).toBe('Selection updated: standard / level_2 / addon off.')
 
-  // the addon toggle re-opens the questionnaire (BD questions) — card rides
+  // the addon toggle re-opens the questionnaire (BD questions) — card rides.
+  // T10: a BD_* next question emits the ONE batch card, never per-question.
   const addon = await commit('select_coverage', { addon: true }, c.id, conv.id)
   expect(addon.outcome).toBe('applied')
   const card = cardOf(addon)
-  expect(card?.type).toBe('show_question')
-  expect(card?.payload.question?.code).toBe('BD_CANCER_HISTORY')
+  expect(card?.type).toBe('show_medical_batch')
+  expect(card?.payload.conditions?.map((x) => x.code)).toEqual([
+    'BD_CANCER_HISTORY', 'BD_CARDIOVASCULAR', 'BD_NEUROLOGICAL', 'BD_TRANSPLANT', 'BD_CHRONIC_CONDITIONS', 'BD_HOSPITALIZATION_RECENT',
+  ])
   expect(msgOf(addon)).toContain(CONDUCT_LINE)
 }, 120000)
 

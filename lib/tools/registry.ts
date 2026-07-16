@@ -23,6 +23,7 @@ import type { LocalizedContent } from './shape-product-info'
 import { getDntState, getDntQuestions, getDntNextQuestion, openDntSession, writeDntAnswer, signDnt } from './handlers/dnt-handlers'
 import { setApplication, getNextQuestionInfo, writeQuestionAnswer, modifyAnswer, resumeApplication, cancelApplication, getLastApplicationInfo, signMedicalDeclarations } from './handlers/application-handlers'
 import { selectCoverage } from './handlers/select-coverage-handlers'
+import { writeMedicalBatch } from './handlers/medical-batch-handlers'
 import { acknowledgeSuitabilityWarning } from './handlers/suitability-handlers'
 import { generateQuote, getQuoteInfo, acceptQuote, cancelQuote, acknowledgeDisclosures } from './handlers/quote-handlers'
 import { compareProducts } from './handlers/product-handlers'
@@ -798,6 +799,32 @@ registerTool('write_question_answer', {
   sideEffect: 'save',
   kind: 'commit',
 }, writeQuestionAnswer)
+
+registerTool('write_medical_batch', {
+  description:
+    'Save the customer\'s answers to ALL the visible BD medical condition questions in ONE commit — the batch card\'s ' +
+    '"Niciuna dintre acestea nu mi se aplică" button posts every condition as "false"; per-condition toggles post the exceptions. ' +
+    'Values are the option literals "true"/"false" keyed by question code (e.g. {"BD_CANCER_HISTORY":"false"}). ' +
+    'Per-question consequences (eligibility, cascades) apply exactly as the sequential path; the typed fallback stays write_question_answer, one question at a time.',
+  parameters: {
+    type: 'object',
+    properties: {
+      answers: {
+        type: 'object',
+        description: 'Map of BD question code → "true" | "false".',
+        additionalProperties: { type: 'string', enum: ['true', 'false'] },
+      },
+    },
+    required: ['answers'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: true,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'save',
+  kind: 'commit',
+}, writeMedicalBatch)
 
 registerTool('modify_answer', {
   description:
