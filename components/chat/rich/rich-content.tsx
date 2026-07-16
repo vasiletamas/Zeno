@@ -10,6 +10,9 @@ import { ConfirmRequiredCard } from './confirm-required-card'
 import { QuoteAcceptedCard } from './quote-accepted-card'
 import { InlineDataForm } from './inline-data-form'
 import { PaymentCard } from './payment-card'
+import { DocumentUploadCard } from './document-upload-card'
+import { OtpEntryCard } from './otp-entry-card'
+import { UnknownActionCard } from './unknown-action-card'
 
 /* ── Types ────────────────────────────────────────── */
 
@@ -81,6 +84,10 @@ export function RichContent({
 }: RichContentProps) {
   const p = action.payload
 
+  // The case list below is mirrored by RENDERED_UI_ACTION_TYPES in
+  // lib/chat/ui-action-registry.ts — the parity test
+  // (__tests__/lib/chat/ui-action-parity.test.ts) scans this file's `case`
+  // literals, so adding/removing a case without updating the registry fails.
   switch (action.type) {
     /* ── Product cards (multiple tiers) ──────────── */
     case 'show_product_cards': {
@@ -381,8 +388,39 @@ export function RichContent({
       )
     }
 
-    /* ── Unknown types → null (forward compatible) ── */
+    /* ── Secure document upload (T29, Stripe-card pattern T14.D5) ── */
+    case 'show_document_upload': {
+      return (
+        <DocumentUploadCard
+          kind={p.kind as string}
+          uploadUrl={p.uploadUrl as string}
+          onAction={onAction}
+          language={language}
+          isAnswered={isAnswered}
+          isLoading={isLoading}
+        />
+      )
+    }
+
+    /* ── OTP entry (T29 — channel verification challenge) ── */
+    case 'show_otp_entry': {
+      return (
+        <OtpEntryCard
+          channel={p.channel as string}
+          targetMasked={p.targetMasked as string | undefined}
+          target={p.target as string | undefined}
+          onAction={onAction}
+          language={language}
+          isAnswered={isAnswered}
+          isLoading={isLoading}
+        />
+      )
+    }
+
+    /* ── Unknown types → VISIBLE fallback (T29: the silent null dropped
+          show_document_upload/show_otp_entry while the agent pointed the
+          customer at the control) ── */
     default:
-      return null
+      return <UnknownActionCard type={action.type} language={language} />
   }
 }

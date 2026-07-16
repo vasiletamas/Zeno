@@ -15,12 +15,15 @@ beforeEach(async () => { await resetFunnelTables() })
 const ctx = (customerId: string, conversationId: string) =>
   ({ customerId, conversationId, language: 'ro', db: prisma } as unknown as ToolContext)
 
-it('start_channel_verification renders show_otp_entry with the channel', async () => {
+it('start_channel_verification renders show_otp_entry with channel + masked and raw target (T29 resend affordance)', async () => {
   const c = await createCustomer()
   const conv = await prisma.conversation.create({ data: { customerId: c.id } })
   const r = await startChannelVerification({ channel: 'email', target: 'otp@example.ro' }, ctx(c.id, conv.id))
   expect(r.success).toBe(true)
-  expect(r.uiAction).toMatchObject({ type: 'show_otp_entry', payload: { channel: 'email' } })
+  expect(r.uiAction).toMatchObject({
+    type: 'show_otp_entry',
+    payload: { channel: 'email', targetMasked: 'o***@example.ro', target: 'otp@example.ro' },
+  })
 })
 
 it('request_document_upload renders show_document_upload with kind + uploadUrl', async () => {

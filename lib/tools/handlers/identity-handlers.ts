@@ -29,13 +29,16 @@ export const startChannelVerification: ToolHandler = async (args, context) => {
     await issueChallenge(context.customerId, channel, target, context.conversationId, context.db)
     // anti-enumeration: the payload never says whether the target belongs to
     // an account — the same response either way.
+    const channelMasked = maskTarget(channel, target)
     return {
       success: true,
-      data: { channelMasked: maskTarget(channel, target) },
+      data: { channelMasked },
       message: channel === 'email'
         ? 'A 6-digit verification code was sent by email (it also contains a one-click link). Ask the customer to read the code back or click the link.'
         : 'A verification challenge was prepared for this phone number.',
-      uiAction: { type: 'show_otp_entry', payload: { channel } },
+      // T29: the card shows the masked target; the raw target rides so the
+      // resend affordance can re-issue via start_channel_verification{resend}.
+      uiAction: { type: 'show_otp_entry', payload: { channel, targetMasked: channelMasked, target } },
     }
   } catch (error) {
     return { success: false, error: String(error) }

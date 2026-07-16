@@ -1,0 +1,112 @@
+'use client'
+
+import { useState } from 'react'
+import { ShieldCheck, Loader2 } from 'lucide-react'
+import type { Language } from '@/lib/i18n/translations'
+import type { UIAction } from '@/lib/chat/action-adapter'
+
+/**
+ * Consumer for show_otp_entry (T29): the 6-digit challenge from
+ * start_channel_verification. Submit round-trips through the adapter to
+ * confirm_channel_verification; the resend affordance re-issues the SAME
+ * challenge with resend:true (the gateway's verificationResendEscape).
+ */
+
+export function buildOtpSubmitAction(code: string): UIAction | null {
+  if (!/^\d{6}$/.test(code)) return null
+  return { type: 'otp_submit', payload: { code } }
+}
+
+export function buildOtpResendAction(channel: string, target: string): UIAction {
+  return { type: 'otp_resend', payload: { channel, target } }
+}
+
+const COPY = {
+  title: { ro: 'Introdu codul de verificare', en: 'Enter the verification code' },
+  sentTo: { ro: 'Cod trimis la', en: 'Code sent to' },
+  sent: { ro: 'Ți-am trimis un cod de 6 cifre.', en: 'We sent you a 6-digit code.' },
+  submit: { ro: 'Verifică', en: 'Verify' },
+  resend: { ro: 'Retrimite codul', en: 'Resend the code' },
+}
+
+interface OtpEntryCardProps {
+  channel: string
+  targetMasked?: string
+  target?: string
+  onAction: (action: UIAction) => void
+  language: Language
+  isAnswered?: boolean
+  isLoading?: boolean
+}
+
+export function OtpEntryCard({
+  channel,
+  targetMasked,
+  target,
+  onAction,
+  language,
+  isAnswered = false,
+  isLoading = false,
+}: OtpEntryCardProps) {
+  const [code, setCode] = useState('')
+  const pick = (key: { ro: string; en: string }) => (language === 'ro' ? key.ro : key.en)
+  const submitAction = buildOtpSubmitAction(code)
+  const disabled = isAnswered || isLoading
+
+  return (
+    <div className="bg-soft-white border border-warm-border rounded-xl p-5 animate-[message-appear_300ms_ease-out]">
+      <div className="flex items-start gap-3">
+        <div className="w-8 h-8 rounded-full bg-sage/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+          <ShieldCheck className="w-5 h-5 text-sage" />
+        </div>
+        <div className="flex-1">
+          <p className="text-[15px] font-medium text-night leading-[1.5]">{pick(COPY.title)}</p>
+          <p className="text-[13px] text-muted leading-[1.5] mt-1">
+            {targetMasked ? `${pick(COPY.sentTo)} ${targetMasked}` : pick(COPY.sent)}
+          </p>
+
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            value={code}
+            disabled={disabled}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            placeholder="000000"
+            className="
+              mt-3 w-full bg-soft-white border border-warm-border rounded-[10px]
+              px-4 py-3 text-[18px] tracking-[0.4em] text-night font-sans text-center
+              placeholder:text-muted placeholder:tracking-[0.4em]
+              focus:outline-none focus:border-sage focus:shadow-[0_0_0_3px_rgba(45,107,82,0.1)]
+              disabled:opacity-50
+              transition-[border-color,box-shadow] duration-150
+            "
+            aria-label={pick(COPY.title)}
+          />
+
+          <button
+            type="button"
+            disabled={disabled || !submitAction}
+            onClick={() => submitAction && onAction(submitAction)}
+            className="mt-3 w-full min-h-[44px] bg-forest text-linen text-[15px] font-medium rounded-[10px] px-6 py-3 hover:bg-sage transition-colors duration-200 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
+          >
+            {isLoading ? <Loader2 className="w-5 h-5 animate-spin text-linen" /> : pick(COPY.submit)}
+          </button>
+
+          {/* resend needs the raw target — cards persisted before T29 lack it */}
+          {target ? (
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => onAction(buildOtpResendAction(channel, target))}
+              className="mt-2 text-[13px] text-muted underline underline-offset-2 hover:text-night disabled:opacity-50"
+            >
+              {pick(COPY.resend)}
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}

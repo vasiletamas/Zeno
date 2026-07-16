@@ -8,6 +8,7 @@ import type { DiagnosticCheck, Finding } from './types'
 import * as basic from './checks-basic'
 import * as behavioral from './checks-behavioral'
 import * as verification from './checks-verification'
+import * as ui from './checks-ui'
 import { questionnaireAnswerFabricated, stateClaimWithoutCommit } from './checks-fabrication'
 import { blockedActionAttempted, missingConsequences, recomputeDriftFindings, type RecomputeOptions } from './checks-envelope'
 
@@ -18,6 +19,8 @@ export const CHECK_CATALOG: DiagnosticCheck[] = [
   ...Object.values(basic),
   ...Object.values(behavioral).filter(isCheck), // skips the exported trigramSimilarity helper
   ...Object.values(verification),
+  // T29 ratchet (2026-07-15): emitted-but-unrendered uiAction types
+  ...Object.values(ui),
   blockedActionAttempted,
   missingConsequences,
   // P0-1 ratchet (2026-07-06): fabrication + false-claim nets

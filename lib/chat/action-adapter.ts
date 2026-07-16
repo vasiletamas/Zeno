@@ -116,6 +116,20 @@ export function adaptAction(action: UIAction): ToolCall | null {
         arguments: { code: String(action.payload.code ?? '') },
       }
 
+    case 'otp_resend':
+      // T29: the [Retrimite codul] button re-issues the SAME challenge —
+      // resend:true is the gateway's verificationResendEscape, so the
+      // pending-challenge wall does not reject the GUI click.
+      return {
+        id: `action_${Date.now()}`,
+        name: 'start_channel_verification',
+        arguments: {
+          channel: String(action.payload.channel ?? ''),
+          target: String(action.payload.target ?? ''),
+          resend: true,
+        },
+      }
+
     case 'document_uploaded':
       // The pipeline already ran server-side in the upload route; the GUI
       // event refreshes the derived state so exposure sees the validated doc.
