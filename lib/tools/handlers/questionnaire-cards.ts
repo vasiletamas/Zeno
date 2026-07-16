@@ -151,7 +151,7 @@ export function savedMessage(
  */
 export function rejectReemit<T extends Record<string, unknown>>(
   data: T | undefined,
-  card: QuestionCardAction | undefined,
+  card: QuestionCardAction | MedicalBatchCardAction | undefined,
 ): Record<string, unknown> {
   return { ...(data ?? {}), ...(card ? { _uiAction: card } : {}) }
 }
