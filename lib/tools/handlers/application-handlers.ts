@@ -28,6 +28,7 @@ import { deriveIdentityTier } from '@/lib/engines/identity-rules'
 import { loadMedicalDeclarationState } from '@/lib/engines/medical-declaration-state'
 import type { GroundingOption } from '@/lib/engines/anti-fabrication'
 import { valueNotGroundedError } from './grounding-guard'
+import { CONDUCT_LINE, questionCard, rejectReemit, savedMessage } from './questionnaire-cards'
 import type { ToolHandler, ToolContext } from '@/lib/tools/types'
 import { bumpInsightOnAnswer } from './insight-bump'
 
@@ -217,6 +218,12 @@ export const writeQuestionAnswer: ToolHandler = async (args, context) => {
 
     const currentQuestion = currentResult.question
 
+    // T9/T12 clause 3: validation/grounding/code-mismatch rejects re-emit
+    // the CURRENT question card through the rejection envelope — the tx
+    // rolls back, so the state (and therefore the card) is unchanged.
+    const reemitCurrent = () =>
+      rejectReemit(undefined, questionCard('application', currentQuestion, currentResult.progress))
+
     const questionMeta = await context.db.question.findUnique({
       where: { id: currentQuestion.id },
       include: { group: true },
@@ -232,7 +239,7 @@ export const writeQuestionAnswer: ToolHandler = async (args, context) => {
       answer,
     )
     if (!validation.valid) {
-      return { success: false, error: validation.error ?? 'Invalid answer.' }
+      return { success: false, error: validation.error ?? 'Invalid answer.', data: reemitCurrent() }
     }
 
     if (!currentQuestion.code) {
@@ -243,7 +250,7 @@ export const writeQuestionAnswer: ToolHandler = async (args, context) => {
     // recovery beats silently writing the wrong row).
     const claimedCode = args.questionCode as string | undefined
     if (claimedCode && claimedCode !== currentQuestion.code) {
-      return { success: false, error: `invalid_args: the current question is ${currentQuestion.code}, not ${claimedCode} — answer it, or correct a past answer with modify_answer.` }
+      return { success: false, error: `invalid_args: the current question is ${currentQuestion.code}, not ${claimedCode} — answer it, or correct a past answer with modify_answer.`, data: reemitCurrent() }
     }
 
     // C1.5: ONE planner path — sensitivity confirmation, cascades,
@@ -258,7 +265,7 @@ export const writeQuestionAnswer: ToolHandler = async (args, context) => {
       (currentQuestion.options as GroundingOption[] | null) ?? undefined,
       snapshot.answers.active[currentQuestion.code] ?? null,
     )
-    if (notGrounded) return { success: false, error: notGrounded }
+    if (notGrounded) return { success: false, error: notGrounded, data: reemitCurrent() }
 
     const plan = computeConsequences(graph, snapshot, { node: `answer:${currentQuestion.code}`, newValue: validation.normalizedValue })
     if (plan.requiresConfirmation && !context.confirmed) {
@@ -314,7 +321,8 @@ export const writeQuestionAnswer: ToolHandler = async (args, context) => {
         success: true,
         effects: plan.effects,
         data: { answerSaved: true, isComplete: true, applicationId: application.id, readyForQuote: true, ...planData(plan) },
-        message: 'Application questionnaire complete. If sensitive medical answers were collected, sign_medical_declarations must confirm them (one card) before the quote; otherwise generate the quote.',
+        // T11 adds the review card on this completion path — not T9's business
+        message: savedMessage('application', null, { answered: 0, total: 0 }),
       }
     }
 
@@ -350,15 +358,10 @@ export const writeQuestionAnswer: ToolHandler = async (args, context) => {
         progress: nextResult.progress,
         ...planData(plan),
       },
-      message: `Answer saved. ${nextResult.progress.total - nextResult.progress.answered} questions remaining.`,
-      uiAction: {
-        type: 'show_question',
-        payload: {
-          question: { id: nq.id, code: nq.code, text: nq.text as { en: string; ro: string }, helpText: nq.helpText as { en: string; ro: string } | null, type: nq.type, options: nq.options },
-          progress: nextResult.progress,
-          groupType: 'application',
-        } as unknown as Record<string, unknown>,
-      },
+      // T9/T12: shared builder — the message carries the conduct line and
+      // the card gains validationRules (unified shape with the DNT family).
+      message: savedMessage('application', nq, nextResult.progress),
+      uiAction: questionCard('application', nq, nextResult.progress),
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -534,7 +537,12 @@ export const resumeApplication: ToolHandler = async (args, context) => {
       data: { activeApplicationId: application.id, productId: application.productId },
     })
 
-    const codes = await appGroupCodesFor(context, application.includesAddon)
+    // Pass the application's OWN productId (the "known committed id" escape
+    // hatch): resolveActiveProductId reads the conversation via the GLOBAL
+    // client, which cannot see the pointer/productId this handler just wrote
+    // inside the gateway tx — a fresh conversation would resolve NO product
+    // and the position walk would run over empty group codes (T9 find).
+    const codes = await appGroupCodesFor({ conversationId: context.conversationId, product: { id: application.productId } }, application.includesAddon)
     const scope = { kind: 'application' as const, applicationId: application.id }
     // P2-9: sequential, not Promise.all — resume_application runs inside the
     // gateway transaction, so these four queries share the one tx connection;
@@ -558,9 +566,12 @@ export const resumeApplication: ToolHandler = async (args, context) => {
           selection: { tier: tier?.code ?? null, level: level?.code ?? null, addon: application.includesAddon },
         },
       },
+      // T9/T12 clause 1: resume is a questionnaire entry point — the pending
+      // question card rides the commit (with the clause-2 conduct line).
       message: next
-        ? 'Application resumed — continuing where the customer left off.'
+        ? `Application resumed — continuing where the customer left off. ${CONDUCT_LINE}`
         : 'Application resumed. All questions already answered — ready for coverage selection / quote.',
+      uiAction: next ? questionCard('application', next.question, progress) : undefined,
     }
   } catch (error) {
     return { success: false, error: String(error) }

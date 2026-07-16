@@ -17,6 +17,9 @@ interface ChatPageProps {
   conversationId: string
   customerId: string
   initialMessages: ChatMessage[]
+  /** T9/T12 reload parity: the server-derived pending question card, anchored
+   *  on the last assistant message so it renders as the actionable card. */
+  initialUiAction?: { messageId: string; action: { type: string; payload: Record<string, unknown> } } | null
   language: 'ro' | 'en'
 }
 
@@ -24,6 +27,7 @@ export default function ChatPage({
   conversationId,
   customerId,
   initialMessages,
+  initialUiAction,
 }: ChatPageProps) {
   const { lang } = useLanguage()
   const debug = useDebug()
@@ -42,6 +46,7 @@ export default function ChatPage({
     markAnswered,
   } = useChat(conversationId, customerId, {
     initialMessages,
+    initialUiAction,
     onDebugEvent: debug.onDebugEvent,
     extraHeaders: debug.extraHeaders,
   })

@@ -65,6 +65,13 @@ interface InFlightTurn {
 
 export interface UseChatOptions {
   initialMessages?: ChatMessage[]
+  /**
+   * T9/T12 reload parity: the server-derived pending question card
+   * (lib/chat/derive-pending-card.ts), keyed to an assistant message id from
+   * initialMessages. Seeds the uiActions map so a reload mid-questionnaire
+   * renders the same card the live turn emitted.
+   */
+  initialUiAction?: { messageId: string; action: UIAction } | null
   onDebugEvent?: (event: { event: string; data: Record<string, unknown> }) => void
   extraHeaders?: Record<string, string>
 }
@@ -74,13 +81,20 @@ export function useChat(
   customerId: string,
   options: UseChatOptions = {},
 ): UseChatReturn {
-  const { initialMessages, onDebugEvent, extraHeaders } = options
+  const { initialMessages, initialUiAction, onDebugEvent, extraHeaders } = options
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages ?? [])
   const [isStreaming, setIsStreaming] = useState(false)
   const [toolStatus, setToolStatus] = useState<{ tool: string; message: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>([])
-  const [uiActions, setUiActions] = useState<Map<string, { type: string; payload: Record<string, unknown> }>>(new Map())
+  // Seeded with the server-derived pending card (reload parity, T9/T12):
+  // keyed to the LAST assistant message, it is the newest entry and therefore
+  // message-list's lastActionableId — it renders interactive on load.
+  const [uiActions, setUiActions] = useState<Map<string, { type: string; payload: Record<string, unknown> }>>(() => {
+    const seeded = new Map<string, { type: string; payload: Record<string, unknown> }>()
+    if (initialUiAction) seeded.set(initialUiAction.messageId, initialUiAction.action)
+    return seeded
+  })
   const [answeredMessageIds, setAnsweredMessageIds] = useState<Set<string>>(new Set())
 
   // Synchronous concurrency guard: checked-and-set before any await. React's

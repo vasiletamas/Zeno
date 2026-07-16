@@ -21,6 +21,7 @@ import { validateCnpChecksum } from '@/lib/engines/cnp-validation'
 import { maskCnp } from '@/lib/security/encryption'
 import type { GroundingOption } from '@/lib/engines/anti-fabrication'
 import { valueNotGroundedError } from './grounding-guard'
+import { CONDUCT_LINE, questionCard, rejectReemit, savedMessage } from './questionnaire-cards'
 import type { ToolHandler } from '@/lib/tools/types'
 import { trackDntCompleted } from '@/lib/analytics/events'
 import { bumpInsightOnAnswer } from './insight-bump'
@@ -269,10 +270,12 @@ export const openDntSession: ToolHandler = async (_args, context) => {
         pendingCodes,
         progress,
       },
+      // T9/T12 clause 2: the conduct instruction is the shared CONDUCT_LINE
+      // (server-owned canonical wording), same as every save-path message.
       message: next
-        ? `DNT session opened (${type}${type === 'UPDATE' ? `, ${prefilled} answers pre-filled` : ''}). First question code: ${next.code}. A question card is shown to the customer with all the options — NEVER list the options in prose (no "Opțiuni:" lists); invite them to answer on the card. If they type instead, call write_dnt_answer with questionCode "${next.code}".`
+        ? `DNT session opened (${type}${type === 'UPDATE' ? `, ${prefilled} answers pre-filled` : ''}). First question code: ${next.code}. ${CONDUCT_LINE} If the customer types instead, call write_dnt_answer with questionCode "${next.code}".`
         : `DNT session opened (${type}); all questions already answered — ready for sign_dnt.`,
-      uiAction: dntQuestionCard(next, progress),
+      uiAction: questionCard('dnt', next, progress),
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -289,35 +292,8 @@ export const openDntSession: ToolHandler = async (_args, context) => {
  * the just-written answer would be re-served. This walk reads via
  * context.db (the tx when gateway-routed).
  */
-/**
- * Task 2.1 (D1): the DNT question CARD — same show_question uiAction the
- * application questionnaire uses (QuestionCard + answer_question GUI action
- * with groupType 'dnt' → gui-actor write_dnt_answer with the EXACT code).
- * Full localized text/options ride the payload; the card, not the model,
- * collects the answer.
- */
-function dntQuestionCard(
-  next: { id: string; code: string | null; text: unknown; helpText: unknown; type: string; options: unknown; validationRules: unknown } | null,
-  progress: { answered: number; total: number },
-): { type: string; payload: Record<string, unknown> } | undefined {
-  if (!next) return undefined
-  return {
-    type: 'show_question',
-    payload: {
-      question: {
-        id: next.id,
-        code: next.code,
-        text: next.text as { en: string; ro: string },
-        helpText: next.helpText as { en: string; ro: string } | null,
-        type: next.type,
-        options: next.options,
-        validationRules: next.validationRules,
-      },
-      progress,
-      groupType: 'dnt',
-    },
-  }
-}
+// Task 2.1 (D1) card builder → moved to the shared questionnaire-cards
+// module (T9/T12): both families now emit the identical show_question shape.
 
 async function sessionNextQuestion(
   db: Parameters<ToolHandler>[1]['db'],
@@ -360,24 +336,33 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
     const question = await context.db.question.findFirst({
       where: { code: questionCode, group: { code: { in: codes } } },
     })
+    // T9/T12 clause 3: every reject below re-emits the SAME question card
+    // through the rejection envelope (data._uiAction survives the tx
+    // rollback) so the customer is never stranded card-less.
+    const reemitCurrent = async () => {
+      const { progress } = await sessionNextQuestion(context.db, codes, session.id)
+      return rejectReemit(undefined, questionCard('dnt', question, progress))
+    }
+
     if (!question) {
       // Self-healing hint (B2.7 live lesson): agents sometimes guess codes —
       // hand back the CURRENT question's exact code so the retry lands.
-      const { next } = await sessionNextQuestion(context.db, codes, session.id)
+      const { next, progress } = await sessionNextQuestion(context.db, codes, session.id)
       return {
         success: false,
         error: `Unknown DNT question code: ${questionCode}. Use the exact code from the tool result — the current unanswered question is ${next?.code ?? '(none — session complete)'}.`,
+        data: rejectReemit(undefined, questionCard('dnt', next, progress)),
       }
     }
 
     const v = validateAnswer({ type: question.type, options: question.options, validationRules: question.validationRules }, value)
-    if (!v.valid) return { success: false, error: v.error ?? 'Invalid answer.' }
+    if (!v.valid) return { success: false, error: v.error ?? 'Invalid answer.', data: await reemitCurrent() }
 
     // P0-4 (2026-07-06): reject invalid CNPs like collect_customer_field does —
     // previously the DNT saved them silently (and silently skipped the profile
     // mirror), leaving an unusable identifier in the regulatory record.
     if (questionCode === 'DNT_CNP' && !validateCnpChecksum(v.normalizedValue)) {
-      return { success: false, error: 'cnp_checksum_invalid: the CNP control digit does not match — ask the customer to re-check the 13 digits.' }
+      return { success: false, error: 'cnp_checksum_invalid: the CNP control digit does not match — ask the customer to re-check the 13 digits.', data: await reemitCurrent() }
     }
 
     // P0-1 write-guard: a regulatory answer must be anchored in the
@@ -388,7 +373,7 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
       select: { value: true },
     })
     const notGrounded = await valueNotGroundedError(context, v.normalizedValue, (question.options as GroundingOption[] | null) ?? undefined, existingAnswer?.value ?? null)
-    if (notGrounded) return { success: false, error: notGrounded }
+    if (notGrounded) return { success: false, error: notGrounded, data: await reemitCurrent() }
 
     // P0-3: the raw CNP never lands in DntAnswer — the encrypted profile
     // store (AES-GCM envelope) is the only carrier; the regulatory record
@@ -430,10 +415,8 @@ export const writeDntAnswer: ToolHandler = async (args, context) => {
         pendingCodes,
         progress,
       },
-      message: next === null
-        ? 'All DNT questions answered. Ready for signature (sign_dnt).'
-        : `Answer saved. Next question code: ${next.code}. ${progress.total - progress.answered} remaining. A question card is shown with all the options — NEVER list the options in prose (no "Opțiuni:" lists); invite the customer to answer on the card.`,
-      uiAction: dntQuestionCard(next, progress),
+      message: savedMessage('dnt', next, progress),
+      uiAction: questionCard('dnt', next, progress),
     }
   } catch (error) {
     return { success: false, error: String(error) }

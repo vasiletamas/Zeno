@@ -9,9 +9,11 @@
  * selection via its own selectionPatch inside this same gateway
  * transaction, so the single-writer invariant holds.
  */
-import { loadActiveApplication } from './application-handlers'
+import { appGroupCodesFor, loadActiveApplication } from './application-handlers'
 import { computeConsequences, type Mutation } from '@/lib/engines/consequence-planner'
 import { applyConsequencePlan, buildPlannerSnapshot, loadDependencyGraph } from '@/lib/engines/consequence-applier'
+import { getNextQuestion } from '@/lib/engines/questionnaire-engine'
+import { CONDUCT_LINE, questionCard, type QuestionCardAction } from './questionnaire-cards'
 import type { ToolHandler } from '@/lib/tools/types'
 
 export const selectCoverage: ToolHandler = async (args, context) => {
@@ -77,6 +79,23 @@ export const selectCoverage: ToolHandler = async (args, context) => {
     const tierRow = post.tierId ? await context.db.pricingTier.findUnique({ where: { id: post.tierId } }) : null
     const levelRow = post.levelId ? await context.db.pricingLevel.findUnique({ where: { id: post.levelId } }) : null
 
+    // T9/T12 clause 1 — the questionnaire's ENTRY point: the commit that
+    // leaves the selection COMPLETE carries the first pending question card
+    // (nothing else emits it: get_next_question is a data-only read,
+    // set_application emits nothing). "Selection complete" = tier AND level
+    // chosen. includesAddon is a NOT NULL boolean @default(false) — there is
+    // no "undecided" representation, so the addon facet cannot gate
+    // completeness (treating default-false as undecided would strand the
+    // flow: no later commit would ever emit the entry card).
+    let entryCard: QuestionCardAction | undefined
+    if (post.tierId && post.levelId && post.status === 'OPEN') {
+      const codes = await appGroupCodesFor(context, post.includesAddon)
+      // context.db, NOT the global client: the walk must see the plan the
+      // gateway tx just applied (addon-toggle invalidations, added questions)
+      const next = await getNextQuestion(codes, { kind: 'application', applicationId: application.id }, undefined, context.db)
+      entryCard = questionCard('application', next?.question ?? null, next?.progress ?? { answered: 0, total: 0 })
+    }
+
     return {
       success: true,
       effects: plan.effects,
@@ -89,9 +108,14 @@ export const selectCoverage: ToolHandler = async (args, context) => {
         invalidations: plan.invalidations,
         eligibilityOutcomes: plan.eligibilityOutcomes,
       },
+      // when the entry card rides, the message is selection summary + the
+      // clause-2 conduct line; selection-complete-but-questionnaire-complete
+      // keeps the bare summary (no card to narrate)
       message:
         `Selection updated: ${tierRow?.code ?? '—'} / ${levelRow?.code ?? '—'} / addon ${post.includesAddon ? 'on' : 'off'}.` +
-        (plan.invalidations.some((i) => i.node === 'selection:level') ? ' The level was invalidated by the tier change — choose a level for the new tier.' : ''),
+        (plan.invalidations.some((i) => i.node === 'selection:level') ? ' The level was invalidated by the tier change — choose a level for the new tier.' : '') +
+        (entryCard ? ` ${CONDUCT_LINE}` : ''),
+      uiAction: entryCard,
     }
   } catch (error) {
     return { success: false, error: String(error) }

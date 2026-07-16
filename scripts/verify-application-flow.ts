@@ -29,8 +29,12 @@ function check(name: string, ok: boolean, detail?: string) {
   if (!ok) failures++
 }
 
+// actor 'gui': scripted answers are the CUSTOMER's input — the P0-1
+// write-guard only polices agent-actor writes (same convention as
+// __tests__/helpers/dnt-fixtures.ts; without it the guard rejects every
+// scripted value as ungrounded, since the conversation has no messages).
 const makeCtx = (customerId: string, conversationId: string) =>
-  ({ customerId, conversationId, language: 'ro', db: prisma } as unknown as ToolContext)
+  ({ customerId, conversationId, language: 'ro', db: prisma, actor: 'gui' } as unknown as ToolContext)
 
 const commit = (tool: string, args: Record<string, unknown>, customerId: string, conversationId: string, actor: CommitActor = 'agent', confirmToken?: string) =>
   executeCommit({ tool, args, actor, customerId, conversationId, confirmToken, toolContext: makeCtx(customerId, conversationId) })
@@ -130,7 +134,11 @@ async function main() {
 
   // leg 7 (D1.5, T13.D2): the recovery path is cancel_QUOTE — two-step token,
   // terminal CAS CANCELLED, pointer released; the frozen COMPLETED
-  // application stays as the audit record of what was priced
+  // application stays as the audit record of what was priced.
+  // P2-8: cancel_quote is exposed only after the CUSTOMER speaks post-quote
+  // (customer_intent_required kills model self-cancel) — simulate the
+  // customer's cancel request before driving the commit.
+  await prisma.message.create({ data: { conversationId: conv.id, role: 'user', content: 'Vreau să anulez oferta.' } })
   const c1 = await commit('cancel_quote', {}, customer.id, conv.id)
   const c2 = c1.outcome === 'requires_confirmation' && c1.confirmToken
     ? await commit('cancel_quote', {}, customer.id, conv.id, 'agent', c1.confirmToken)

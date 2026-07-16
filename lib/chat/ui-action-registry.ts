@@ -17,7 +17,7 @@
  * orchestrator-synthesized confirm_required.
  */
 export const EMITTED_UI_ACTION_TYPES: readonly string[] = [
-  'show_question', // dnt-handlers dntQuestionCard + application-handlers
+  'show_question', // questionnaire-cards questionCard (T9: shared by dnt-handlers, application-handlers, select-coverage-handlers, derive-pending-card)
   'show_data_field', // data-handlers
   'show_otp_entry', // identity-handlers startChannelVerification
   'show_document_upload', // identity-handlers requestDocumentUpload

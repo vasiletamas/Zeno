@@ -20,8 +20,12 @@ function check(name: string, ok: boolean, detail?: string) {
   if (!ok) failures++
 }
 
+// actor 'gui': scripted answers are the CUSTOMER's input — the P0-1
+// write-guard only polices agent-actor writes (same convention as
+// __tests__/helpers/dnt-fixtures.ts; without it the guard rejects every
+// scripted value as ungrounded, since the conversation has no messages).
 const makeCtx = (customerId: string, conversationId: string) =>
-  ({ customerId, conversationId, language: 'ro', db: prisma } as unknown as ToolContext)
+  ({ customerId, conversationId, language: 'ro', db: prisma, actor: 'gui' } as unknown as ToolContext)
 
 async function answerAll(ctx: ToolContext): Promise<number> {
   let count = 0
