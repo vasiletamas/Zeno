@@ -15,6 +15,7 @@ import { OtpEntryCard } from './otp-entry-card'
 import { DntReviewCard } from './dnt-review-card'
 import { MedicalReviewCard } from './medical-review-card'
 import { MedicalBatchCard } from './medical-batch-card'
+import { AcceptanceCard } from './acceptance-card'
 import { UnknownActionCard } from './unknown-action-card'
 
 /* ── Types ────────────────────────────────────────── */
@@ -220,12 +221,11 @@ export function RichContent({
           addonCoverages={p.addonCoverages as CoveragePayload[]}
           validUntil={p.validUntil as string}
           onAccept={() =>
-            // No self-confirm (M4/A3.5): the tokenless first click makes the
-            // gateway answer requires_confirmation → confirm_required card.
-            // D2.5: the GUI button elects the ANNUAL frequency shown on the
-            // card (paymentOption is material); other frequencies are elected
-            // through the agent, changeable via change_payment_option (D3).
-            onAction({ type: 'accept_quote', payload: { paymentOption: 'annual' } })
+            // T23: the primary button OPENS the acceptance card (doc links +
+            // ack checkbox + frequency comparison + gated Accept) via the
+            // get_acceptance_bundle read — the hard-coded annual accept is
+            // dead; the paymentOption is elected ON that card.
+            onAction({ type: 'open_acceptance', payload: {} })
           }
           onModify={() => onAction({ type: 'cancel_quote', payload: {} })}
           language={language}
@@ -452,6 +452,28 @@ export function RichContent({
           applicationId={p.applicationId as string}
           conditions={p.conditions as { code: string; question: LocalizedString; value: 'true' | 'false' | null }[]}
           progress={p.progress as { answered: number; total: number }}
+          onAction={onAction}
+          language={language}
+          isAnswered={isAnswered}
+          isLoading={isLoading}
+        />
+      )
+    }
+
+    /* ── Acceptance card (T23: doc links + ack checkbox + frequency
+          comparison + Accept gated on both; the QuoteCard's primary button
+          opens it via the get_acceptance_bundle read) ── */
+    case 'show_acceptance': {
+      return (
+        <AcceptanceCard
+          quoteId={p.quoteId as string}
+          tierName={p.tierName as LocalizedString | null}
+          levelName={p.levelName as LocalizedString | null}
+          includesAddon={(p.includesAddon as boolean | undefined) ?? false}
+          premium={p.premium as { annual: number; semiAnnual: number | null; quarterly: number | null; currency: string }}
+          offeredOptions={((p.frequencies ?? []) as { option: string }[]).map((f) => f.option)}
+          documents={(p.documents ?? []) as { id: string; kind: string; title: LocalizedString; url: string }[]}
+          disclosuresAcked={(p.disclosuresAcked as boolean | undefined) ?? false}
           onAction={onAction}
           language={language}
           isAnswered={isAnswered}

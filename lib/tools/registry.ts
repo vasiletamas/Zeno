@@ -25,7 +25,7 @@ import { setApplication, getNextQuestionInfo, writeQuestionAnswer, modifyAnswer,
 import { selectCoverage } from './handlers/select-coverage-handlers'
 import { writeMedicalBatch } from './handlers/medical-batch-handlers'
 import { acknowledgeSuitabilityWarning } from './handlers/suitability-handlers'
-import { generateQuote, getQuoteInfo, acceptQuote, cancelQuote, acknowledgeDisclosures } from './handlers/quote-handlers'
+import { generateQuote, getQuoteInfo, getAcceptanceBundle, acceptQuote, cancelQuote, acknowledgeDisclosures } from './handlers/quote-handlers'
 import { compareProducts } from './handlers/product-handlers'
 import { previewProductRequirements } from './handlers/preview-handlers'
 import { getStateHandler } from './handlers/state-handlers'
@@ -1019,6 +1019,23 @@ registerTool('get_quote_info', {
   sideEffects: false, // pure read — Task 5.3: the default-true left it in the writing partition, so missing_consequences fired on every call
   kind: 'read',
 }, getQuoteInfo)
+
+registerTool('get_acceptance_bundle', {
+  description:
+    'Show the ONE acceptance card for the issued quote: disclosure document links (IPID, terms & conditions), the acknowledgment checkbox and the payment-frequency ' +
+    'comparison with the Accept button — the CUSTOMER completes it on the card. Use when the customer is ready to review and accept the offer.',
+  parameters: {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: true,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffects: false, // pure read — the card is the only output
+  kind: 'read',
+}, getAcceptanceBundle)
 
 registerTool('acknowledge_disclosures', {
   description:

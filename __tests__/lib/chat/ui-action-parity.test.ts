@@ -54,6 +54,8 @@ const CLIENT_ACTION_FIXTURES: Record<string, Record<string, unknown>> = {
   change_payment_option: { paymentOption: 'quarterly', confirmToken: 't' },
   request_cancellation: { confirmToken: 't' },
   payment_complete: { paymentId: 'p1' },
+  open_acceptance: {},
+  acknowledge_disclosures: {},
 }
 
 describe('uiAction parity (T29)', () => {

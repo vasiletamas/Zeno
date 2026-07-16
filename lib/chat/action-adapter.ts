@@ -99,6 +99,26 @@ export function adaptAction(action: UIAction): ToolCall | null {
         arguments: action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {},
       }
 
+    // ── T23 acceptance card ──
+    // The QuoteCard's primary button opens the acceptance card via the
+    // get_acceptance_bundle read — the hard-coded annual accept died with it.
+    case 'open_acceptance':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'get_acceptance_bundle',
+        arguments: {},
+      }
+
+    // The ack checkbox commits acknowledge_disclosures tokenless (gui-actor
+    // commits are confirmed by construction); confirmToken passthrough only
+    // serves a hypothetical agent-path confirm round-trip.
+    case 'acknowledge_disclosures':
+      return {
+        id: `action_${Date.now()}`,
+        name: 'acknowledge_disclosures',
+        arguments: action.payload.confirmToken ? { confirmToken: String(action.payload.confirmToken) } : {},
+      }
+
     // ── Payment (D3.5, M4): the Pay button rides the SAME commit as the
     // agent — mode (started|resumed|retried) is engine OUTPUT, never input ──
     case 'pay_now':

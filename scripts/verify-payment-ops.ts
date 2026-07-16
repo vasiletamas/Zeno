@@ -33,8 +33,12 @@ function check(name: string, ok: boolean, detail?: string) {
   else failures++
 }
 
+// actor 'gui': the scripted fixture values are the CUSTOMER's input — the
+// P0-1 grounding guard only polices agent-actor writes (same convention as
+// __tests__/helpers/funnel-fixtures.ts). Pre-existing on main: the guard
+// rejected the script's DNT setup writes with value_not_grounded.
 const makeCtx = (customerId: string, conversationId: string) =>
-  ({ customerId, conversationId, language: 'ro', db: prisma } as unknown as ToolContext)
+  ({ customerId, conversationId, language: 'ro', db: prisma, actor: 'gui' } as unknown as ToolContext)
 
 const commit = (tool: string, args: Record<string, unknown>, customerId: string, conversationId: string, actor: CommitActor = 'agent', confirmToken?: string) =>
   executeCommit({ tool, args, actor, customerId, conversationId, confirmToken, toolContext: makeCtx(customerId, conversationId) })

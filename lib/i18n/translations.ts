@@ -120,7 +120,7 @@ export const translations: Record<Language, TranslationTable> = {
     quote_card_title: 'Oferta ta',
     quote_card_coverages: 'Acoperiri incluse:',
     quote_card_valid_until: 'Valabila pana la:',
-    quote_card_accept: 'Accepta oferta',
+    quote_card_accept: 'Continuă spre acceptare', // T23: opens the acceptance card (doc links + ack + frequency); the accept itself lives there
     quote_card_modify: 'Modifica',
 
     // B2: Question card
@@ -285,7 +285,7 @@ export const translations: Record<Language, TranslationTable> = {
     quote_card_title: 'Your quote',
     quote_card_coverages: 'Included coverages:',
     quote_card_valid_until: 'Valid until:',
-    quote_card_accept: 'Accept quote',
+    quote_card_accept: 'Continue to acceptance', // T23: opens the acceptance card (doc links + ack + frequency); the accept itself lives there
     quote_card_modify: 'Modify',
 
     // B2: Question card

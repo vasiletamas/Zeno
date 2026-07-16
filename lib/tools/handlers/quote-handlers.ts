@@ -9,7 +9,7 @@ import type { QuoteInput } from '@/lib/engines/quote-engine'
 import { decideQuoteIssue } from '@/lib/engines/quote-decision'
 import { canQuoteTransition, effectiveQuoteStatus, type QuoteStatusV3 } from '@/lib/engines/quote-lifecycle'
 import { disclosuresRequired, type DisclosureRef } from '@/lib/engines/disclosures'
-import { buildSchedule, type PaymentFrequency } from '@/lib/engines/payment-schedule'
+import { buildSchedule, INSTALLMENTS_BY_FREQUENCY, type PaymentFrequency } from '@/lib/engines/payment-schedule'
 import { getProductDisclosureDocuments } from '@/lib/documents/registry'
 import { toQuoteCoverageRow, type QuoteCoverageRow } from '@/lib/products/coverage-display'
 import { evaluateEligibility } from '@/lib/engines/eligibility'
@@ -19,7 +19,7 @@ import { getAge } from '@/lib/customer/profile-service'
 import { createReferralWorkItem } from '@/lib/work-items/referral'
 import { generateSuitabilityReport } from '@/lib/compliance/suitability-report'
 import { loadActiveApplication } from './application-handlers'
-import type { ToolHandler } from '@/lib/tools/types'
+import type { ToolContext, ToolHandler } from '@/lib/tools/types'
 import { trackQuoteGenerated, trackQuoteAccepted } from '@/lib/analytics/events'
 
 // ─────────────────────────────────────────────
@@ -354,6 +354,132 @@ export const getQuoteInfo: ToolHandler = async (args, context) => {
 }
 
 // ─────────────────────────────────────────────
+// get_acceptance_bundle (T23)
+// ─────────────────────────────────────────────
+
+/** Customer-facing titles for the two static disclosure kinds — the Document
+ * registry row has no title column; the kind IS the identity. */
+const DISCLOSURE_TITLES: Record<string, { en: string; ro: string }> = {
+  IPID: { en: 'Insurance Product Information Document (IPID)', ro: 'Document de informare (IPID)' },
+  TERMS: { en: 'Terms and Conditions', ro: 'Termeni și condiții' },
+}
+
+interface AcceptanceQuoteRow {
+  id: string
+  productId: string
+  premiumAnnual: number
+  premiumSemiAnnual: number | null
+  premiumQuarterly: number | null
+  currency: string
+  coverages: unknown
+  addonsSelected: unknown
+}
+
+/**
+ * The show_acceptance payload, shared by the get_acceptance_bundle read and
+ * the acknowledge_disclosures re-emit: offer recap, the disclosure document
+ * links, the frequency comparison (Product.paymentFrequencyOptions ∩ the
+ * quote's precomputed variants — same intersection as get_quote_info's
+ * payment_options) and the disclosuresAcked gate.
+ */
+async function buildAcceptanceBundlePayload(quote: AcceptanceQuoteRow, context: ToolContext): Promise<Record<string, unknown>> {
+  const product = await context.db.product.findUnique({ where: { id: quote.productId }, select: { paymentFrequencyOptions: true } })
+  const freqOptions = product?.paymentFrequencyOptions as Record<string, unknown> | null
+  const variant: Record<string, number | null> = {
+    annual: quote.premiumAnnual,
+    semi_annual: quote.premiumSemiAnnual,
+    quarterly: quote.premiumQuarterly,
+  }
+  const frequencies = (Object.keys(INSTALLMENTS_BY_FREQUENCY) as PaymentFrequency[])
+    .filter((opt) => Object.keys(freqOptions ?? {}).includes(opt) && variant[opt] != null)
+    .map((opt) => {
+      const perInstallment = variant[opt]!
+      const installments = INSTALLMENTS_BY_FREQUENCY[opt]
+      return {
+        option: opt,
+        perInstallment,
+        installments,
+        // display math from the precomputed fields — the ACTUAL schedule is
+        // built at accept in integer minor units (buildSchedule)
+        totalPerYear: Math.round(perInstallment * installments * 100) / 100,
+      }
+    })
+  const language = context.language ?? 'ro'
+  const docs = await getProductDisclosureDocuments(quote.productId, language, context.db)
+  const acks = await context.db.disclosureAck.findMany({ where: { quoteId: quote.id } })
+  const disclosuresAcked = disclosuresRequired(
+    docs.map((d) => ({ kind: d.kind as DisclosureRef['kind'], version: d.version, language: d.language })),
+    acks.map((a) => ({ kind: a.kind as DisclosureRef['kind'], version: a.version, language: a.language })),
+  ).length === 0
+  const coverages = quote.coverages as { pricingTierLabel?: { en: string; ro: string }; pricingLevelLabel?: { en: string; ro: string } } | null
+  return {
+    quoteId: quote.id,
+    tierName: coverages?.pricingTierLabel ?? null,
+    levelName: coverages?.pricingLevelLabel ?? null,
+    includesAddon: quote.addonsSelected != null,
+    premium: {
+      annual: quote.premiumAnnual,
+      semiAnnual: quote.premiumSemiAnnual,
+      quarterly: quote.premiumQuarterly,
+      currency: quote.currency,
+    },
+    frequencies,
+    documents: docs.map((d) => ({
+      id: d.id,
+      kind: d.kind,
+      title: DISCLOSURE_TITLES[d.kind] ?? { en: d.kind, ro: d.kind },
+      // plain registry URL — the card renders a plain <a target="_blank"
+      // rel="noopener"> so the SPA survives the navigation regardless of the
+      // route's auth story (T21 owns the auth fix)
+      url: `/api/documents/${d.id}`,
+    })),
+    disclosuresAcked,
+  }
+}
+
+/**
+ * T23: the acceptance-card read. Runs on the plain executor path (never in
+ * the gateway tx — context.db IS the global client there); the uiAction rides
+ * ToolResult.uiAction and the orchestrator emits ui_action for any tool
+ * result that carries one, read or commit.
+ *
+ * Identity note: the card may render while identity is below
+ * verified_channel — the Accept click is then rejected by the gateway
+ * legality wall (requires_identity envelope) and the model narrates the gap.
+ * Acceptable: the funnel does OTP before acceptance (T27/T28 own the
+ * ordering); the card gates Accept only on disclosuresAcked + frequency.
+ */
+export const getAcceptanceBundle: ToolHandler = async (_args, context) => {
+  try {
+    const application = await loadActiveApplication(context)
+    if (!application) {
+      return { success: false, error: 'no_open_application: no application found.' }
+    }
+    const quote = await context.db.quote.findFirst({
+      where: { applicationId: application.id, status: 'ISSUED' },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!quote) {
+      return { success: false, error: 'no_issued_quote: there is no issued quote to accept.' }
+    }
+    if (effectiveQuoteStatus({ status: quote.status as QuoteStatusV3, validUntil: quote.validUntil }, new Date()) === 'EXPIRED') {
+      return { success: false, error: 'quote_expired: the quote expired — cancel it and start a new application for a fresh price.' }
+    }
+    const payload = await buildAcceptanceBundlePayload(quote, context)
+    return {
+      success: true,
+      data: payload,
+      message:
+        'Acceptance card shown: document links, the disclosure-acknowledgment checkbox and the payment-frequency comparison with the Accept button. ' +
+        'In prose do NOT repeat the amounts or list the frequencies — invite the customer to read the documents, tick the confirmation and choose how they want to pay.',
+      uiAction: { type: 'show_acceptance', payload },
+    }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}
+
+// ─────────────────────────────────────────────
 // accept_quote
 // ─────────────────────────────────────────────
 
@@ -479,12 +605,18 @@ export const acknowledgeDisclosures: ToolHandler = async (_args, context) => {
         },
       })
     }
+    // T23: the ack re-emits the acceptance card — the checkbox click marked
+    // the previous card answered (inert), so the fresh card renders the
+    // checkbox checked+disabled with Accept gated only on the frequency
+    // choice. disclosuresAcked recomputes over the rows just written.
+    const bundle = await buildAcceptanceBundlePayload(quote, context)
     return {
       success: true,
       data: { acknowledged: missing.map(({ kind, version, language: lang }) => ({ kind, version, language: lang })) },
       message: missing.length > 0
         ? `Disclosure documents acknowledged: ${missing.map((m) => `${m.kind} v${m.version}`).join(', ')}.`
         : 'All disclosure documents were already acknowledged.',
+      uiAction: { type: 'show_acceptance', payload: bundle },
     }
   } catch (error) {
     return { success: false, error: String(error) }

@@ -157,7 +157,12 @@ const cancelQuoteSchema = z.object({
   confirmToken: z.string().optional(),
 }).strict()
 
-const acknowledgeDisclosuresSchema = z.object({}).strict()
+// T23: the token is card-carried (never model-emitted) — the ack checkbox
+// posts tokenless (gui commits are confirmed by construction); the optional
+// token only survives a hypothetical agent-path confirm round-trip.
+const acknowledgeDisclosuresSchema = z.object({
+  confirmToken: z.string().optional(),
+}).strict()
 
 // P2-15: previously absent — the permissive unknown-tool fallback let any
 // args through. The token is card-carried (never model-emitted).
@@ -285,6 +290,7 @@ const toolSchemas: Record<string, ZodType> = {
   generate_quote: generateQuoteSchema,
   accept_quote: acceptQuoteSchema,
   get_quote_info: getQuoteInfoSchema,
+  get_acceptance_bundle: z.object({}).strict(),
   cancel_quote: cancelQuoteSchema,
   acknowledge_disclosures: acknowledgeDisclosuresSchema,
   sign_medical_declarations: signMedicalDeclarationsSchema,

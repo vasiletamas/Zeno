@@ -28,8 +28,7 @@ export const EMITTED_UI_ACTION_TYPES: readonly string[] = [
   'show_dnt_review', // questionnaire-cards buildDntReviewCard (T7: DNT completion review/sign card)
   'show_medical_review', // questionnaire-cards buildMedicalReviewCard (T11: medical completion review/sign card)
   'show_medical_batch', // questionnaire-cards medicalBatchCard (T10: the ONE bulk BD-conditions card — "none of these apply" + toggles)
-  // Later tasks register here when their emitters land (comment only — the
-  // parity test fails on an unregistered emission): 'show_acceptance' (T22).
+  'show_acceptance', // quote-handlers get_acceptance_bundle read + acknowledge_disclosures re-emit (T23: the ONE acceptance card — doc links, ack checkbox, frequency comparison, gated Accept)
 ]
 
 /**
@@ -66,6 +65,7 @@ export const RENDERED_UI_ACTION_TYPES: readonly string[] = [
   'show_dnt_review',
   'show_medical_review',
   'show_medical_batch',
+  'show_acceptance',
 ]
 
 /**
@@ -95,6 +95,10 @@ export const CLIENT_POSTED_ACTION_TYPES: readonly string[] = [
   // T30: settlement already ran server-side (/api/payments/confirm); the
   // post injects a get_payment_status read so the orchestrator narrates it
   'payment_complete',
+  // T23 acceptance card: the QuoteCard primary button opens the card (a
+  // get_acceptance_bundle read); the ack checkbox commits the disclosures
+  'open_acceptance',
+  'acknowledge_disclosures',
 ]
 
 /**
