@@ -138,4 +138,21 @@ describe('main-chat agent constraints', () => {
     expect(mainChat?.systemPrompt).toMatch(/NEVER re-collect a field/i)
     expect(mainChat?.systemPrompt).toMatch(/never ask the customer to retype/i)
   })
+
+  // T20 (2026-07-15, conv cmrm3fgku00056g0y4eb2hsme msg 71-74): the blanket
+  // "Send emails, SMS, or documents" ban made the model refuse a code send
+  // with ZERO tool calls — right after offering it. The clause is now scoped
+  // to free-form messaging, and a conduct rule demands trying the tool.
+  it('scopes the CANNOT-DO messaging clause to free-form writing — tool-delivered codes/documents are IN scope (T20)', () => {
+    const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
+    expect(mainChat?.systemPrompt).not.toContain('Send emails, SMS, or documents to the customer')
+    expect(mainChat?.systemPrompt).toContain('Write free-form emails or SMS in my own words')
+    expect(mainChat?.systemPrompt).toContain('system-generated verification codes and documents ARE delivered through my tools')
+  })
+
+  it('CORE BEHAVIORS carries the try-the-tool conduct rule — never refuse from memory of limitations (T20)', () => {
+    const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
+    expect(mainChat?.systemPrompt).toContain('TRY THE TOOL and trust its error')
+    expect(mainChat?.systemPrompt).toContain('never refuse from memory of your limitations')
+  })
 })

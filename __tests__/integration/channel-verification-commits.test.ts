@@ -65,7 +65,11 @@ it('confirm merges into an owner who VERIFIED the target (consumed evidence), bu
   expect((await prisma.customer.findUniqueOrThrow({ where: { id: attacker.id } })).mergedIntoId).toBeNull()
 })
 
-it('NEGATIVE: sms verification is rejected with a redirect while the transport is unimplemented (a standing sms challenge is an unfulfillable dead end)', async () => {
+// T20 (P3.5): sms now dies at the SCHEMA layer — the zod enum derives from
+// availableVerificationChannels() and excludes sms while no SMS_PROVIDER is
+// configured, so the gateway rejects with invalid_args before the handler
+// runs. The handler's own reject stays as defense in depth (tested below).
+it('NEGATIVE: sms verification is rejected at the schema layer while no SMS provider is configured (a standing sms challenge is an unfulfillable dead end)', async () => {
   const c = await createCustomer()
   const conv = await prisma.conversation.create({ data: { customerId: c.id } })
   const r = await executeCommit({
@@ -73,7 +77,18 @@ it('NEGATIVE: sms verification is rejected with a redirect while the transport i
     args: { channel: 'sms', target: '0712345678' }, toolContext: ctx(c.id, conv.id),
   })
   expect(r.outcome).toBe('rejected')
-  expect(String((r.data as { error?: string })?.error)).toMatch(/sms.*(not|nu).*(available|disponibil)|email/i)
+  expect(r.reason).toBe('invalid_args')
+  expect(await prisma.verificationChallenge.count({ where: { customerId: c.id } })).toBe(0)
+})
+
+it('NEGATIVE (defense in depth): the handler itself still rejects sms with the email redirect even when called past the schema', async () => {
+  const c = await createCustomer()
+  const conv = await prisma.conversation.create({ data: { customerId: c.id } })
+  const { startChannelVerification } = await import('@/lib/tools/handlers/identity-handlers')
+  const r = await startChannelVerification({ channel: 'sms', target: '0712345678' }, ctx(c.id, conv.id))
+  expect(r.success).toBe(false)
+  expect(String(r.error)).toMatch(/sms.*(not|nu).*(available|disponibil)/i)
+  expect(String(r.error)).toMatch(/email/i)
   expect(await prisma.verificationChallenge.count({ where: { customerId: c.id } })).toBe(0)
 })
 

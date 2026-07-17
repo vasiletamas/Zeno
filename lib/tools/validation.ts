@@ -7,6 +7,7 @@
  */
 
 import { z, type ZodType } from 'zod'
+import { availableVerificationChannels, type VerificationChannel } from '@/lib/channels/availability'
 
 // ==============================================
 // COMMON SCHEMAS
@@ -210,8 +211,13 @@ const escalateToHumanSchema = z.object({
 // IDENTITY / CHANNEL VERIFICATION (B3.5)
 // ==============================================
 
+// T20 (P3.5): the accepted channels derive from provider config at module
+// load — the schema can never accept a channel the manifest does not offer.
+const VERIFICATION_CHANNELS = availableVerificationChannels()
 const startChannelVerificationSchema = z.object({
-  channel: z.enum(['email', 'sms']),
+  channel: z.enum(VERIFICATION_CHANNELS as [VerificationChannel, ...VerificationChannel[]], {
+    error: `channel must be one of: ${VERIFICATION_CHANNELS.join(', ')} — only channels with a configured delivery provider are available.`,
+  }),
   target: z.string().min(3, 'Target contact is required'),
   // Task 1.1 (D5): the ONLY way to re-issue for the SAME target while a
   // challenge is pending — the customer must have asked for a new code.

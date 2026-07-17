@@ -43,6 +43,7 @@ import { getPolicyInfo, requestCancellation } from './handlers/policy-handlers'
 import { requestErasure, requestDataExport, approveErasure, approveExport } from './handlers/gdpr-handlers'
 import { getOpenItems } from './handlers/open-items-handlers'
 import { startChannelVerification, confirmChannelVerification, requestDocumentUpload } from './handlers/identity-handlers'
+import { availableVerificationChannels, type VerificationChannel } from '@/lib/channels/availability'
 
 // ==============================================
 // INTERNAL STORAGE
@@ -1222,17 +1223,28 @@ registerTool('escalate_to_human', {
 
 // --- Identity / channel verification (B3.5) ---
 
+// T20 (P3.5): the manifest derives from provider config at module load — the
+// description names EXACTLY the deliverable channels (no advertised "or phone
+// number" while no SMS provider exists), so the model is never told about a
+// channel the schema and handler would reject.
+const VERIFICATION_CHANNELS = availableVerificationChannels()
+const VERIFICATION_TARGET_NOUN: Record<VerificationChannel, string> = {
+  email: 'email address',
+  sms: 'phone number',
+}
+const verificationTargetPhrase = VERIFICATION_CHANNELS.map((c) => VERIFICATION_TARGET_NOUN[c]).join(' or ')
+
 registerTool('start_channel_verification', {
   description:
-    'Send the customer a 6-digit verification code (plus a one-click link) to the email address or phone number THEY provided. ' +
+    `Send the customer a 6-digit verification code (plus a one-click link) to the ${verificationTargetPhrase} THEY provided. ` +
     'Verifying a channel raises the identity tier (needed before accepting a quote). ' +
     'Never reveals whether the address belongs to an existing account. ' +
     'While a code is already pending, do NOT call this again for the same address (it would invalidate the code the customer is reading) — pass resend: true ONLY when the customer explicitly asks for a new code.',
   parameters: {
     type: 'object',
     properties: {
-      channel: { type: 'string', enum: ['email', 'sms'], description: 'Which channel to verify. Only "email" is deliverable today — sms is rejected until an SMS provider is configured.' },
-      target: { type: 'string', description: 'The email address or Romanian phone number the customer gave, exactly as provided.' },
+      channel: { type: 'string', enum: VERIFICATION_CHANNELS, description: `Which channel to verify. Available: ${VERIFICATION_CHANNELS.join(', ')} — a channel is offered ONLY while its delivery provider is configured.` },
+      target: { type: 'string', description: `The ${verificationTargetPhrase} the customer gave, exactly as provided.` },
       resend: { type: 'boolean', description: 'Set true ONLY when the customer explicitly asked for a new code while one is already pending.' },
     },
     required: ['channel', 'target'],

@@ -24,6 +24,10 @@ export const startChannelVerification: ToolHandler = async (args, context) => {
       // sms challenge could never be satisfied, and Task 1.1's re-send guard
       // would then wall the funnel behind an undeliverable code. Reject with
       // the redirect until a real SMS provider lands.
+      // T20: this reject is the DEFENSE-IN-DEPTH layer behind the manifest +
+      // zod schema, which both derive from availableVerificationChannels()
+      // (lib/channels/availability.ts) and already exclude sms while no
+      // SMS_PROVIDER is configured. Keep it even after those layers agree.
       return { success: false, error: 'invalid_args: SMS verification is not available yet — verify the EMAIL address instead (start_channel_verification with channel "email").' }
     }
     await issueChallenge(context.customerId, channel, target, context.conversationId, context.db)
