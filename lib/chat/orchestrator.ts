@@ -941,7 +941,15 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // debug events, pipeline execution with the server-resolved 'gui' actor,
   // result/ui_action/confirm_required emission — exactly the synthetic-path
   // contract, returned so the caller can seed the loop and refresh.
-  async function* runGuiToolCall(tc: ToolCall): AsyncGenerator<SSEEvent, PipelineResult> {
+  // T19: the agent-path _autoChain hop reuses this runner with actor 'agent'
+  // — the hop rides the SAME actor as the commit that declared it (a
+  // deterministic consequence of the submission, whichever surface it came
+  // through), at the round it fired in.
+  async function* runGuiToolCall(
+    tc: ToolCall,
+    actor: import('@/lib/engines/domain-types').CommitActor = 'gui',
+    atRound = 0,
+  ): AsyncGenerator<SSEEvent, PipelineResult> {
     const def = getToolDefinition(tc.name)
     const isBlocking = def?.executionMode === 'blocking'
 
@@ -959,7 +967,7 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     yield* recordAndYield({
       event: 'debug:tool_call',
       data: {
-        round: 0,
+        round: atRound,
         toolCallId: tc.id,
         name: tc.name,
         args: tc.arguments,
@@ -977,11 +985,12 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     const pipelineResult = await executeToolWithPipeline(
       tc.name,
       tc.arguments,
-      // GUI-originated commit: the customer clicked, the server resolved the
-      // actor — never the model (A2.9). The _autoChain hop rides the same
-      // actor: it is a deterministic consequence of that click, gateway-
-      // legality-checked like any commit.
-      { ...toolContext, actor: 'gui' },
+      // Server-resolved actor — never the model (A2.9): 'gui' for the
+      // customer's click and its chained hop, 'agent' for the T19 agent-path
+      // hop. The _autoChain hop rides the same actor as its commit: it is a
+      // deterministic consequence of that submission, gateway-legality-
+      // checked like any commit.
+      { ...toolContext, actor },
       state.traceId,
     )
 
@@ -1502,6 +1511,28 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       // APPLIED envelope this round; state/actions are the post-round
       // recompute.
       yield* refreshAfterAppliedCommits(roundEnvelopes, round)
+
+      // T19: _autoChain on the AGENT path — the consent travels with the
+      // submission regardless of actor (T8 wired the hop for gui/synthetic
+      // commits only; an email typed in prose authorizes the send exactly
+      // like a card submit). Same contract as the synthetic hop: only an
+      // APPLIED commit chains, the hop executes AFTER the round refresh so
+      // the executor wall reflects the post-commit world, and the cap is
+      // EXACTLY ONE hop per declaring commit — the chained result's own
+      // _autoChain is ignored (only the model's round calls are scanned).
+      for (const tc of writing) {
+        const entry = resultMap.get(tc.id)
+        if (!entry) continue
+        const chain = extractAutoChain(entry.pipelineResult.toolResult)
+        if (!chain) continue
+        const chainTc: ToolCall = { id: `${tc.id}_auto`, name: chain.tool, arguments: chain.args }
+        const chainResult = yield* runGuiToolCall(chainTc, 'agent', round)
+        messages.push(...seedSyntheticLoopMessages(chainTc, chainResult.toolResult))
+        const chainEnvelope = chainResult.toolResult.envelope
+        if (chainEnvelope) {
+          yield* refreshAfterAppliedCommits([chainEnvelope], round)
+        }
+      }
 
       round++
     }

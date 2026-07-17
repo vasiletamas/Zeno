@@ -6,9 +6,10 @@
  */
 
 import { setDeclaredField, getProfile, type ProfileFieldName } from '@/lib/customer/profile-service'
+import { verifiedChannelsFor, maskVerificationTarget } from '@/lib/customer/verification-service'
 import { validateCnpChecksum, cnpMatchesDob } from '@/lib/engines/cnp-validation'
 import { valueNotGroundedError } from './grounding-guard'
-import type { ToolHandler } from '@/lib/tools/types'
+import type { ToolHandler, ToolContext } from '@/lib/tools/types'
 
 // ─────────────────────────────────────────────
 // Field collection order
@@ -128,6 +129,44 @@ function validateField(
 }
 
 // ─────────────────────────────────────────────
+// T19: contact submission IS the consent
+// ─────────────────────────────────────────────
+
+/**
+ * T19 (P3.4): submitting the email in a field labeled "for identity
+ * verification" already authorizes the send — the commit declares a
+ * data._autoChain to start_channel_verification so the orchestrator sends
+ * the code and renders the OTP card in the SAME turn (T8 single-hop
+ * contract), on both the card path and the agent-typed path. The model must
+ * never ask "trimit codul...?" again (conv cmrm3fgku00056g0y4eb2hsme
+ * messageIndex 66-74: three prose round-trips for one code send).
+ *
+ * GUARDED declaration (deliberate choice over declare-and-let-the-gateway-
+ * reject): the guard mirrors the exposure rule for start_channel_verification
+ * — no verified email channel, no live pending challenge — so the happy path
+ * never ledgers a rejected hop. PHONE never chains while the SMS transport
+ * is undeliverable (T20 owns phone).
+ */
+async function emailAutoChain(
+  context: ToolContext,
+  target: string,
+): Promise<{ tool: string; args: Record<string, unknown> } | null> {
+  if ((await verifiedChannelsFor(context.customerId, context.db)).includes('email')) return null
+  // same query shape the snapshot loader uses for identity.pendingChallenge
+  const pending = await context.db.verificationChallenge.findFirst({
+    where: { customerId: context.customerId, consumedAt: null, expiresAt: { gt: new Date() } },
+    select: { id: true },
+  })
+  if (pending) return null
+  return { tool: 'start_channel_verification', args: { channel: 'email', target } }
+}
+
+/** The directive _message that rides the collect result when the chain is
+ * declared — the model reads it AFTER the hop has already executed. */
+const emailAutoChainMessage = (target: string): string =>
+  `Contact saved. The verification code was ALREADY sent automatically to ${maskVerificationTarget('email', target)} — a code-entry card is shown. Do NOT ask whether to send the code and do NOT resend.`
+
+// ─────────────────────────────────────────────
 // collect_customer_field
 // ─────────────────────────────────────────────
 
@@ -177,6 +216,10 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
       }
     }
 
+    // T19: an applied email collect declares the guarded auto-send — the
+    // orchestrator executes the hop; this handler only DECLARES it.
+    const autoChain = field === 'email' ? await emailAutoChain(context, trimmedValue) : null
+
     // 3. Determine next needed field from the provenance store
     const profile = await getProfile(context.customerId)
     let nextField: CollectableField | null = null
@@ -196,8 +239,11 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
           fieldSaved: field,
           nextField,
           ...(w.mirrorConflict ? { mirrorConflict: w.mirrorConflict } : {}),
+          ...(autoChain ? { _autoChain: autoChain } : {}),
         },
-        message: `${field} saved. Please provide ${nextField}.`,
+        message: autoChain
+          ? emailAutoChainMessage(trimmedValue)
+          : `${field} saved. Please provide ${nextField}.`,
         uiAction: {
           type: 'show_data_field',
           payload: {
@@ -219,8 +265,11 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
         fieldSaved: field,
         allFieldsCollected: true,
         ...(w.mirrorConflict ? { mirrorConflict: w.mirrorConflict } : {}),
+        ...(autoChain ? { _autoChain: autoChain } : {}),
       },
-      message: 'All customer information collected successfully.',
+      message: autoChain
+        ? emailAutoChainMessage(trimmedValue)
+        : 'All customer information collected successfully.',
     }
   } catch (error) {
     return { success: false, error: String(error) }
