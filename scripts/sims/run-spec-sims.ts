@@ -63,16 +63,43 @@ const ASSERTS: Record<string, (e: ConversationExport) => void> = {
 /** Task 2.2 (D1): a DNT question card captured from a show_question ui_action. */
 interface DntCard { code: string; type: string; options: { value: string }[] | null }
 
+/** P2: any customer-actionable card, captured verbatim from the ui_action stream. */
+interface UiCard { type: string; payload: Record<string, unknown> }
+
+/** The show_question payload bits the harness reads (both group families). */
+interface ShowQuestionPayload {
+  groupType?: string
+  question?: { code?: string | null; type?: string; options?: { value: string }[] | null }
+}
+
+interface DrainResult {
+  confirms: { tool: string; confirmToken: string; args: Record<string, unknown> }[]
+  cards: UiCard[]
+}
+
+/** P2: the card family the persona clicks (cardClick maps each to the SAME
+ * synthetic gui commit the real card posts). show_payment and
+ * show_document_upload stay world-hook driven (DB-keyed, not card-keyed). */
+const CAPTURED_CARD_TYPES = new Set([
+  'show_question',
+  'show_dnt_review',
+  'show_medical_review',
+  'show_medical_batch',
+  'show_acceptance',
+  'show_otp_entry',
+])
+
 /** Drain the SSE stream, collecting confirm_required ui_actions (F5.5 gap:
  * the GUI confirm card is a CUSTOMER click, so the sim must replay it —
  * without this the funnel deadlocks at sign_dnt/accept_quote forever) and
- * DNT question cards (Task 2.2: the cards-mode persona taps, never types). */
-async function drain(stream: ReadableStream<Uint8Array>): Promise<{ confirms: { tool: string; confirmToken: string; args: Record<string, unknown> }[]; dntCards: DntCard[] }> {
+ * every customer-actionable card (Task 2.2 DNT question cards; P2 review/
+ * batch/acceptance/otp cards — the persona clicks, never types). */
+async function drain(stream: ReadableStream<Uint8Array>): Promise<DrainResult> {
   const reader = stream.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
   const confirms: { tool: string; confirmToken: string; args: Record<string, unknown> }[] = []
-  const dntCards: DntCard[] = []
+  const cards: UiCard[] = []
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
@@ -85,17 +112,28 @@ async function drain(stream: ReadableStream<Uint8Array>): Promise<{ confirms: { 
       const dataLine = raw.match(/^data: (.+)$/m)?.[1]
       if (eventLine !== 'ui_action' || !dataLine) continue
       try {
-        const data = JSON.parse(dataLine) as { type?: string; payload?: { tool?: string; confirmToken?: string; args?: Record<string, unknown>; groupType?: string; question?: { code?: string | null; type?: string; options?: { value: string }[] | null } } }
+        const data = JSON.parse(dataLine) as { type?: string; payload?: { tool?: string; confirmToken?: string; args?: Record<string, unknown> } }
         if (data.type === 'confirm_required' && data.payload?.tool && data.payload.confirmToken) {
           confirms.push({ tool: data.payload.tool, confirmToken: data.payload.confirmToken, args: data.payload.args ?? {} })
-        }
-        if (data.type === 'show_question' && data.payload?.groupType === 'dnt' && data.payload.question?.code) {
-          dntCards.push({ code: data.payload.question.code, type: data.payload.question.type ?? 'DROPDOWN', options: data.payload.question.options ?? null })
+        } else if (data.type && CAPTURED_CARD_TYPES.has(data.type)) {
+          cards.push({ type: data.type, payload: (data.payload ?? {}) as Record<string, unknown> })
         }
       } catch { /* non-JSON data lines are not ours */ }
     }
   }
-  return { confirms, dntCards }
+  return { confirms, cards }
+}
+
+/** Task 2.2 (D1): the DNT question cards among the captured cards. */
+function dntCardsOf(cards: UiCard[]): DntCard[] {
+  const out: DntCard[] = []
+  for (const c of cards) {
+    if (c.type !== 'show_question') continue
+    const p = c.payload as ShowQuestionPayload
+    if (p.groupType !== 'dnt' || !p.question?.code) continue
+    out.push({ code: p.question.code, type: p.question.type ?? 'DROPDOWN', options: p.question.options ?? null })
+  }
+  return out
 }
 
 /**
@@ -129,6 +167,76 @@ const DNT_CARD_ANSWERS: Record<string, string> = {
 }
 function pickCardAnswer(card: DntCard): string {
   return DNT_CARD_ANSWERS[card.code] ?? card.options?.[0]?.value ?? 'da'
+}
+
+/** P2: application single-question card answers by code (the only non-BD_*
+ * application question today; BD_* arrive as the ONE batch card). */
+const APP_CARD_ANSWERS: Record<string, string> = {
+  HEALTH_DECLARATION_CONFIRM: 'true', // the healthy persona confirms
+}
+
+/** P2: a queued card click — the SAME synthetic gui commit the real card
+ * posts through the action adapter (gui commits are confirmed by
+ * construction, one click applies). */
+interface CardClick { label: string; name: string; args: Record<string, unknown> }
+
+/**
+ * P2: map a captured card to the customer's click, or null when this persona
+ * does not click it (link/typed OTP modes; DNT question cards keep the
+ * cards/typed pending-card mechanics in runTrial).
+ */
+async function cardClick(card: UiCard, sc: SpecSimScenario): Promise<CardClick | null> {
+  switch (card.type) {
+    // T7: the review card's Sign — consent checkboxes ticked, tokenless
+    // (the _message FORBIDS the model calling sign_dnt; the click is the
+    // ONLY signing path).
+    case 'show_dnt_review':
+      return { label: 'sign_dnt', name: 'sign_dnt', args: { consent: { gdpr: true, aiDisclosure: true } } }
+    // T11: the medical review card's Sign.
+    case 'show_medical_review':
+      return { label: 'sign_medical_declarations', name: 'sign_medical_declarations', args: {} }
+    // T10: the batch card's primary action — every listed condition answered
+    // 'false' (the healthy persona's "none of these apply").
+    case 'show_medical_batch': {
+      const conditions = (card.payload.conditions as { code: string }[] | undefined) ?? []
+      if (conditions.length === 0) return null
+      const answers: Record<string, string> = {}
+      for (const c of conditions) answers[c.code] = 'false'
+      return { label: 'medical_batch', name: 'write_medical_batch', args: { answers } }
+    }
+    // T23: the acceptance card — the ack checkbox first (re-emits the card
+    // acked), then Accept with the elected frequency. The re-emitted card is
+    // drained from the ack click's turn, so the two-click sequence emerges
+    // from the queue without special-casing.
+    case 'show_acceptance':
+      return card.payload.disclosuresAcked === true
+        ? { label: 'accept_quote', name: 'accept_quote', args: { paymentOption: sc.paymentFrequency ?? 'annual' } }
+        : { label: 'acknowledge_disclosures', name: 'acknowledge_disclosures', args: {} }
+    // P2 card-mode OTP: the code scraped from the mock email (the same seam
+    // verify-identity-flow uses). link mode = the world hook clicks the real
+    // route; typed mode = the persona types it for the AGENT to confirm.
+    case 'show_otp_entry': {
+      if (sc.verification !== 'card') return null
+      const target = card.payload.target as string | undefined
+      if (!target) return null
+      const { lastMockEmailTo } = await import('@/lib/email/providers/mock')
+      const code = lastMockEmailTo(target)?.code
+      if (!code) return null
+      return { label: 'otp_submit', name: 'confirm_channel_verification', args: { code } }
+    }
+    // P2: application single-question cards are ANSWERED ON THE CARD (the
+    // agent's prose no longer names the question — the card is the one
+    // visible source); DNT question cards keep the existing mechanics.
+    case 'show_question': {
+      const p = card.payload as ShowQuestionPayload
+      if (p.groupType !== 'application' || !p.question?.code) return null
+      const q = p.question
+      const answer = APP_CARD_ANSWERS[q.code!] ?? q.options?.[0]?.value ?? (q.type === 'BOOLEAN' ? 'true' : 'da')
+      return { label: 'answer_question', name: 'write_question_answer', args: { answer, questionCode: q.code! } }
+    }
+    default:
+      return null
+  }
 }
 
 async function lastAssistant(conversationId: string): Promise<string> {
@@ -328,26 +436,47 @@ async function runTrial(sc: SpecSimScenario, trial: number): Promise<{ pass: boo
   const personaEmail = `ion.sim+${Date.now()}@example.com`
   // Task 2.2 (D1): the latest unanswered DNT card on screen (cards mode taps it).
   let pendingDntCard: DntCard | null = null
+  const noteDntCards = (cards: UiCard[]) => {
+    const dnt = dntCardsOf(cards)
+    if (dnt.length > 0) pendingDntCard = dnt[dnt.length - 1]
+  }
   const send = async (msg: string, syntheticToolCall?: { id: string; name: string; arguments: Record<string, unknown> }) => {
     turns++
     try {
       const first = await drain(handleChatTurn({ conversationId: conv.id, customerId: customer.id, message: msg, language: 'ro', ...(syntheticToolCall ? { syntheticToolCall } : {}) }))
-      if (first.dntCards.length > 0) pendingDntCard = first.dntCards[first.dntCards.length - 1]
-      // Replay each confirm card as the customer's click (same commit + token
-      // the GUI round-trips via the action adapter). Scenarios whose scripted
-      // customer REFUSES never click (P2-14: the auto-click was signing the
-      // DNT the customer had just refused).
+      noteDntCards(first.cards)
+      // Replay each confirm card AND each actionable card as the customer's
+      // click (same commit + token the GUI round-trips via the action
+      // adapter). Scenarios whose scripted customer REFUSES never click
+      // (P2-14: the auto-click was signing the DNT the customer had just
+      // refused). P2: a click's own turn can emit the NEXT card (the batch
+      // card rides the entry answer, the review card rides the completing
+      // write, the ack re-emits the acceptance card acked) — the FIFO queue
+      // runs the cascade to exhaustion under a cap.
       if (sc.replayConfirms === false) return
-      for (const c of first.confirms) {
+      const queue: CardClick[] = []
+      const enqueue = async (r: DrainResult) => {
+        for (const c of r.confirms) {
+          queue.push({ label: `confirm ${c.tool}`, name: c.tool, args: { ...c.args, confirmToken: c.confirmToken } })
+        }
+        for (const card of r.cards) {
+          const click = await cardClick(card, sc)
+          if (click) queue.push(click)
+        }
+      }
+      await enqueue(first)
+      for (let clicks = 0; queue.length > 0 && clicks < 16; clicks++) {
+        const click = queue.shift()!
         turns++
         const replay = await drain(handleChatTurn({
           conversationId: conv.id,
           customerId: customer.id,
-          message: `[Action: confirm ${c.tool}]`,
+          message: `[Action: ${click.label}]`,
           language: 'ro',
-          syntheticToolCall: { id: `sim_confirm_${turns}`, name: c.tool, arguments: { ...c.args, confirmToken: c.confirmToken } },
+          syntheticToolCall: { id: `sim_click_${turns}`, name: click.name, arguments: click.args },
         }))
-        if (replay.dntCards.length > 0) pendingDntCard = replay.dntCards[replay.dntCards.length - 1]
+        noteDntCards(replay.cards)
+        await enqueue(replay)
       }
     } catch (e) {
       console.error(`    [${sc.key}#${trial}] turn "${msg.slice(0, 30)}" errored:`, (e as Error).message)
@@ -373,7 +502,9 @@ async function runTrial(sc: SpecSimScenario, trial: number): Promise<{ pass: boo
     return pickCardAnswer(pendingDntCard)
   }
 
-  const hookOpts = { typedCodeVerification: sc.verification === 'typed' }
+  // typed AND card modes disable the link-click hook: the challenge must be
+  // consumed by confirm_channel_verification (agent-typed or gui card click).
+  const hookOpts = { typedCodeVerification: sc.verification === 'typed' || sc.verification === 'card' }
   /** Task 4.2 (D7): the live unconsumed code from the mock-email seam — the
    * persona types it instead of the world hook clicking the link. */
   const currentCode = async (): Promise<string | null> => {
@@ -402,7 +533,10 @@ async function runTrial(sc: SpecSimScenario, trial: number): Promise<{ pass: boo
     // agent no longer enumerates options in prose, so the card is the
     // question's one visible source).
     const typed = await typedCardAnswer()
-    await send(typed ?? pickAnswer(await lastAssistant(conv.id), sc.answerPolicy, await currentCode(), sc.verification ?? 'link', personaEmail))
+    // 'card' maps to 'typed' for the persona: neither mode may claim a link
+    // click (the lie derails the close); in card mode the OTP is clicked
+    // inside send()'s cascade, so the prose rules rarely fire anyway.
+    await send(typed ?? pickAnswer(await lastAssistant(conv.id), sc.answerPolicy, await currentCode(), sc.verification === 'link' || sc.verification === undefined ? 'link' : 'typed', personaEmail))
   }
   if (sc.fullFunnel) await worldHooks(customer.id, conv.id, hookOpts)
   if (sc.key === 'quote-decline' && (await goalReached(sc.key, customer.id, conv.id))) {

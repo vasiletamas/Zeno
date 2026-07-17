@@ -16,9 +16,15 @@ export interface SpecSimScenario {
    * Task 4.2 (D7): how the channel challenge is completed. 'link' (default)
    * = the world hook clicks the REAL /api/auth/verify route; 'typed' = the
    * hook is disabled and the persona types the code from the mock-email
-   * seam — the AGENT must call confirm_channel_verification with it.
+   * seam — the AGENT must call confirm_channel_verification with it;
+   * 'card' (P2) = the hook is disabled and the persona clicks the
+   * show_otp_entry card (synthetic gui confirm_channel_verification with the
+   * code scraped from the mock email).
    */
-  verification?: 'link' | 'typed'
+  verification?: 'link' | 'typed' | 'card'
+  /** P2: the frequency the persona elects on the acceptance card's Accept
+   * click (default 'annual' — matches the answer-policy prose). */
+  paymentFrequency?: 'annual' | 'semi_annual' | 'quarterly'
   /**
    * Task 2.2 (D1): 'cards' makes the persona TAP the DNT question cards
    * (synthetic gui-actor write_dnt_answer with the card's exact code+value)
