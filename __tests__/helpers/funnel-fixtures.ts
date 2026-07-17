@@ -13,8 +13,8 @@ import { seedDocuments } from '@/prisma/seeds/seed-documents'
 import { seedMinimalProtectFixture, signDntWithFacts } from './test-db'
 import type { ToolContext } from '@/lib/tools/types'
 
-export async function buildReadyApplication(options: { escalationFlag?: string; withoutDob?: boolean } = {}) {
-  const fx = await seedMinimalProtectFixture({ tier: 'standard', level: 'level_1', addon: false })
+export async function buildReadyApplication(options: { escalationFlag?: string; withoutDob?: boolean; addon?: boolean } = {}) {
+  const fx = await seedMinimalProtectFixture({ tier: 'standard', level: 'level_1', addon: options.addon ?? false })
   await signDntWithFacts(fx, {
     DNT_LIFE_SUBTYPE: 'simple_protection',
   })
@@ -32,13 +32,22 @@ export async function buildReadyApplication(options: { escalationFlag?: string; 
     await prisma.customerProfileField.deleteMany({ where: { customerId: fx.customerId, field: { in: ['cnp', 'dateOfBirth'] } } })
   }
   // complete the application questionnaire directly (the commit under test
-  // is generate_quote, not the answer path)
+  // is generate_quote, not the answer path). With the addon ON the visible
+  // set includes bd_medical: those answer 'false' (raw store writes fire no
+  // consequence plans, so the addon stays selected AND stays addon-eligible).
   const groupCodes = (await resolveGroupCodes((await prisma.application.findUniqueOrThrow({ where: { id: fx.applicationId } })).productId, 'application')) ?? []
+  const includeBd = options.addon ?? false
   const questions = groupCodes.length > 0
-    ? await prisma.question.findMany({ where: { group: { code: { in: groupCodes.filter((c) => c !== 'bd_medical') } } } })
+    ? await prisma.question.findMany({ where: { group: { code: { in: includeBd ? groupCodes : groupCodes.filter((c) => c !== 'bd_medical') } } } })
     : []
   for (const q of questions) {
-    await writeRevision(prisma, { applicationId: fx.applicationId, questionId: q.id, value: 'true', source: 'USER_ANSWER' })
+    await writeRevision(prisma, { applicationId: fx.applicationId, questionId: q.id, value: q.code?.startsWith('BD_') ? 'false' : 'true', source: 'USER_ANSWER' })
+  }
+  if (includeBd) {
+    // the batch medical signature gates generate_quote (T6.D3) — sign it
+    // through the real gateway; actor 'gui' applies without the confirm step
+    const signedMed = await executeCommit({ tool: 'sign_medical_declarations', args: {}, actor: 'gui', customerId: fx.customerId, conversationId: fx.conversationId, toolContext: fixtureCtx(fx.customerId, fx.conversationId) })
+    if (signedMed.outcome !== 'applied') throw new Error(`buildReadyApplication: sign_medical_declarations ${signedMed.outcome} (${signedMed.reason})`)
   }
   if (options.escalationFlag) {
     // the C1 pause → customer-resumed path leaves the derived escalate flag

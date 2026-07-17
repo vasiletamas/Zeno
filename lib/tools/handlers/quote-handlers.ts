@@ -13,9 +13,10 @@ import { buildSchedule, INSTALLMENTS_BY_FREQUENCY, type PaymentFrequency } from 
 import { getProductDisclosureDocuments } from '@/lib/documents/registry'
 import { toQuoteCoverageRow, type QuoteCoverageRow } from '@/lib/products/coverage-display'
 import { evaluateEligibility } from '@/lib/engines/eligibility'
-import { deriveSuitability } from '@/lib/engines/derive-and-expose'
+import { deriveSuitability, engineVersion } from '@/lib/engines/derive-and-expose'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
-import { getAge } from '@/lib/customer/profile-service'
+import { loadMedicalDeclarationState } from '@/lib/engines/medical-declaration-state'
+import { getAgeWithSource } from '@/lib/customer/profile-service'
 import { createReferralWorkItem } from '@/lib/work-items/referral'
 import { generateSuitabilityReport } from '@/lib/compliance/suitability-report'
 import { loadActiveApplication } from './application-handlers'
@@ -49,7 +50,9 @@ export const generateQuote: ToolHandler = async (_args, context) => {
     // ── the typed decision (D1.3): identity → compliance → eligibility →
     // suitability → referral — every input engine-derived, nothing guessed
     const snapshot = await loadDomainSnapshot(context.conversationId, context.db)
-    const age = await getAge(application.customerId, new Date(), context.db as Parameters<typeof getAge>[2])
+    // T14: age WITH provenance — the pair freezes into ratingInputs below
+    const ageInfo = await getAgeWithSource(application.customerId, new Date(), context.db as Parameters<typeof getAgeWithSource>[2])
+    const age = ageInfo?.age ?? null
     const eligibilityRules = snapshot.product?.eligibilityRules ?? null
     const eligFacts = {
       ...snapshot.eligibilityFacts,
@@ -147,6 +150,7 @@ export const generateQuote: ToolHandler = async (_args, context) => {
       }))
 
     let addonPricingRule: { premiumAnnual: number } | null = null
+    let addonBand: { minAge: number; maxAge: number } | null = null
     let addonCoverages: QuoteCoverageRow[] = []
     if (application.includesAddon) {
       const addon = await context.db.addon.findFirst({
@@ -155,7 +159,10 @@ export const generateQuote: ToolHandler = async (_args, context) => {
       })
       if (addon) {
         const matchingRule = addon.pricingRules.find(r => customerAge >= r.minAge && customerAge <= r.maxAge)
-        if (matchingRule) addonPricingRule = { premiumAnnual: matchingRule.premiumAnnual }
+        if (matchingRule) {
+          addonPricingRule = { premiumAnnual: matchingRule.premiumAnnual }
+          addonBand = { minAge: matchingRule.minAge, maxAge: matchingRule.maxAge }
+        }
         addonCoverages = addon.coverageAmounts.map(ca => toQuoteCoverageRow({
           amount: ca.amount,
           currency: ca.currency,
@@ -186,6 +193,28 @@ export const generateQuote: ToolHandler = async (_args, context) => {
     }
     const result = calculateQuote(quoteInput)
 
+    // T14 (P4.1): the FULL rating-input snapshot, frozen in the SAME tx as
+    // the quote — every factor the price came from (age+source, band,
+    // component premiums, medical answersHash, DNT id, engine version). The
+    // contract: no rating factor is ever re-derived after issuance.
+    const medical = await loadMedicalDeclarationState(context.db, application)
+    const ratingInputs = {
+      ageUsed: customerAge,
+      ageSource: ageInfo!.source, // decision guarantees the age is known
+      band: addonBand,
+      basePremiumAnnual: result.basePremiumAnnual,
+      addonPremiumAnnual: result.addonPremiumAnnual,
+      tierCode: pricingLevel.tier.code,
+      levelCode: pricingLevel.code,
+      includesAddon: application.includesAddon,
+      // no required sensitive set (addon off) → null, not a hash of nothing
+      medicalAnswersHash: medical.requiredCodes.length > 0 ? medical.currentHash : null,
+      dntId: snapshot.dnt.latest?.id ?? null,
+      fx: null as { rate: number; date: string; source: string } | null, // T18 fills this
+      engineVersion,
+      computedAt: new Date().toISOString(),
+    }
+
     const quote = await context.db.quote.create({
       data: {
         applicationId: application.id,
@@ -208,6 +237,7 @@ export const generateQuote: ToolHandler = async (_args, context) => {
         addonsSelected: application.includesAddon
           ? JSON.parse(JSON.stringify({ included: true, addonPremiumAnnual: result.addonPremiumAnnual }))
           : undefined,
+        ratingInputs: JSON.parse(JSON.stringify(ratingInputs)),
         status: 'ISSUED' as const,
         validUntil: result.validUntil,
       },

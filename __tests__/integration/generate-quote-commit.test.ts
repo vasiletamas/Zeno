@@ -2,7 +2,18 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { prisma } from '@/lib/db'
 import { resetDb } from '@/__tests__/helpers/test-db'
 import { executeCommit } from '@/lib/tools/gateway'
+import { engineVersion } from '@/lib/engines/derive-and-expose'
+import { loadMedicalDeclarationState } from '@/lib/engines/medical-declaration-state'
+import { setDeclaredField } from '@/lib/customer/profile-service'
 import { buildReadyApplication, fixtureCtx } from '@/__tests__/helpers/funnel-fixtures'
+
+/** same age arithmetic as profile-service getAge — the tests stay green as time passes */
+const ageFrom = (d: Date, now = new Date()): number => {
+  let a = now.getFullYear() - d.getFullYear()
+  const m = now.getMonth() - d.getMonth()
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) a--
+  return a
+}
 
 const gq = (fx: { customerId: string; conversationId: string }) =>
   executeCommit({ tool: 'generate_quote', args: {}, actor: 'agent', customerId: fx.customerId, conversationId: fx.conversationId, toolContext: fixtureCtx(fx.customerId, fx.conversationId) })
@@ -94,5 +105,77 @@ describe('generate_quote commit (D1.4)', () => {
     const second = await gq(fx)
     expect(second.outcome).toBe('rejected')
     expect(second.reason).toBe('application_frozen')
+  })
+
+  // ── T14 (P4.1): the full rating-input snapshot frozen at issuance ─────────
+
+  describe('T14: ratingInputs — no rating factor is re-derivable after issue', () => {
+    it('freezes every factor (dateOfBirth path, addon off): age+source, null band, components, tier/level, null medical hash, dntId, engineVersion, fx placeholder', async () => {
+      const fx = await buildReadyApplication()
+      const res = await gq(fx)
+      expect(res.outcome).toBe('applied')
+      const quote = await prisma.quote.findUniqueOrThrow({ where: { applicationId: fx.applicationId } })
+      const ri = quote.ratingInputs as Record<string, unknown> | null
+      expect(ri).toBeTruthy()
+      expect(ri!.ageUsed).toBe(ageFrom(new Date('1990-01-01')))
+      expect(ri!.ageSource).toBe('dateOfBirth')
+      expect(ri!.band).toBeNull() // no addon → no age band participated
+      expect(ri!.basePremiumAnnual).toBe(190)
+      expect(ri!.addonPremiumAnnual).toBe(0)
+      expect(ri!.tierCode).toBe('standard')
+      expect(ri!.levelCode).toBe('level_1')
+      expect(ri!.includesAddon).toBe(false)
+      expect(ri!.medicalAnswersHash).toBeNull() // addon off → no sensitive set required
+      const dnt = await prisma.dnt.findFirstOrThrow({ where: { customerId: fx.customerId } })
+      expect(ri!.dntId).toBe(dnt.id)
+      expect(ri!.fx).toBeNull() // T18 fills this; the slot exists from day one
+      expect(ri!.engineVersion).toBe(engineVersion)
+      expect(typeof ri!.computedAt).toBe('string')
+      expect(Number.isNaN(Date.parse(ri!.computedAt as string))).toBe(false)
+    })
+
+    it('addon on: the matched age band, the addon component and the medical answersHash freeze too', async () => {
+      const fx = await buildReadyApplication({ addon: true })
+      const res = await gq(fx)
+      expect(res.outcome).toBe('applied')
+      const quote = await prisma.quote.findUniqueOrThrow({ where: { applicationId: fx.applicationId } })
+      const ri = quote.ratingInputs as Record<string, unknown>
+      expect(ri.includesAddon).toBe(true)
+      // DOB 1990-01-01 → band 31-45 (seeded AddonPricingRule)
+      expect(ri.band).toEqual({ minAge: 31, maxAge: 45 })
+      expect(ri.basePremiumAnnual).toBe(190)
+      expect(ri.addonPremiumAnnual).toBe(350)
+      expect(quote.premiumAnnual).toBe(540)
+      const app = await prisma.application.findUniqueOrThrow({ where: { id: fx.applicationId } })
+      const medical = await loadMedicalDeclarationState(prisma, app)
+      expect(ri.medicalAnswersHash).toBe(medical.currentHash)
+    })
+
+    it('ageSource declaredAge: no DOB, declaredAge BEATS the declared CNP in the age priority and the source is recorded', async () => {
+      // the identity wall (IDENTITY_REQUIREMENTS) demands a declared CNP or
+      // DOB to quote at all — the CNP satisfies the wall, but the derivation
+      // priority (dateOfBirth → declaredAge → cnp) makes the declared age
+      // the factor actually used, and THAT is what must freeze.
+      const fx = await buildReadyApplication({ withoutDob: true })
+      await setDeclaredField(fx.customerId, 'cnp', '1900101080012', 'fixture') // encodes 1990-01-01
+      await setDeclaredField(fx.customerId, 'declaredAge', '40', 'fixture')
+      const res = await gq(fx)
+      expect(res.outcome).toBe('applied')
+      const quote = await prisma.quote.findUniqueOrThrow({ where: { applicationId: fx.applicationId } })
+      const ri = quote.ratingInputs as Record<string, unknown>
+      expect(ri.ageUsed).toBe(40)
+      expect(ri.ageSource).toBe('declaredAge')
+    })
+
+    it('ageSource cnp: only a CNP known — the derived age and its source are recorded', async () => {
+      const fx = await buildReadyApplication({ withoutDob: true })
+      await setDeclaredField(fx.customerId, 'cnp', '1900101080012', 'fixture') // encodes 1990-01-01
+      const res = await gq(fx)
+      expect(res.outcome).toBe('applied')
+      const quote = await prisma.quote.findUniqueOrThrow({ where: { applicationId: fx.applicationId } })
+      const ri = quote.ratingInputs as Record<string, unknown>
+      expect(ri.ageUsed).toBe(ageFrom(new Date('1990-01-01')))
+      expect(ri.ageSource).toBe('cnp')
+    })
   })
 })

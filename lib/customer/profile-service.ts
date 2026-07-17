@@ -120,7 +120,15 @@ export async function getProfile(customerId: string) {
   return { customerId, fields, conflicts: rows.filter(r => r.provenance === 'conflict').map(r => r.field) }
 }
 
-export async function getAge(customerId: string, now = new Date(), db: Db = prisma): Promise<number | null> {
+export type AgeSource = 'dateOfBirth' | 'declaredAge' | 'cnp'
+
+/**
+ * T14 (P4.1): the derived age WITH its provenance — dateOfBirth beats
+ * declaredAge beats CNP-decoded birth date (same priority getAge always
+ * had; the source used to be discarded). generate_quote freezes the pair
+ * into Quote.ratingInputs so the price's age input is never re-derived.
+ */
+export async function getAgeWithSource(customerId: string, now = new Date(), db: Db = prisma): Promise<{ age: number; source: AgeSource } | null> {
   const ageFrom = (d: Date): number => {
     let a = now.getFullYear() - d.getFullYear()
     const m = now.getMonth() - d.getMonth()
@@ -128,15 +136,19 @@ export async function getAge(customerId: string, now = new Date(), db: Db = pris
     return a
   }
   const dob = await existingRecord(db, customerId, 'dateOfBirth')
-  if (dob) return ageFrom(new Date(dob.value))
+  if (dob) return { age: ageFrom(new Date(dob.value)), source: 'dateOfBirth' }
   const decl = await existingRecord(db, customerId, 'declaredAge')
-  if (decl) return Number(decl.value)
+  if (decl) return { age: Number(decl.value), source: 'declaredAge' }
   // D1.4: a declared CNP encodes the birth date (B3 decode) — derived,
   // never guessed. existingRecord already decoded the stored envelope.
   const cnp = await existingRecord(db, customerId, 'cnp')
   if (cnp) {
     const d = cnpBirthDate(cnp.value)
-    if (d) return ageFrom(d)
+    if (d) return { age: ageFrom(d), source: 'cnp' }
   }
   return null
+}
+
+export async function getAge(customerId: string, now = new Date(), db: Db = prisma): Promise<number | null> {
+  return (await getAgeWithSource(customerId, now, db))?.age ?? null
 }
