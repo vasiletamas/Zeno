@@ -30,6 +30,7 @@ import { compareProducts } from './handlers/product-handlers'
 import { previewProductRequirements } from './handlers/preview-handlers'
 import { getStateHandler } from './handlers/state-handlers'
 import { setCandidateProduct } from './handlers/candidate-handlers'
+import { setPurchaseIntent } from './handlers/intent-handlers'
 import { getCustomerProfile } from './handlers/profile-handlers'
 import { withdrawConsent } from './handlers/consent-handlers'
 import { getObjectionStrategy } from './handlers/objection-handlers'
@@ -596,6 +597,40 @@ registerTool('set_candidate_product', {
   sideEffect: 'lifecycle',
   kind: 'commit',
 }, setCandidateProduct)
+
+registerTool('set_purchase_intent', {
+  description:
+    'Record the customer\'s purchase intent — call it THE MOMENT the customer commits to buying or to a quote ' +
+    '("vreau să-l cumpăr", "fă-mi o ofertă", "hai să mergem mai departe" in a product context). ' +
+    'Pass the goal ("quote" or "purchase"), the productCode, and optionally the config they converged on (tier/level/addon — advisory; selection truth stays with select_coverage). ' +
+    'One durable commitment: from then on the funnel proceeds WITHOUT re-asking readiness. ' +
+    'A newer intent supersedes the prior one. If the customer explicitly withdraws ("nu mai vreau", "m-am răzgândit"), call it with {renounce: true} — the intent is marked renounced.',
+  parameters: {
+    type: 'object',
+    properties: {
+      goal: { type: 'string', enum: ['quote', 'purchase'], description: 'What the customer committed to: an offer (quote) or the purchase itself.' },
+      productCode: { type: 'string', description: "The product the commitment is about (e.g. 'protect')." },
+      config: {
+        type: 'object',
+        properties: {
+          tier: { type: 'string', description: 'Pricing tier code the customer converged on, if any.' },
+          level: { type: 'string', description: 'Premium level code, if any.' },
+          addon: { type: 'boolean', description: 'Whether the add-on is part of the commitment.' },
+        },
+        additionalProperties: false,
+        description: 'Advisory snapshot of the converged configuration — selection truth stays with select_coverage.',
+      },
+      renounce: { type: 'boolean', description: 'true = the customer explicitly withdrew their commitment; marks the active intent renounced.' },
+    },
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'save',
+  kind: 'commit',
+}, setPurchaseIntent)
 
 // switch_product retired in B4 (T5.D3: product is FROZEN on the application;
 // changing product = cancel + set_application on the new candidate)

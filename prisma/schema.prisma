@@ -438,6 +438,25 @@ model Customer {
   dntSessions       DntSession[]
   verificationChallenges VerificationChallenge[]
   documents         CustomerDocument[]
+  purchaseIntents   PurchaseIntent[]
+}
+
+// T8 (design 2026-07-15): durable purchase intent — a ledgered commit, never
+// prose. The latest ACTIVE row per customer is the briefing's momentum fact;
+// a newer intent supersedes (prior → stale), accept_quote fulfils, explicit
+// customer withdrawal renounces.
+model PurchaseIntent {
+  id             String    @id @default(cuid())
+  customerId     String
+  conversationId String
+  goal           String    // 'quote' | 'purchase'
+  productCode    String
+  config         Json?     // {tier?, level?, addon?} — advisory, selection truth stays with select_coverage
+  status         String    @default("active") // active | fulfilled | stale | renounced
+  capturedAt     DateTime  @default(now())
+  renewedAt      DateTime?
+  customer       Customer  @relation(fields: [customerId], references: [id])
+  @@index([customerId, status])
 }
 
 // B3.4: ONE challenge primitive with two presentations (in-chat OTP code and
@@ -917,6 +936,9 @@ model Quote {
   // D2 (T7.D6): immutable acceptance evidence — paymentFrequency is written
   // ONLY by accept_quote, never re-read for money math (the schedule owns it)
   acceptedAt     DateTime?
+  // T14 (P4.1): the exact rating-engine inputs this quote was priced from —
+  // written once by generate_quote, read-only evidence thereafter.
+  ratingInputs   Json?
   validUntil     DateTime
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt

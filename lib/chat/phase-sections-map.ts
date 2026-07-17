@@ -68,9 +68,47 @@ const GOAL_DESCRIPTIONS: Record<import('@/lib/engines/domain-types').FunnelGoal,
   post_sale: 'serve the customer post-sale (the sale is closed — no selling)',
 }
 
+// T8: "standard/level_1 + addon" — the advisory config the customer
+// converged on when they committed; empty string when none was recorded.
+function intentConfigSummary(config: { tier?: string; level?: string; addon?: boolean } | null): string {
+  if (!config) return ''
+  const base = [config.tier, config.level].filter(Boolean).join('/')
+  return `${base}${config.addon ? (base ? ' + addon' : 'addon') : ''}`
+}
+
+/**
+ * T8 (design 2026-07-15 §3.2/§4): the intent briefing lines.
+ * - Same-session and fresh (≤ 7 days): the customer already committed — the
+ *   do-not-re-ask directive plus the next action.
+ * - Cross-session or older than 7 days: never silently assume — the renewal
+ *   script, anchored in recorded data (daysAgo, product, config) and the
+ *   CURRENT missing preconditions (funnel progress is monotonic, so what is
+ *   missing now was also missing at capture; the capture itself records no
+ *   precondition snapshot).
+ */
+function formatIntentLine(state: DerivedStateV3): string | null {
+  const intent = state.intent
+  if (!intent) return null
+  const cfg = intentConfigSummary(intent.config)
+  const cfgSuffix = cfg ? ` (${cfg})` : ''
+  const capturedDate = intent.capturedAt.slice(0, 10)
+  const daysAgo = Math.floor((Date.now() - new Date(intent.capturedAt).getTime()) / 86_400_000)
+  if (intent.sameSession && daysAgo <= 7) {
+    return `Active intent: ${intent.goal} ${intent.productCode}${cfgSuffix} — captured ${capturedDate}. The customer has already committed; do NOT re-ask readiness ("Ești gata să continuăm?" is a defect) — proceed to the next step yourself; the only legitimate pauses are the cards (signatures, OTP, upload, acceptance, payment). Next: ${state.nextBestAction}.`
+  }
+  const missingNow = state.objective.missingPreconditions.map((b) => `${b.action} (${b.reason})`).join(', ')
+  const missingThen = missingNow || 'câțiva pași'
+  const nowText = missingNow || 'totul este pregătit'
+  return `Active intent (${intent.sameSession ? 'stale' : 'from a previous conversation'}, ${daysAgo} days old): ${intent.goal} ${intent.productCode}${cfgSuffix} — captured ${capturedDate}. Do not silently assume it still holds — RENEW WITH CONTEXT: ask ONE question anchored in the recorded state, e.g. "Acum ${daysAgo} zile te interesa ${intent.productCode}${cfgSuffix} — lipsea ${missingThen}; acum ${nowText}. Continuăm?" — then proceed on a yes, or call set_purchase_intent with {renounce: true} if they decline.`
+}
+
 export function formatDerivedBriefing(state: DerivedStateV3, actions: ExposedActions): string {
   const lines: string[] = []
   lines.push(`Phase: ${state.phase}${state.subphase ? '/' + state.subphase : ''}`)
+  // T8: momentum first — the intent line precedes the objective so the
+  // do-not-re-ask directive frames everything below it.
+  const intentLine = formatIntentLine(state)
+  if (intentLine) lines.push(intentLine)
   lines.push(`Open objective: ${GOAL_DESCRIPTIONS[state.objective.goal]}.`)
   if (state.objective.achievableNow) {
     lines.push(`Achievable now via: ${state.objective.achievableNow}.`)

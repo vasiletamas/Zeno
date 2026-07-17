@@ -115,6 +115,53 @@ describe('formatDerivedBriefing (new vocabulary)', () => {
     const r = deriveAndExpose(makeSnapshot())
     expect(formatDerivedBriefing(r.state, r.actions)).not.toContain('AWAITING CUSTOMER CONFIRMATION')
   })
+  // T8 (design 2026-07-15 §3.2/§4): the briefing surfaces the ledgered intent —
+  // same-session fresh = never re-ask readiness; cross-session or stale =
+  // renew WITH CONTEXT via the data-grounded script.
+  it('same-session active intent renders the do-not-re-ask directive with the config summary and the next action', () => {
+    const daysAgo2 = new Date(Date.now() - 2 * 86_400_000).toISOString()
+    const r = deriveAndExpose(makeSnapshot({ intent: { goal: 'purchase', productCode: 'protect', config: { tier: 'standard', level: 'level_1', addon: true }, capturedAt: daysAgo2, sameSession: true, status: 'active' } }))
+    const text = formatDerivedBriefing(r.state, r.actions)
+    expect(text).toContain(`Active intent: purchase protect (standard/level_1 + addon) — captured ${daysAgo2.slice(0, 10)}`)
+    expect(text).toContain('The customer has already committed; do NOT re-ask')
+    expect(text).toContain('Next: ')
+  })
+  it('cross-session active intent renders the renewal script anchored in recorded data (daysAgo + Continuăm?)', () => {
+    const capturedAt = new Date(Date.now() - 3 * 86_400_000).toISOString()
+    const r = deriveAndExpose(makeSnapshot({ intent: { goal: 'quote', productCode: 'protect', config: { tier: 'standard' }, capturedAt, sameSession: false, status: 'active' } }))
+    const text = formatDerivedBriefing(r.state, r.actions)
+    expect(text).not.toContain('do NOT re-ask')
+    expect(text).toContain('Acum 3 zile te interesa protect (standard)')
+    expect(text).toContain('Continuăm?')
+    // default snapshot: the discovery goal is achievable now → nothing missing
+    expect(text).toContain('totul este pregătit')
+    expect(text).toContain('renounce')
+  })
+  it('a same-session intent older than 7 days is stale — renewal script, not the do-not-re-ask line', () => {
+    const capturedAt = new Date(Date.now() - 10 * 86_400_000).toISOString()
+    const r = deriveAndExpose(makeSnapshot({ intent: { goal: 'purchase', productCode: 'protect', config: null, capturedAt, sameSession: true, status: 'active' } }))
+    const text = formatDerivedBriefing(r.state, r.actions)
+    expect(text).not.toContain('do NOT re-ask')
+    expect(text).toContain('Acum 10 zile te interesa protect')
+    expect(text).toContain('Continuăm?')
+  })
+  it('the renewal script names the current missing preconditions when the goal is blocked', () => {
+    const capturedAt = new Date(Date.now() - 9 * 86_400_000).toISOString()
+    const r = deriveAndExpose(makeSnapshot({
+      application: { id: 'a', status: 'OPEN', tier: 't', level: 'l', addon: false, answeredCount: 6, requiredCount: 6, missingCodes: [], frozen: true },
+      dnt: { signed: true, valid: true, validUntil: '2027-01-01T00:00:00.000Z', coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0, facts: {} },
+      consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true },
+      quote: { id: 'q1', status: 'ISSUED', premiumAnnual: 500, validUntil: '2027-01-01T00:00:00.000Z', expired: false },
+      intent: { goal: 'purchase', productCode: 'protect', config: null, capturedAt, sameSession: false, status: 'active' },
+    }))
+    const text = formatDerivedBriefing(r.state, r.actions)
+    expect(text).toContain('accept_quote (requires_identity)')
+    expect(text).not.toContain('totul este pregătit')
+  })
+  it('no intent → no Active intent line', () => {
+    const r = deriveAndExpose(makeSnapshot())
+    expect(formatDerivedBriefing(r.state, r.actions)).not.toContain('Active intent')
+  })
   it('renders blocked actions with machine reason codes so the agent can explain a block', () => {
     const r = deriveAndExpose(makeSnapshot({ application: { id: 'a', status: 'OPEN', tier: 't', level: 'l', addon: false, answeredCount: 6, requiredCount: 6, missingCodes: [], frozen: false }, dnt: { signed: true, valid: true, validUntil: '2027-01-01T00:00:00.000Z', coversProductTypes: ['LIFE'], answeredCount: 5, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0, facts: {} } }))
     const text = formatDerivedBriefing(r.state, r.actions)

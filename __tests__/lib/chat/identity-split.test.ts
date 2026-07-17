@@ -51,6 +51,14 @@ describe('E1 seed split — block placement', () => {
     expect(CONSTITUTION_CORE).toContain('NEVER use the words "AI"')
   })
 
+  it('T8 (design 2026-07-15 §3.3): ADVANCING carries the intent directives — capture via set_purchase_intent at commitment; with an active intent never ask readiness questions (the cards are the only pauses)', () => {
+    expect(CONSTITUTION_CORE).toContain('set_purchase_intent')
+    expect(CONSTITUTION_CORE).toContain('NEVER ask readiness questions')
+    expect(CONSTITUTION_CORE).toContain('renounce')
+    // the defect being fixed, named: a card-bearing step needs no "are you ready?"
+    expect(CONSTITUTION_CORE).toContain('Ești gata să continuăm?')
+  })
+
   it('CONSTITUTION_CORE contains NO discovery-conduct or first-turn blocks', () => {
     for (const marker of [
       'FIRST-TURN RULES',

@@ -234,6 +234,14 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
   // must explain-and-escalate, never hammer. requires_confirmation is NOT a
   // failure (the customer's card tap resolves it, confirmation_stalled
   // diagnoses that class).
+  // T8: the customer's latest ACTIVE purchase intent — the ledgered
+  // commitment the briefing turns into momentum. Customer-scoped (an intent
+  // survives the conversation); sameSession compares its capturing
+  // conversation with THIS one.
+  const activeIntent = await db.purchaseIntent.findFirst({
+    where: { customerId: conversation.customerId, status: 'active' },
+    orderBy: { capturedAt: 'desc' },
+  })
   const repeatedFailureRows = await db.commitLedger.groupBy({
     by: ['tool', 'argsHash'],
     where: { conversationId, outcome: { in: ['rejected', 'unavailable'] } },
@@ -283,6 +291,16 @@ export async function loadDomainSnapshot(conversationId: string, db: Db = prisma
     circuit: { openTools: getOpenCircuitTools() }, // M10 degraded-mode input (A2.7)
     degraded: [], // backend circuits land with their blocks (payment provider in D3)
     repeatedFailureTools,
+    intent: activeIntent
+      ? {
+          goal: activeIntent.goal,
+          productCode: activeIntent.productCode,
+          config: (activeIntent.config as { tier?: string; level?: string; addon?: boolean } | null) ?? null,
+          capturedAt: activeIntent.capturedAt.toISOString(),
+          sameSession: activeIntent.conversationId === conversationId,
+          status: activeIntent.status,
+        }
+      : null,
     answers: appAnswers, // C2.6: ACTIVE application answers (code → value) feed the eligibility answer-facts
   }
 }

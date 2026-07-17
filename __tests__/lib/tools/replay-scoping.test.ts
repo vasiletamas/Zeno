@@ -37,4 +37,11 @@ describe('resolveTargetRef application-instance scoping (P1-4)', () => {
     const b = resolveTargetRef('write_question_answer', { questionCode: 'Q_SMOKER' }, stateWithApp('app_1'), 'conv')
     expect(a).toBe(b)
   })
+
+  it('set_purchase_intent is CUSTOMER-scoped (T8): targetRef intent:<customerId>, stable across conversations', () => {
+    const a = resolveTargetRef('set_purchase_intent', { goal: 'purchase', productCode: 'protect' }, stateWithApp(null), 'conv-1', 'cust-9')
+    const b = resolveTargetRef('set_purchase_intent', { renounce: true }, stateWithApp(null), 'conv-2', 'cust-9')
+    expect(a).toBe('intent:cust-9')
+    expect(b).toBe('intent:cust-9')
+  })
 })

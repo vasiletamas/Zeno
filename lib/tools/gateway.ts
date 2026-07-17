@@ -73,6 +73,12 @@ const REPLAY_EXEMPT = new Set([
   // replayed 'started' envelope would hand back a dead clientSecret and
   // break retry-after-failure.
   'ensure_payment_session',
+  // T8: intent is state-guarded — after a renounce, an identical re-commit
+  // ("m-am răzgândit înapoi") must create a FRESH active row; a replayed
+  // applied envelope would point at a dead (renounced) intent. Identical
+  // duplicates against a live intent are answered by the handler's
+  // unchanged path (select_coverage precedent), never a second row.
+  'set_purchase_intent',
   // P1-4: the replay id 'application:none' is constant across re-opens — a
   // cancel_application/cancel_quote nulls the pointer, so an identical
   // set_application would REPLAY the first app's applied envelope and create
@@ -106,9 +112,12 @@ export const OPERATOR_TOOLS = new Set(['resolve_referral', 'resolve_work_item', 
  */
 const MONEY_TOOLS = new Set(['ensure_payment_session', 'change_payment_option', 'accept_quote'])
 
-export function resolveTargetRef(tool: string, args: Record<string, unknown>, state: DerivedStateV3, conversationId: string): string {
+export function resolveTargetRef(tool: string, args: Record<string, unknown>, state: DerivedStateV3, conversationId: string, customerId?: string): string {
   // repeatable commits — addressed entity from ARGS (erratum 4)
   if (tool === 'collect_customer_field') return `field:${String(args.field ?? 'unknown')}`
+  // T8: the intent is CUSTOMER-scoped (one active intent per customer,
+  // surviving the conversation) — the ref follows the entity, not the session.
+  if (tool === 'set_purchase_intent') return `intent:${customerId ?? 'unknown'}`
   if (tool === 'write_dnt_answer') return `dnt_answer:${String(args.questionCode ?? 'unknown')}`
   // C1.9 + P1-4: the addressed entity is (application INSTANCE, question
   // CODE). Without the application id, a same-value answer to the same
@@ -275,7 +284,7 @@ export async function executeCommit(req: CommitRequest): Promise<CommitResult> {
 
   // (1) actor: server-resolved by the caller, recorded on every ledger row.
   const pre = deriveAndExpose(await loadDomainSnapshot(req.conversationId))
-  const targetRef = resolveTargetRef(req.tool, req.args, pre.state, req.conversationId)
+  const targetRef = resolveTargetRef(req.tool, req.args, pre.state, req.conversationId, req.customerId)
   const argsHash = materialArgsHash(req.tool, targetRef, req.args)
 
   // Operator tools have no exposure rule — the server-resolved actor IS the

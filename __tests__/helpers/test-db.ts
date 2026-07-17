@@ -26,6 +26,7 @@ export const DOMAIN_TABLES: string[] = [
   'Dnt',
   'DntSession',
   'ConsentEvent',
+  'PurchaseIntent',
   'CustomerProfileField',
   'CommitLedger',
   'DisclosureAck',

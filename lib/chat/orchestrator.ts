@@ -35,7 +35,7 @@ import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
 import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, loadDntContext, loadPaymentContext, loadPolicyContext, loadQuestionnaireContextForState, getLastInjectedProductContentVersions, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
 import { buildTurnTools, DEGRADED_FLOOR } from './turn-tools'
 import { shouldRefreshExposure, buildRefreshArtifacts } from './round-refresh'
-import { seedSyntheticLoopMessages } from './synthetic-turn'
+import { seedSyntheticLoopMessages, extractAutoChain } from './synthetic-turn'
 import { evaluateTurnInvariants, recommendedActionsFromBriefing } from '@/lib/monitors/turn-invariants'
 import { loadTurnContext, reactivateIfArchived, type TurnContext } from './turn-context'
 import { inferCandidate, hasAnyCategoryKeyword } from './candidate-inference'
@@ -937,9 +937,11 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   // generate_quote attempts).
   let round = 0
 
-  if (input.syntheticToolCall) {
-    // ----- Synthetic tool call path -----
-    const tc = input.syntheticToolCall
+  // GUI tool execution (T13, shared with the T8 _autoChain hop): status +
+  // debug events, pipeline execution with the server-resolved 'gui' actor,
+  // result/ui_action/confirm_required emission — exactly the synthetic-path
+  // contract, returned so the caller can seed the loop and refresh.
+  async function* runGuiToolCall(tc: ToolCall): AsyncGenerator<SSEEvent, PipelineResult> {
     const def = getToolDefinition(tc.name)
     const isBlocking = def?.executionMode === 'blocking'
 
@@ -976,7 +978,9 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       tc.name,
       tc.arguments,
       // GUI-originated commit: the customer clicked, the server resolved the
-      // actor — never the model (A2.9).
+      // actor — never the model (A2.9). The _autoChain hop rides the same
+      // actor: it is a deterministic consequence of that click, gateway-
+      // legality-checked like any commit.
       { ...toolContext, actor: 'gui' },
       state.traceId,
     )
@@ -1035,6 +1039,14 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       }
     }
 
+    return pipelineResult
+  }
+
+  if (input.syntheticToolCall) {
+    // ----- Synthetic tool call path -----
+    const tc = input.syntheticToolCall
+    const pipelineResult = yield* runGuiToolCall(tc)
+
     // T13: seed the standard loop with the synthetic assistant+tool
     // exchange — exactly the shape an LLM-initiated round would have pushed.
     messages.push(...seedSyntheticLoopMessages(tc, pipelineResult.toolResult))
@@ -1048,6 +1060,25 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     const syntheticEnvelope = pipelineResult.toolResult.envelope
     if (syntheticEnvelope) {
       yield* refreshAfterAppliedCommits([syntheticEnvelope], 0)
+    }
+
+    // T8 (design 2026-07-15 §3.4): _autoChain single hop — an APPLIED gui
+    // commit may declare its ONE deterministic follow-up (contact submit →
+    // start_channel_verification, OTP confirm → request_document_upload).
+    // Executed AFTER the refresh so the executor's exposure wall reflects
+    // the post-commit world; failures surface as a normal tool result
+    // (executeToolWithPipeline never throws). Cap: EXACTLY ONE hop — the
+    // chained result's own _autoChain is deliberately ignored; chains of
+    // judgment stay with the model inside the tool loop below.
+    const chain = extractAutoChain(pipelineResult.toolResult)
+    if (chain) {
+      const chainTc: ToolCall = { id: `${tc.id}_auto`, name: chain.tool, arguments: chain.args }
+      const chainResult = yield* runGuiToolCall(chainTc)
+      messages.push(...seedSyntheticLoopMessages(chainTc, chainResult.toolResult))
+      const chainEnvelope = chainResult.toolResult.envelope
+      if (chainEnvelope) {
+        yield* refreshAfterAppliedCommits([chainEnvelope], 0)
+      }
     }
 
     // The synthetic execution consumed one round's worth of work — the LLM

@@ -93,6 +93,21 @@ export interface DomainSnapshot {
    * Optional — undefined ≡ [] — keeps pre-existing test literals compiling.
    */
   repeatedFailureTools?: string[]
+  /**
+   * T8 (design 2026-07-15): the customer's latest ACTIVE PurchaseIntent —
+   * the ledgered commitment the briefing turns into momentum (same-session:
+   * never re-ask readiness; cross-session/stale: renew with context).
+   * sameSession = intent.conversationId === this snapshot's conversation.
+   * Optional — undefined ≡ null — keeps pre-existing test literals compiling.
+   */
+  intent?: {
+    goal: string
+    productCode: string
+    config: { tier?: string; level?: string; addon?: boolean } | null
+    capturedAt: string
+    sameSession: boolean
+    status: string
+  } | null
   answers: Record<string, string>
 }
 
@@ -125,6 +140,8 @@ export interface DerivedStateV3 {
   objective: FunnelObjective
   /** Mirrors DomainSnapshot.pendingConfirmationTools — see that doc comment. */
   pendingConfirmationTools?: string[]
+  /** T8: the snapshot's intent slice, verbatim — one source for the briefing and get_current_state. undefined ≡ null. */
+  intent?: DomainSnapshot['intent']
 }
 
 export interface BlockedAction { action: string; reason: ReasonCode; params?: Record<string, unknown> }

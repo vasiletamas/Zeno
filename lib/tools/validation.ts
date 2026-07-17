@@ -171,6 +171,23 @@ const signMedicalDeclarationsSchema = z.object({
 }).strict()
 
 // ==============================================
+// PURCHASE INTENT (T8)
+// ==============================================
+
+// goal+productCode are required UNLESS this is an explicit renounce — the
+// DTO is the boundary (a bare {} or a goal without its product never
+// reaches the handler).
+const setPurchaseIntentSchema = z.object({
+  goal: z.enum(['quote', 'purchase']).optional(),
+  productCode: z.string().min(1).optional(),
+  config: z.object({ tier: z.string(), level: z.string(), addon: z.boolean() }).partial().optional(),
+  renounce: z.boolean().optional(),
+}).strict().refine(
+  (v) => v.renounce === true || (v.goal !== undefined && v.productCode !== undefined),
+  { message: 'goal and productCode are required unless renounce is true' },
+)
+
+// ==============================================
 // DATA COLLECTION
 // ==============================================
 
@@ -301,6 +318,9 @@ const toolSchemas: Record<string, ZodType> = {
   ensure_payment_session: z.object({}).strict(),
   change_payment_option: z.object({ paymentOption: z.enum(['annual', 'semi_annual', 'quarterly']), confirmToken: z.string().optional() }).strict(),
   get_payment_status: z.object({}).strict(),
+
+  // Purchase intent (T8)
+  set_purchase_intent: setPurchaseIntentSchema,
 
   // Data Collection
   collect_customer_field: collectCustomerFieldSchema,

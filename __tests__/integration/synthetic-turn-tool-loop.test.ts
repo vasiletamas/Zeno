@@ -198,6 +198,69 @@ describe('synthetic GUI turn runs the standard tool loop (T13)', () => {
     expect(events.some((e) => e.event === 'error')).toBe(false)
   }, 60000)
 
+  it('_autoChain single hop (T8 §3.4): an applied synthetic commit declaring data._autoChain executes ONE follow-up gui tool, seeds BOTH exchanges before round 1, and ignores the hop\'s own _autoChain', async () => {
+    const customer = await prisma.customer.create({ data: { isAnonymous: true, language: 'ro' } })
+    const conv = await prisma.conversation.create({ data: { customerId: customer.id, language: 'ro', channel: 'web' } })
+
+    const { executeToolWithPipeline } = await import('@/lib/tools/pipeline')
+    const chainDecl = { tool: 'start_channel_verification', args: { channel: 'email' } }
+    vi.mocked(executeToolWithPipeline)
+      .mockImplementationOnce(async (name: string, _args, ctx) => {
+        h.pipelineCalls.push({ name, actor: (ctx as { actor?: string }).actor })
+        h.phase = 'post'
+        return {
+          toolResult: {
+            success: true,
+            data: { _message: 'Contact saved.', _autoChain: chainDecl },
+            envelope: { outcome: 'applied', effects: [], ledgerId: 'led-syn', data: { _message: 'Contact saved.', _autoChain: chainDecl } },
+          },
+        } as never
+      })
+      .mockImplementationOnce(async (name: string, _args, ctx) => {
+        h.pipelineCalls.push({ name, actor: (ctx as { actor?: string }).actor })
+        return {
+          toolResult: {
+            success: true,
+            // the hop declares its OWN _autoChain — the cap must ignore it
+            data: { _message: 'Verification code sent.', _autoChain: { tool: 'generate_quote', args: {} } },
+            envelope: { outcome: 'applied', effects: [], ledgerId: 'led-chain', data: { _message: 'Verification code sent.', _autoChain: { tool: 'generate_quote', args: {} } } },
+            uiAction: { type: 'show_verification_prompt', payload: { channel: 'email' } },
+          },
+        } as never
+      })
+
+    h.streamScript.push({ content: 'Ți-am trimis codul pe email.' })
+
+    const events = await drainEvents(handleChatTurn({
+      conversationId: conv.id,
+      customerId: customer.id,
+      message: 'Salvează contactul',
+      language: 'ro',
+      syntheticToolCall: { id: 'click_3', name: 'collect_customer_field', arguments: { field: 'email', value: 'x@y.ro' } },
+    }))
+
+    // exactly TWO gui executions — the chained hop's own _autoChain is ignored
+    expect(h.pipelineCalls).toEqual([
+      { name: 'collect_customer_field', actor: 'gui' },
+      { name: 'start_channel_verification', actor: 'gui' },
+    ])
+
+    // BOTH exchanges (assistant tool-call + tool result) are seeded before round 1
+    const msgs = h.streamCalls[0].options.messages
+    const synIdx = msgs.findIndex((m) => m.role === 'assistant' && m.toolCalls?.[0]?.name === 'collect_customer_field')
+    const chainIdx = msgs.findIndex((m) => m.role === 'assistant' && m.toolCalls?.[0]?.name === 'start_channel_verification')
+    expect(synIdx).toBeGreaterThanOrEqual(0)
+    expect(chainIdx).toBeGreaterThan(synIdx)
+    expect(msgs[chainIdx + 1].role).toBe('tool')
+    expect(msgs[chainIdx + 1].content).toContain('Verification code sent')
+
+    // the hop's tool events + ui_action reached the stream
+    expect(events.some((e) => e.event === 'ui_action' && (e.data as { type?: string }).type === 'show_verification_prompt')).toBe(true)
+    expect(events.some((e) => e.event === 'content' && String(e.data.text).includes('codul pe email'))).toBe(true)
+    expect(events.some((e) => e.event === 'done')).toBe(true)
+    expect(events.some((e) => e.event === 'error')).toBe(false)
+  }, 60000)
+
   it('a non-applied synthetic result seeds the loop WITHOUT a state refresh (no [State update] message)', async () => {
     const customer = await prisma.customer.create({ data: { isAnonymous: true, language: 'ro' } })
     const conv = await prisma.conversation.create({ data: { customerId: customer.id, language: 'ro', channel: 'web' } })

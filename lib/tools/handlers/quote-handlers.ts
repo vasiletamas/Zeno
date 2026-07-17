@@ -522,6 +522,12 @@ export const acceptQuote: ToolHandler = async (args, context) => {
     if (cas.count === 0) {
       return { success: false, error: 'illegal_status_transition: the quote left ISSUED between legality and apply.' }
     }
+    // T8: the accepted quote FULFILS the customer's active purchase intent —
+    // inside the same apply tx, so intent truth never lags the acceptance.
+    await context.db.purchaseIntent.updateMany({
+      where: { customerId: quote.customerId, status: 'active' },
+      data: { status: 'fulfilled' },
+    })
     const rows = buildSchedule({ premiumAnnual: quote.premiumAnnual, frequency: paymentOption, startAt: now })
     const schedule = await context.db.paymentSchedule.create({
       data: {
