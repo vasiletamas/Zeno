@@ -34,7 +34,8 @@ import type { DeriveAndExposeResult, Phase, AppSubphase } from '@/lib/engines/do
 import { buildSlidingWindow, updateSummaryIfStale } from './sliding-window'
 import { loadAllSections, loadStateGrounding, loadCustomerInsights, loadCapabilityManifest, loadDntContext, loadPaymentContext, loadPolicyContext, loadQuestionnaireContextForState, getLastInjectedProductContentVersions, type StateGroundingInput, type RawCustomerInsight } from './context-loaders'
 import { buildTurnTools, DEGRADED_FLOOR } from './turn-tools'
-import { shouldRefreshExposure, formatRoundRefreshMessage } from './round-refresh'
+import { shouldRefreshExposure, buildRefreshArtifacts } from './round-refresh'
+import { seedSyntheticLoopMessages } from './synthetic-turn'
 import { evaluateTurnInvariants, recommendedActionsFromBriefing } from '@/lib/monitors/turn-invariants'
 import { loadTurnContext, reactivateIfArchived, type TurnContext } from './turn-context'
 import { inferCandidate, hasAnyCategoryKeyword } from './candidate-inference'
@@ -882,6 +883,54 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const turnExecutorRejections: { tool: string; reason: string }[] = []
   let lastStatusMessage: string | undefined
 
+  // Post-commit exposure refresh (A3.4, T1.D5), shared by the mid-loop
+  // rounds and the T13 pre-round-0 synthetic refresh: re-derive, rebuild the
+  // tool list + the executor wall, push the [State update] system message
+  // and emit one post_commit legality entry per APPLIED envelope, joined to
+  // its ledger row by the stamped ledgerId (erratum 2).
+  async function* refreshAfterAppliedCommits(
+    envelopes: import('@/lib/engines/domain-types').CommitResult[],
+    atRound: number,
+  ): AsyncGenerator<SSEEvent> {
+    if (!shouldRefreshExposure(envelopes)) return
+    try {
+      const refreshSnap = await loadDomainSnapshot(state.conversationId)
+      const refreshed = deriveAndExpose(refreshSnap)
+      const artifacts = buildRefreshArtifacts(refreshed)
+      tools = artifacts.tools
+      toolContext = await buildToolContext(state.customerId, state.conversationId, state.language)
+      toolContext.actor = 'agent'
+      toolContext.exposedTools = artifacts.exposedTools
+      messages.push(artifacts.stateUpdateMessage)
+      for (const env of envelopes.filter((e) => e.outcome === 'applied')) {
+        yield* recordAndYield({
+          event: 'debug:legality',
+          data: buildLegalityPayload({
+            traceId: state.traceId,
+            point: 'post_commit',
+            round: atRound,
+            commitLedgerId: env.ledgerId,
+            contentVersions: getLastInjectedProductContentVersions(),
+            snapshot: refreshSnap,
+            state: refreshed.state,
+            actions: refreshed.actions,
+          }),
+        })
+      }
+    } catch (err: unknown) {
+      logWarn({ layer: 'orchestrator', category: 'derive_state', message: 'post-round re-derivation failed — keeping previous exposure', context: { conversationId: state.conversationId }, error: err })
+    }
+  }
+
+  // T13: GUI action turns run the STANDARD tool loop. The synthetic
+  // execution below consumes round 0's budget, then falls through into the
+  // shared rounds from round 1 — the old path narrated over a TOOL-LESS
+  // stream call, so the model structurally could not chain (conv
+  // cmrm3fgku00056g0y4eb2hsme messageIndex 58: "the quote can be generated
+  // now" followed by "calcularea nu poate fi finalizată" with zero
+  // generate_quote attempts).
+  let round = 0
+
   if (input.syntheticToolCall) {
     // ----- Synthetic tool call path -----
     const tc = input.syntheticToolCall
@@ -980,41 +1029,30 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
       }
     }
 
-    // Build tool result message for LLM
-    const toolResultMessage: Message = {
-      role: 'tool',
-      content: serializeToolResultForModel(pipelineResult.toolResult),
-      toolCallId: tc.id,
+    // T13: seed the standard loop with the synthetic assistant+tool
+    // exchange — exactly the shape an LLM-initiated round would have pushed.
+    messages.push(...seedSyntheticLoopMessages(tc, pipelineResult.toolResult))
+
+    // T13: an applied GUI commit gets the SAME post-commit refresh the loop
+    // runs mid-loop, injected BEFORE the model's first round so it sees the
+    // post-commit world (fresh tools + executor wall + [State update]).
+    // requires_confirmation / rejected results refresh nothing — the
+    // turn-start exposure stands (the tool stays exposed, as on the agent
+    // path) and the envelope's _instruction already forbids re-calling it.
+    const syntheticEnvelope = pipelineResult.toolResult.envelope
+    if (syntheticEnvelope) {
+      yield* refreshAfterAppliedCommits([syntheticEnvelope], 0)
     }
 
-    // Add the assistant message (with tool call) and tool result
-    const syntheticAssistantMsg: Message = {
-      role: 'assistant',
-      content: '',
-      toolCalls: [tc],
-    }
-    messages.push(syntheticAssistantMsg, toolResultMessage)
+    // The synthetic execution consumed one round's worth of work — the LLM
+    // gets MAX_TOOL_ROUNDS - 1 tool-bearing rounds instead of a tool-less
+    // narration call.
+    round = 1
+  }
 
-    // Stream a natural language response
-    const responseStream = await gateway.stream(agentSlug, {
-      messages,
-      traceId: state.traceId,
-    })
-
-    for await (const chunk of responseStream) {
-      if (chunk.type === 'content' && chunk.content) {
-        finalContent += chunk.content
-        yield { event: 'content', data: { text: chunk.content } }
-      }
-      if (chunk.type === 'done' && chunk.usage) {
-        accumulateTurnUsage(state, chunk.usage)
-      }
-    }
-  } else {
-    // ----- Standard chat path with tool loop -----
-    // F2.4: per-turn facts for the runtime invariant monitors
-    let round = 0
-
+  // ----- Standard tool loop (T13: shared — a chat turn starts at round 0,
+  // a GUI action turn continues from round 1 with the seeded messages) -----
+  {
     while (round <= MAX_TOOL_ROUNDS) {
       const toolChoice = round >= MAX_TOOL_ROUNDS ? 'none' as const : 'auto' as const
 
@@ -1375,37 +1413,10 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
           turnExecutorRejections.push({ tool: tc.name, reason: 'not_exposed' })
         }
       }
-      if (shouldRefreshExposure(roundEnvelopes)) {
-        try {
-          const refreshSnap = await loadDomainSnapshot(state.conversationId)
-          const refreshed = deriveAndExpose(refreshSnap)
-          tools = buildTurnTools(refreshed.actions)
-          toolContext = await buildToolContext(state.customerId, state.conversationId, state.language)
-          toolContext.actor = 'agent'
-          toolContext.exposedTools = refreshed.actions.available
-          messages.push({ role: 'system', content: formatRoundRefreshMessage(refreshed.state, refreshed.actions) })
-          // F2.2: one post_commit legality entry per APPLIED envelope this
-          // round, joined to its ledger row by the stamped ledgerId
-          // (erratum 2); state/actions are the post-round recompute.
-          for (const env of roundEnvelopes.filter((e) => e.outcome === 'applied')) {
-            yield* recordAndYield({
-              event: 'debug:legality',
-              data: buildLegalityPayload({
-                traceId: state.traceId,
-                point: 'post_commit',
-                round,
-                commitLedgerId: env.ledgerId,
-                contentVersions: getLastInjectedProductContentVersions(),
-                snapshot: refreshSnap,
-                state: refreshed.state,
-                actions: refreshed.actions,
-              }),
-            })
-          }
-        } catch (err: unknown) {
-          logWarn({ layer: 'orchestrator', category: 'derive_state', message: 'post-round re-derivation failed — keeping previous exposure', context: { conversationId: state.conversationId }, error: err })
-        }
-      }
+      // F2.2: the shared refresh emits one post_commit legality entry per
+      // APPLIED envelope this round; state/actions are the post-round
+      // recompute.
+      yield* refreshAfterAppliedCommits(roundEnvelopes, round)
 
       round++
     }

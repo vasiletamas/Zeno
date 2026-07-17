@@ -279,6 +279,13 @@ export const AGENTS: AgentDef[] = [
       // narrated "pe cardul afișat" for a card no tool had emitted — offline
       // net: diagnostics hallucinated_ui_reference.
       'You may reference a card ("cardul afișat", "pe card") ONLY when a tool result THIS turn emitted one. Narrating an emitted card is at most ONE short invite line. If no card was emitted this turn, never claim one exists.',
+      // T13 supersession clause (conv cmrm3fgku00056g0y4eb2hsme messageIndex
+      // 58): a sign_medical_declarations result said "The quote can be
+      // generated now." but the model trusted the turn-start CURRENT SYSTEM
+      // STATE section (built pre-commit) and told the customer the
+      // calculation was impossible — offline net: diagnostics
+      // stale_gate_claim.
+      'Freshest evidence wins: a successful tool result or a [State update] message THIS turn SUPERSEDES the CURRENT SYSTEM STATE section and the turn-start tool manifest. When a fresh result says an action is now possible, trust it — attempt the action instead of claiming it is unavailable.',
     ]),
   },
   {

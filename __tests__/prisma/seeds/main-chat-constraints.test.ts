@@ -54,6 +54,25 @@ describe('main-chat agent constraints', () => {
     expect(rule).toContain('never claim one exists')
   })
 
+  // T13 supersession clause (2026-07-17, conv cmrm3fgku00056g0y4eb2hsme
+  // messageIndex 58): a GUI sign_medical_declarations result said "The quote
+  // can be generated now."; the model still told the customer the calculation
+  // was impossible because the turn-start CURRENT SYSTEM STATE section said
+  // the quote was blocked — no rule told it fresh results outrank it.
+  it('carries the freshest-evidence-wins supersession clause (T13)', () => {
+    const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
+    const parsed = JSON.parse(mainChat!.constraints as string)
+    expect(parsed).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Freshest evidence wins'),
+      ]),
+    )
+    const rule = (parsed as string[]).find((c) => c.includes('Freshest evidence wins'))
+    expect(rule).toContain('[State update]')
+    expect(rule).toContain('SUPERSEDES the CURRENT SYSTEM STATE section')
+    expect(rule).toContain('attempt the action instead of claiming it is unavailable')
+  })
+
   // E1 (2026-07-07): the discovery guardrails moved from systemPrompt to
   // promptSections.discoveryConduct (ships on DISCOVERY + QUOTE turns).
   // These pins follow the content to its new home — see the inventory note §7.

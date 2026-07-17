@@ -6,7 +6,9 @@
  * advance_phase): cascades change legality without moving the phase.
  */
 
-import type { CommitResult, DerivedStateV3, ExposedActions } from '@/lib/engines/domain-types'
+import type { CommitResult, DeriveAndExposeResult, DerivedStateV3, ExposedActions } from '@/lib/engines/domain-types'
+import type { LLMToolDefinition, Message } from '@/lib/llm/providers/types'
+import { buildTurnTools } from './turn-tools'
 
 export function shouldRefreshExposure(envelopes: Pick<CommitResult, 'outcome' | 'effects'>[]): boolean {
   return envelopes.some((e) => e.outcome === 'applied')
@@ -18,4 +20,23 @@ export function formatRoundRefreshMessage(state: Pick<DerivedStateV3, 'phase' | 
     `Available actions: ${actions.available.join(', ')}`,
     actions.blocked.length > 0 ? `Blocked: ${actions.blocked.map((b) => `${b.action} (${b.reason})`).join(', ')}` : '',
   ].filter(Boolean).join('\n')
+}
+
+/**
+ * T13 seam: everything the NEXT LLM round needs after an applied commit —
+ * the fresh tool list (what the model may call), the executor wall (what
+ * the pipeline will accept) and the [State update] system message. One
+ * builder so the mid-loop refresh and the synthetic pre-round-0 refresh
+ * can never drift apart.
+ */
+export function buildRefreshArtifacts(refreshed: Pick<DeriveAndExposeResult, 'state' | 'actions'>): {
+  tools: LLMToolDefinition[]
+  exposedTools: string[]
+  stateUpdateMessage: Message
+} {
+  return {
+    tools: buildTurnTools(refreshed.actions),
+    exposedTools: refreshed.actions.available,
+    stateUpdateMessage: { role: 'system', content: formatRoundRefreshMessage(refreshed.state, refreshed.actions) },
+  }
 }

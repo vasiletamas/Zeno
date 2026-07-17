@@ -12,6 +12,7 @@ import * as ui from './checks-ui'
 import * as paymentFunnel from './checks-payment-funnel'
 import { questionnaireAnswerFabricated, stateClaimWithoutCommit } from './checks-fabrication'
 import { hallucinatedUiReference } from './checks-cards'
+import { staleGateClaim } from './checks-supersession'
 import { blockedActionAttempted, missingConsequences, recomputeDriftFindings, type RecomputeOptions } from './checks-envelope'
 
 const isCheck = (v: unknown): v is DiagnosticCheck =>
@@ -32,6 +33,9 @@ export const CHECK_CATALOG: DiagnosticCheck[] = [
   stateClaimWithoutCommit,
   // T11 ratchet (2026-07-15): card references with no emitted card that turn
   hallucinatedUiReference,
+  // T13 ratchet (2026-07-17): stale-gate refusal — an enabling result this
+  // turn, zero calls to the enabled action, impossibility prose about it
+  staleGateClaim,
 ]
 
 export function runDiagnostics(
