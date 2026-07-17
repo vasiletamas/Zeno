@@ -71,10 +71,16 @@ describe('E1 seed split — block placement', () => {
     }
   })
 
-  it('FIRST_TURN_RULES carries the opener rules and reference opening only', () => {
+  // T5 (P3.6): the live model reproduced the "Reference opening" example
+  // word-for-word — every customer got the identical canned greeting. The
+  // rules now specify the elements and demand fresh wording; there is NO
+  // example sentence left to parrot.
+  it('FIRST_TURN_RULES carries the opener rules with a vary-directive — no reference opening to reproduce (T5)', () => {
     expect(FIRST_TURN_RULES).toContain('FIRST-TURN RULES')
-    expect(FIRST_TURN_RULES).toContain('Reference opening (Romanian):')
-    expect(FIRST_TURN_RULES).toContain('Ce te-a adus pe aici azi?')
+    expect(FIRST_TURN_RULES).toContain('Compose the greeting fresh each time')
+    expect(FIRST_TURN_RULES).toContain('NEVER reproduce a memorized or previously used greeting sentence verbatim')
+    expect(FIRST_TURN_RULES).not.toContain('Reference opening')
+    expect(FIRST_TURN_RULES).not.toContain('Bună! Sunt Zeno')
     // A cross-REFERENCE to the guardrails is fine (they render below on turn
     // 1); the block itself must not be here.
     expect(FIRST_TURN_RULES).not.toContain('PRODUCT DISCOVERY GUARDRAILS (apply on EVERY turn')
@@ -121,8 +127,8 @@ describe('E1 seed split — block placement', () => {
     })
   })
 
-  it('char budget: the always-on constitution stays under 14KB (the sales-line TOOL FAILURE PROTOCOL + CUSTOMER FIELD DISCIPLINE blocks live here; drops toward ≤9KB once Workstream C removes ADVANCING)', () => {
-    expect(CONSTITUTION_CORE.length).toBeLessThanOrEqual(14_000)
+  it('char budget: the always-on constitution stays under 14.5KB (T20 scoped the messaging ban + added the try-the-tool rule, +~140 chars past the old 14KB line; drops toward ≤9KB once Workstream C removes ADVANCING)', () => {
+    expect(CONSTITUTION_CORE.length).toBeLessThanOrEqual(14_500)
   })
 })
 
