@@ -10,30 +10,27 @@
  * stale-gate refusal class.
  */
 import { stripDiacritics } from '@/lib/products/aliases'
+import { ACTION_DOMAINS, IMPOSSIBILITY, impossibilityNearDomain } from '@/lib/chat/impossibility-lexicon'
 import type { DiagnosticCheck, Finding } from './types'
 
 /**
  * message→action table: result `data._message` texts that announce an action
- * is NOW possible, with the action's domain keywords (diacritic-stripped,
- * lowercased — same normalization as the prose).
+ * is NOW possible. Domain keywords come from the SHARED impossibility
+ * lexicon (T16) — the online outbound guard imports the same exports, so the
+ * offline net and the live self-repair can never drift (the test asserts
+ * import equality).
  */
-const ENABLEMENTS: { pattern: RegExp; action: string; domain: RegExp }[] = [
-  { pattern: /quote can (now )?be generated/i, action: 'generate_quote', domain: /calcul|cotati|pret|ofert/ },
-  { pattern: /Ready for signature \(sign_dnt\)/, action: 'sign_dnt', domain: /semna/ },
-  { pattern: /can now proceed with insurance applications/i, action: 'set_application', domain: /aplicat/ },
+export const ENABLEMENTS: { pattern: RegExp; action: string; domain: RegExp }[] = [
+  { pattern: /quote can (now )?be generated/i, action: 'generate_quote', domain: ACTION_DOMAINS.generate_quote },
+  { pattern: /Ready for signature \(sign_dnt\)/, action: 'sign_dnt', domain: ACTION_DOMAINS.sign_dnt },
+  { pattern: /can now proceed with insurance applications/i, action: 'set_application', domain: ACTION_DOMAINS.set_application },
 ]
 
-const IMPOSSIBILITY = /nu (mai )?(poate|pot|se poate)|nu este posibil|imposibil|cannot|can'?t|unavailable/
-
-/** A domain keyword NEAR an impossibility phrase (±80 chars) — "calcularea
- * nu poate fi finalizată" flags; an unrelated "nu pot" elsewhere does not. */
+/** A domain keyword NEAR an impossibility phrase (shared proximity window) —
+ * "calcularea nu poate fi finalizată" flags; an unrelated "nu pot" elsewhere
+ * does not. Offline scans mixed-language transcripts → the union pattern. */
 function claimsImpossibility(prose: string, domain: RegExp): boolean {
-  for (const m of prose.matchAll(new RegExp(domain.source, 'g'))) {
-    const idx = m.index ?? 0
-    const windowText = prose.slice(Math.max(0, idx - 80), idx + m[0].length + 80)
-    if (IMPOSSIBILITY.test(windowText)) return true
-  }
-  return false
+  return impossibilityNearDomain(prose, domain, IMPOSSIBILITY) !== null
 }
 
 export const staleGateClaim: DiagnosticCheck = {

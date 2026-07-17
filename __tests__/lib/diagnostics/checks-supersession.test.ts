@@ -10,6 +10,8 @@
  */
 import { describe, it, expect } from 'vitest'
 import { runDiagnostics } from '@/lib/diagnostics'
+import { ENABLEMENTS } from '@/lib/diagnostics/checks-supersession'
+import { ACTION_DOMAINS } from '@/lib/chat/impossibility-lexicon'
 import { makeExport, turn } from './export-helpers'
 
 const msg = (role: 'user' | 'assistant', content: string) => ({ role, content }) as never
@@ -81,7 +83,11 @@ describe('stale_gate_claim', () => {
       },
     }
     const e = makeExport({
-      messages: [msg('user', 'da'), msg('assistant', 'Din păcate nu se poate semna acum în această conversație.')],
+      // T16 lexicon note: the sign_dnt domain is the SHARED (online+offline)
+      // pattern — "semna" near "analiz" — so a bare "nu se poate semna" no
+      // longer attributes to sign_dnt (it would collide with medical-
+      // declaration signing in the online guard); the refusal names the DNT.
+      messages: [msg('user', 'da'), msg('assistant', 'Din păcate analiza nu se poate semna acum în această conversație.')],
       turns: [turn(0, { toolCalls: [dntComplete] })] as never,
     })
     expect(runDiagnostics(e).find((f) => f.checkId === 'stale_gate_claim')).toMatchObject({
@@ -117,5 +123,17 @@ describe('stale_gate_claim', () => {
       turns: [turn(0, { toolCalls: [signResult] })] as never,
     })
     expect(runDiagnostics(e).some((f) => f.checkId === 'stale_gate_claim')).toBe(false)
+  })
+
+  // T16: the online outbound guard (lib/chat/outbound-guard.ts) and this
+  // offline check share ONE lexicon module — assert import EQUALITY (the very
+  // same RegExp objects), not duplicated patterns, so the two surfaces cannot
+  // drift apart.
+  it('offline enablement domains ARE the shared lexicon exports (import equality)', () => {
+    expect(ENABLEMENTS.length).toBeGreaterThan(0)
+    for (const e of ENABLEMENTS) {
+      expect(ACTION_DOMAINS[e.action], `lexicon entry for ${e.action}`).toBeDefined()
+      expect(e.domain, `domain for ${e.action} must be the lexicon export itself`).toBe(ACTION_DOMAINS[e.action])
+    }
   })
 })

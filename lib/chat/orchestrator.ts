@@ -50,6 +50,7 @@ import { extractAndPersistInsights } from '@/lib/insights/extractor'
 import { CircuitOpenError, TimeoutError } from '@/lib/errors/types'
 import { eventBus, initObservability, getTurnCost, getTurnAnomalies, getTurnToolHistory, recordTurnAnomaly } from '@/lib/events'
 import { validateSideEffectClaims } from './side-effect-validator'
+import { detectFalseUnavailabilityClaim } from './outbound-guard'
 import { detectToolNarration, type ToolNarrationResult } from './tool-narration-detector'
 import { debugYield, isDev, buildIdentityPayload, buildLegalityPayload, recordDebugEvent, type DebugEvent, type DebugGatePayload } from './debug'
 import { serializeToolResultForModel } from './tool-result-serializer'
@@ -882,6 +883,11 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
   const turnWritingResults: { tool: string; hasEnvelope: boolean }[] = []
   const turnExecutorRejections: { tool: string; reason: string }[] = []
   let lastStatusMessage: string | undefined
+  // T16: one-shot outbound self-repair — once a false-unavailability draft
+  // has been rejected and retried, the guard stands down for the turn (a
+  // second offending draft streams as-is; better a wrong claim than an
+  // infinite loop, and the offline stale_gate_claim ratchet still nets it).
+  let repairAttempted = false
 
   // Post-commit exposure refresh (A3.4, T1.D5), shared by the mid-loop
   // rounds and the T13 pre-round-0 synthetic refresh: re-derive, rebuild the
@@ -1130,14 +1136,33 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
       let roundContent = ''
       let roundToolCalls: ToolCall[] = []
+      // T16 outbound guard: a round's content events are BUFFERED until we
+      // know whether the round carries tool calls. A tool round flushes the
+      // moment its tool_calls chunk arrives (providers emit text blocks
+      // before tool_use blocks, so the hold is one block boundary); the
+      // FINAL narration round — the only round the customer actually reads —
+      // holds its text until the draft clears the guard below. Accepted
+      // latency tradeoff: the final reply arrives as a burst after the
+      // stream completes instead of token-by-token — the price of never
+      // showing a false "I can't" about an action that is available right
+      // now. After the one-shot repair the guard stands down and content
+      // streams live again.
+      const bufferedContent: SSEEvent[] = []
 
       for await (const chunk of stream!) {
         if (chunk.type === 'content' && chunk.content) {
           roundContent += chunk.content
-          yield { event: 'content', data: { text: chunk.content } }
+          const ev: SSEEvent = { event: 'content', data: { text: chunk.content } }
+          if (repairAttempted || roundToolCalls.length > 0) {
+            yield ev
+          } else {
+            bufferedContent.push(ev)
+          }
         }
         if (chunk.type === 'tool_calls' && chunk.toolCalls) {
           roundToolCalls = chunk.toolCalls
+          // Tool round — stream live from here on; release the held prefix.
+          for (const buffered of bufferedContent.splice(0)) yield buffered
         }
         if (chunk.type === 'done' && chunk.usage) {
           accumulateTurnUsage(state, chunk.usage)
@@ -1146,11 +1171,40 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
 
       // If no tool calls, we have the final response
       if (roundToolCalls.length === 0) {
+        // T16: deterministic outbound contradiction guard. A draft claiming
+        // an AVAILABLE funnel action is impossible never reaches the
+        // customer: discard it, record the anomaly (recordTurnAnomaly →
+        // turn:end / TurnTrace / TurnDebug, same channel as the F2.4
+        // invariant monitors) and re-invoke the model ONCE with a correction
+        // — tools stay enabled so it can simply perform the action.
+        const falseClaim = repairAttempted
+          ? null
+          : detectFalseUnavailabilityClaim(roundContent, toolContext.exposedTools ?? [], state.language)
+        if (falseClaim) {
+          repairAttempted = true
+          bufferedContent.length = 0 // the draft is discarded, never streamed
+          recordTurnAnomaly(state.traceId, {
+            type: 'behavioral',
+            severity: 'warning',
+            message: 'self_repair_triggered',
+            metadata: { action: falseClaim.action, claim: falseClaim.claim },
+          })
+          messages.push({
+            role: 'system',
+            content: `[Correction] Your draft falsely claimed "${falseClaim.claim}" — but ${falseClaim.action} IS available right now. Rewrite your reply: either perform the action by calling the tool, or tell the customer it is happening. Never claim it is impossible.`,
+          })
+          continue // same round index — the repair replaces the rejected draft
+        }
+        // Clean draft (or repair already spent): flush the buffered events
+        // in order, byte-identical to what live streaming would have sent.
+        for (const buffered of bufferedContent.splice(0)) yield buffered
         finalContent += roundContent
         break
       }
 
       // Process tool calls
+      // (defensive: a stream that ended tool_calls-last has already flushed)
+      for (const buffered of bufferedContent.splice(0)) yield buffered
       finalContent += roundContent
 
       // Add the assistant message with tool calls
