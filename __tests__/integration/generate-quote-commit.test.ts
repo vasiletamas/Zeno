@@ -134,7 +134,7 @@ describe('generate_quote commit (D1.4)', () => {
       expect(Number.isNaN(Date.parse(ri!.computedAt as string))).toBe(false)
     })
 
-    it('addon on: the matched age band, the addon component and the medical answersHash freeze too', async () => {
+    it('addon on: the matched age band, the CONVERTED addon component, the fx reference and the medical answersHash freeze too', async () => {
       const fx = await buildReadyApplication({ addon: true })
       const res = await gq(fx)
       expect(res.outcome).toBe('applied')
@@ -144,8 +144,11 @@ describe('generate_quote commit (D1.4)', () => {
       // DOB 1990-01-01 → band 31-45 (seeded AddonPricingRule)
       expect(ri.band).toEqual({ minAge: 31, maxAge: 45 })
       expect(ri.basePremiumAnnual).toBe(190)
-      expect(ri.addonPremiumAnnual).toBe(350)
-      expect(quote.premiumAnnual).toBe(540)
+      // T17: the rate card is EUR-denominated — 350 EUR * 5.06 (default
+      // fixed reference) = 1771 RON; the fx used freezes alongside
+      expect(ri.addonPremiumAnnual).toBe(1771)
+      expect(quote.premiumAnnual).toBe(1961)
+      expect(ri.fx).toEqual({ rate: 5.06, date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), source: 'fixed:env' })
       const app = await prisma.application.findUniqueOrThrow({ where: { id: fx.applicationId } })
       const medical = await loadMedicalDeclarationState(prisma, app)
       expect(ri.medicalAnswersHash).toBe(medical.currentHash)

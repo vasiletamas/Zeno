@@ -696,6 +696,13 @@ export async function seedProduct(prisma: PrismaClient) {
   // Delete existing rules for this addon to avoid duplicates
   await prisma.addonPricingRule.deleteMany({ where: { addonId: addon.id } })
 
+  // T17 ruling (P4.3, autonomous run 2026-07-17): the 200/350/500/700
+  // figures are the REAL product's EUR tariffs — they were mislabeled RON,
+  // which made addon-inclusive quotes ~5x cheap. Seeded in their true
+  // denomination; T18's currency guard + FX reference (BNR daily or the
+  // fixed env rate) produce the RON premiums at rating time.
+  // FLAGGED FOR VERIFICATION: confirm these figures against the actual
+  // Allianz tariff sheet before production.
   const addonPricingRules = [
     { minAge: 18, maxAge: 30, premiumAnnual: 200 },
     { minAge: 31, maxAge: 45, premiumAnnual: 350 },
@@ -709,7 +716,7 @@ export async function seedProduct(prisma: PrismaClient) {
       minAge: r.minAge,
       maxAge: r.maxAge,
       premiumAnnual: r.premiumAnnual,
-      currency: 'RON',
+      currency: 'EUR',
     })),
   })
   console.log(`    ${addonPricingRules.length} addon pricing rules created`)
