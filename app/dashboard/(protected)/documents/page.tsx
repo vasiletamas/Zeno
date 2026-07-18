@@ -1,15 +1,17 @@
 /**
  * Customer Documents Page (server component)
  *
- * Full page document list. Same documents as dashboard but dedicated page.
- * Load policies -> check status -> show document availability.
+ * T25 (P5.5): the full document library — every signed, acknowledged,
+ * generated and uploaded artifact, grouped per product where a link
+ * exists. Thin server component over lib/documents/library.
  */
 
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { verifyToken } from '@/lib/auth/jwt'
 import { prisma } from '@/lib/db'
-import DocumentList from '@/components/dashboard/document-list'
+import { listCustomerDocuments } from '@/lib/documents/library'
+import DocumentLibrary from '@/components/dashboard/document-library'
 
 export default async function DocumentsPage() {
   const cookieStore = await cookies()
@@ -21,42 +23,27 @@ export default async function DocumentsPage() {
 
   const user = await prisma.user.findUnique({
     where: { id: payload.userId },
-    include: {
-      customer: {
-        include: {
-          policies: {
-            orderBy: { createdAt: 'desc' },
-            take: 1,
-          },
-        },
-      },
-    },
+    select: { customerId: true },
   })
+  if (!user?.customerId) redirect('/dashboard/login')
 
-  if (!user?.customer) {
-    redirect('/dashboard/login')
-  }
-
-  const latestPolicy = user.customer.policies[0]
-  const isActive = latestPolicy?.status === 'ACTIVE'
+  const library = await listCustomerDocuments(user.customerId)
+  const serialize = (items: typeof library.ungrouped) =>
+    items.map((i) => ({
+      ...i,
+      createdAt: i.createdAt.toISOString(),
+      acknowledgedAt: i.acknowledgedAt?.toISOString() ?? null,
+    }))
 
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-xl font-medium text-night">
         Documente
       </h1>
-
-      {!latestPolicy ? (
-        <div className="rounded-xl border border-warm-border bg-linen px-6 py-8 text-center">
-          <p className="text-sm text-muted">
-            Nu ai documente disponibile. Vorbeste cu Zeno pentru a obtine o polita.
-          </p>
-        </div>
-      ) : (
-        <DocumentList
-          documents={(await prisma.document.findMany({ where: { customerId: latestPolicy.customerId }, orderBy: { generatedAt: 'desc' } })).map((d) => ({ id: d.id, kind: d.kind, version: d.version, language: d.language, generatedAt: d.generatedAt.toISOString() }))}
-        />
-      )}
+      <DocumentLibrary
+        groups={library.groups.map((g) => ({ ...g, items: serialize(g.items) }))}
+        ungrouped={serialize(library.ungrouped)}
+      />
     </div>
   )
 }
