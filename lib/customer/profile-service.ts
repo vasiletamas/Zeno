@@ -11,7 +11,11 @@ import { Prisma } from '@/lib/generated/prisma/client'
 import { encrypt, decrypt, maskCnp } from '@/lib/security/encryption'
 import { resolveDeclaredWrite, resolveVerifiedWrite, type FieldRecord } from '@/lib/engines/provenance-rules'
 
-export type ProfileFieldName = 'name' | 'cnp' | 'dateOfBirth' | 'declaredAge' | 'email' | 'phone' | 'address' | 'residency'
+// T6 (P5.6): occupation/familySize/minorChildren/education/incomeSource are
+// DNT-promoted demographics — declared writes only, no Customer-column mirrors.
+export type ProfileFieldName =
+  | 'name' | 'cnp' | 'dateOfBirth' | 'declaredAge' | 'email' | 'phone' | 'address' | 'residency'
+  | 'occupation' | 'familySize' | 'minorChildren' | 'education' | 'incomeSource'
 
 export type ProfileWriteResult =
   | { outcome: 'applied'; provenance: FieldRecord['provenance']; mirrorConflict?: string }

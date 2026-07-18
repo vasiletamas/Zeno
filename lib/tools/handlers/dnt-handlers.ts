@@ -16,6 +16,7 @@ import { computeVisibleSet } from '@/lib/engines/dependency-graph'
 import { loadDependencyGraph } from '@/lib/engines/dependency-graph-loader'
 import { isDntValidFor, isExpiringOrExpired, decideSessionType, computeCoverage, DNT_VALIDITY_DAYS, type DntFact } from '@/lib/engines/dnt-rules'
 import { appendConsentEvents } from '@/lib/customer/consent-service'
+import { promoteDntFacts } from '@/lib/customer/dnt-promotion'
 import type { GroundingOption } from '@/lib/engines/anti-fabrication'
 import { valueNotGroundedError } from './grounding-guard'
 import { CONDUCT_LINE, DNT_COMPLETION_MESSAGE, buildDntReviewCard, questionCard, rejectReemit, savedMessage } from './questionnaire-cards'
@@ -486,6 +487,21 @@ export const signDnt: ToolHandler = async (args, context) => {
       }
     }
     await appendConsentEvents(context.customerId, consentEvents, undefined, context.db)
+
+    // T6 (P5.6): promote the demographic answers to durable profile fields +
+    // insights — same tx, non-fatal (the marketing lift precedent): a failed
+    // promotion never voids the signature.
+    try {
+      const answerRows = await context.db.dntAnswer.findMany({
+        where: { sessionId: session.id },
+        include: { question: { select: { code: true } } },
+      })
+      const answersByCode: Record<string, string> = {}
+      for (const r of answerRows) if (r.question.code) answersByCode[r.question.code] = r.value
+      await promoteDntFacts(context.db, context.customerId, context.conversationId, answersByCode)
+    } catch {
+      // non-fatal — the Dnt aggregate and consents stand
+    }
 
     trackDntCompleted(context.customerId)
 
