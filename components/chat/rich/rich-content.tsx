@@ -4,7 +4,6 @@ import type { Language } from '@/lib/i18n/translations'
 import { ProductCard } from './product-card'
 import { QuoteCard } from './quote-card'
 import { QuestionCard } from './question-card'
-import { cnpChecksumHint } from './dnt-cnp-hint'
 import { BdResultCard } from './bd-result-card'
 import { ConfirmRequiredCard } from './confirm-required-card'
 import { QuoteAcceptedCard } from './quote-accepted-card'
@@ -168,7 +167,6 @@ export function RichContent({
           question={question}
           progress={progress}
           groupType={groupType}
-          clientValidate={question.code === 'DNT_CNP' ? (v) => cnpChecksumHint(v, language) : undefined}
           onAnswer={(value) =>
             onAction({
               type: 'answer_question',

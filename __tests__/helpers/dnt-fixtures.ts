@@ -6,7 +6,6 @@ import type { ToolContext } from '@/lib/tools/types'
 function answerFor(q: { type: string; options: unknown; code?: string | null }): string {
   if (q.type === 'BOOLEAN') return 'da'
   if (q.type === 'NUMBER') return '0'
-  if (q.code === 'DNT_CNP') return '1980418089861' // pattern-pinned 13-digit CNP
   const opts = Array.isArray(q.options) ? q.options : []
   const first = opts[0]
   if (typeof first === 'string') return first

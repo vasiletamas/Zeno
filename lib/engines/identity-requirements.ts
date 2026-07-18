@@ -6,11 +6,11 @@
  *
  * Deliberate interpretations (B3 erratum 4, recorded so nobody "corrects"
  * them): (a) generate_quote is encoded minTier 'anonymous' +
- * anyDeclaredOf [cnp, dateOfBirth] rather than the literal 'declared' tier
- * — the full declared tier already implies both fields, which would make
- * the ratified 'CNP-or-DOB' clause vacuous; this encoding keeps it
- * meaningful (either field alone unlocks quoting). (b) T4-R6's document
- * default is resolved to before-payment-session; flip by seeding
+ * anyDeclaredOf [cnp, dateOfBirth, declaredAge] rather than the literal
+ * 'declared' tier — any one age-bearing fact alone unlocks quoting; T28
+ * (P5.1) added declaredAge so the quote rates on the AGE asked directly
+ * ("câți ani ai?") and the CNP is never demanded by mouth. (b) T4-R6's
+ * document default is resolved to before-payment-session; flip by seeding
  * accept_quote's verificationRequirements if compliance wants accept-time.
  * Rows are keyed by REGISTERED commit tools; the payment-documents row
  * rides ensure_payment_session (D3.3 renamed the legacy initiate tool).
@@ -20,7 +20,7 @@ import type { IdentityTier, DomainSnapshot } from './domain-types'
 
 export interface IdentityRequirement {
   minTier: IdentityTier
-  anyDeclaredOf?: ('cnp' | 'dateOfBirth')[]
+  anyDeclaredOf?: ('cnp' | 'dateOfBirth' | 'declaredAge')[]
   productDocuments?: boolean
 }
 export type IdentityRequirementsTable = Record<string, IdentityRequirement>
@@ -28,7 +28,7 @@ export type IdentityRequirementsTable = Record<string, IdentityRequirement>
 export const IDENTITY_REQUIREMENTS: IdentityRequirementsTable = {
   set_application: { minTier: 'anonymous' }, // no hard gate pre-needs-analysis (#1)
   sign_dnt: { minTier: 'anonymous' },
-  generate_quote: { minTier: 'anonymous', anyDeclaredOf: ['cnp', 'dateOfBirth'] },
+  generate_quote: { minTier: 'anonymous', anyDeclaredOf: ['cnp', 'dateOfBirth', 'declaredAge'] },
   accept_quote: { minTier: 'verified_channel' },
   ensure_payment_session: { minTier: 'verified_channel', productDocuments: true },
   // E3 (M3): disclosure demands a proven channel; erasure must stay open to
@@ -40,10 +40,15 @@ export const IDENTITY_REQUIREMENTS: IdentityRequirementsTable = {
 
 const TIER_ORDER: Record<IdentityTier, number> = { anonymous: 0, declared: 1, verified_channel: 2 }
 
-/** The KYC field set the tier ladder is built on (B3.2) — exported here (not
- * identity-rules) because identity-rules imports this module. */
-export const KYC_FIELDS = ['name', 'cnp', 'dateOfBirth', 'email', 'phone'] as const
+/** The KYC field set the tier ladder is built on — exported here (not
+ * identity-rules) because identity-rules imports this module. T28 (P5.1)
+ * shrank it to the CONTACT pair: pre-acceptance collection is phone+email
+ * ONLY; name/DOB/CNP arrive later via ID extraction (T27) with document
+ * provenance and must never wall the funnel. */
+export const KYC_FIELDS = ['email', 'phone'] as const
 export type KycField = (typeof KYC_FIELDS)[number]
+/** Fields a row's anyDeclaredOf clause may name — a superset of KYC_FIELDS. */
+export type DeclarableField = KycField | 'cnp' | 'dateOfBirth' | 'declaredAge'
 
 /** The actionable decomposition of an unmet verified_channel requirement. */
 export interface IdentityDetail { missingFields: string[]; hasVerifiedChannel: boolean }
@@ -55,15 +60,16 @@ export interface IdentityDetail { missingFields: string[]; hasVerifiedChannel: b
  *
  * With `detail`, an unmet verified_channel tier DECOMPOSES into the gaps the
  * agent can act on (run cmr9dw3s5 2026-07-06: the channel WAS verified and
- * dateOfBirth+phone were the real blockers, but the payload said only
- * 'verified_channel' — the agent polled state 15 turns, then escalated).
- * When fields and channel are complete but the tier still refuses, the one
- * remaining reason is an invalid CNP (checksum / DOB mismatch): valid:cnp.
+ * real blockers were missing, but the payload said only 'verified_channel'
+ * — the agent polled state 15 turns, then escalated). T28: the old
+ * valid:cnp fallback died with the CNP tier gate — with the contact-only
+ * ladder a complete decomposition IS the tier, so an empty-needs refusal can
+ * only be inconsistent caller facts; the coarse label is the honest answer.
  */
 export function evaluateRow(
   req: IdentityRequirement,
   tier: IdentityTier,
-  hasDeclared: (field: KycField) => boolean,
+  hasDeclared: (field: DeclarableField) => boolean,
   requiredDocs: string[] = [],
   validatedDocs: string[] = [],
   detail?: IdentityDetail,
@@ -73,10 +79,9 @@ export function evaluateRow(
     if (req.minTier === 'verified_channel' && detail) {
       for (const f of detail.missingFields) needs.push(`declared:${f}`)
       if (!detail.hasVerifiedChannel) needs.push('verified_channel')
-      // fields + channel complete yet the tier refuses: the one remaining
-      // reason is an invalid CNP (checksum / DOB mismatch) — name it, never
-      // a tier word the agent may already have satisfied.
-      if (needs.length === 0) needs.push('valid:cnp')
+      // decomposition sees no gap yet the tier refuses — inconsistent facts
+      // guard (T28: valid:cnp is dead; CNP quality is document review's).
+      if (needs.length === 0) needs.push('verified_channel')
     } else {
       needs.push(req.minTier === 'verified_channel' ? 'verified_channel' : 'declared')
     }

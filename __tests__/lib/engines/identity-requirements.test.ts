@@ -10,8 +10,8 @@ describe('identity-requirements mechanism (contradiction #1)', () => {
       ['accept_quote', 'ensure_payment_session', 'generate_quote', 'request_data_export', 'request_erasure', 'set_application', 'sign_dnt'],
     )
   })
-  it('pins the ratified rows (ADD-1, erratum-4a encoding)', () => {
-    expect(IDENTITY_REQUIREMENTS.generate_quote).toEqual({ minTier: 'anonymous', anyDeclaredOf: ['cnp', 'dateOfBirth'] })
+  it('pins the ratified rows (ADD-1, erratum-4a encoding; T28 adds declaredAge)', () => {
+    expect(IDENTITY_REQUIREMENTS.generate_quote).toEqual({ minTier: 'anonymous', anyDeclaredOf: ['cnp', 'dateOfBirth', 'declaredAge'] })
     expect(IDENTITY_REQUIREMENTS.accept_quote).toEqual({ minTier: 'verified_channel' })
     // D3.3: the document requirement rides ensure_payment_session
     expect(IDENTITY_REQUIREMENTS.ensure_payment_session).toEqual({ minTier: 'verified_channel', productDocuments: true })
@@ -25,10 +25,10 @@ describe('identity-requirements mechanism (contradiction #1)', () => {
     const commits = new Set(listCommitTools())
     for (const k of Object.keys(IDENTITY_REQUIREMENTS)) expect(commits.has(k), k).toBe(true)
   })
-  it('checkIdentityRequirement DECOMPOSES verified_channel needs into the actionable gaps (run cmr9dw3s5)', () => {
-    // The run-6 stall: name+cnp+email declared, channel VERIFIED — the old
-    // payload said only 'verified_channel' and the agent polled state 15
-    // turns, then escalated. The needs must name what to collect.
+  it('checkIdentityRequirement DECOMPOSES verified_channel needs into the actionable gaps (run cmr9dw3s5; T28 KYC = email+phone)', () => {
+    // The run-6 stall: the old payload said only 'verified_channel' and the
+    // agent polled state 15 turns, then escalated. The needs must name what
+    // to collect — under T28 the ladder is contact-only, so here: phone.
     const r = checkIdentityRequirement(
       IDENTITY_REQUIREMENTS,
       'accept_quote',
@@ -40,7 +40,7 @@ describe('identity-requirements mechanism (contradiction #1)', () => {
       },
     )
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.needs).toEqual(['declared:dateOfBirth', 'declared:phone'])
+    if (!r.ok) expect(r.needs).toEqual(['declared:phone'])
   })
   it('checkIdentityRequirement reports declared:* plus verified_channel when nothing is verified', () => {
     const r = checkIdentityRequirement(
@@ -50,20 +50,20 @@ describe('identity-requirements mechanism (contradiction #1)', () => {
     )
     expect(r.ok).toBe(false)
     // tier 'declared' with empty fields is a synthetic fixture: decomposition
-    // reads the FIELDS, so all five KYC gaps surface, then the channel; the
-    // anyDeclaredOf clause's declared:cnp DEDUPES into the decomposition's
-    // (a duplicate need is noise for the model).
-    if (!r.ok) expect(r.needs).toEqual(['declared:name', 'declared:cnp', 'declared:dateOfBirth', 'declared:email', 'declared:phone', 'verified_channel'])
+    // reads the FIELDS, so both contact gaps surface, then the channel, then
+    // the row's own anyDeclaredOf clause (cnp is not a KYC field under T28,
+    // so it no longer dedupes into the decomposition).
+    if (!r.ok) expect(r.needs).toEqual(['declared:email', 'declared:phone', 'verified_channel', 'declared:cnp'])
   })
-  it('falls back to valid:cnp when fields+channel are complete but the tier still refuses (checksum/DOB mismatch)', () => {
-    const allDeclared = Object.fromEntries(['name', 'cnp', 'dateOfBirth', 'email', 'phone'].map((f) => [f, { provenance: 'declared' as const }]))
+  it('T28: falls back to the coarse verified_channel label when the decomposition sees no gap yet the tier refuses (inconsistent facts guard — valid:cnp died with the CNP tier gate)', () => {
+    const allDeclared = Object.fromEntries(['email', 'phone'].map((f) => [f, { provenance: 'declared' as const }]))
     const r = checkIdentityRequirement(
       IDENTITY_REQUIREMENTS,
       'accept_quote',
       { tier: 'anonymous', fields: allDeclared, verifiedChannels: ['email'], pendingChallenge: null },
     )
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.needs).toEqual(['valid:cnp'])
+    if (!r.ok) expect(r.needs).toEqual(['verified_channel'])
   })
   it('product-document requirements resolve against validated documents', () => {
     const row = { initiate_payment: { minTier: 'anonymous' as const, productDocuments: true } }

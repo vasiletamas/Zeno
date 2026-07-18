@@ -36,9 +36,10 @@ export function acceptQuoteLegality(
     const needs: string[] = []
     for (const f of s.identity.missingFields ?? []) needs.push(`declared:${f}`)
     if (s.identity.hasVerifiedChannel === false) needs.push('verified_channel')
-    // decomposition threaded but nothing visible → the one remaining reason
-    // is an invalid CNP; without the decomposition keep the coarse label.
-    if (needs.length === 0) needs.push(s.identity.missingFields !== undefined && s.identity.hasVerifiedChannel === true ? 'valid:cnp' : 'verified_channel')
+    // decomposition sees no gap yet the tier refuses → inconsistent caller
+    // facts; the coarse label is the honest answer (T28: valid:cnp died with
+    // the CNP tier gate — CNP quality belongs to document review).
+    if (needs.length === 0) needs.push('verified_channel')
     return { ok: false, outcome: 'requires_identity', needs }
   }
   if (s.quote.disclosuresRequired.length > 0) return { ok: false, outcome: 'requires_disclosures', needs: s.quote.disclosuresRequired.map((d) => d.kind) }

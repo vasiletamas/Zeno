@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import { adaptAction } from '@/lib/chat/action-adapter'
-import { cnpChecksumHint } from '@/components/chat/rich/dnt-cnp-hint'
 
 // Task 2.1 (D1): DNT questions render as cards — the tap posts the EXACT
 // questionCode + option VALUE through the gui actor, killing the
@@ -40,15 +39,5 @@ describe('DNT card answer → gui-actor write_dnt_answer', () => {
   })
 })
 
-describe('DNT_CNP client-side checksum hint (server stays the boundary)', () => {
-  it('flags a checksum-invalid CNP with a hint', () => {
-    expect(cnpChecksumHint('1960229410016', 'ro')).toMatch(/CNP/)
-    expect(cnpChecksumHint('1234567890123', 'en')).toMatch(/CNP/)
-  })
-  it('accepts a checksum-valid CNP', () => {
-    expect(cnpChecksumHint('1960229410015', 'ro')).toBeNull()
-  })
-  it('non-13-digit input gets the hint too', () => {
-    expect(cnpChecksumHint('12345', 'ro')).toMatch(/13/)
-  })
-})
+// T28: the DNT_CNP question (and its client-side checksum hint) died with
+// data minimization — the CNP is never asked by mouth.

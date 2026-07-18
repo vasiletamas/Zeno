@@ -15,7 +15,11 @@ import type { ToolHandler, ToolContext } from '@/lib/tools/types'
 // Field collection order
 // ─────────────────────────────────────────────
 
-const FIELD_ORDER = ['name', 'cnp', 'dateOfBirth', 'email', 'phone'] as const
+// T28 (P5.1) data minimization: the card ladder collects the CONTACT pair
+// ONLY. name/DOB/CNP arrive document-grade via ID extraction (T27) and are
+// never demanded pre-acceptance; declaredAge is asked conversationally
+// ("câți ani ai?") and recorded directly — it is NOT a ladder card.
+const FIELD_ORDER = ['email', 'phone'] as const
 
 type CollectableField = (typeof FIELD_ORDER)[number]
 
@@ -32,23 +36,6 @@ const FIELD_META: Record<
     placeholder?: { en: string; ro: string }
   }
 > = {
-  name: {
-    label: { en: 'Full name', ro: 'Numele complet' },
-    type: 'text',
-    validation: { minLength: 2, maxLength: 100 },
-    placeholder: { en: 'e.g. Ion Popescu', ro: 'ex. Ion Popescu' },
-  },
-  cnp: {
-    label: { en: 'Personal identification number (CNP)', ro: 'Cod numeric personal (CNP)' },
-    type: 'text',
-    validation: { pattern: '^[1-9]\\d{12}$', minLength: 13, maxLength: 13 },
-    placeholder: { en: '13-digit CNP', ro: 'CNP din 13 cifre' },
-  },
-  dateOfBirth: {
-    label: { en: 'Date of birth', ro: 'Data nasterii' },
-    type: 'date',
-    placeholder: { en: 'YYYY-MM-DD', ro: 'AAAA-LL-ZZ' },
-  },
   email: {
     label: { en: 'Email address', ro: 'Adresa de email' },
     type: 'email',
@@ -119,6 +106,15 @@ function validateField(
       return { valid: true }
     }
 
+    // T28: the declared age rates the quote — asked directly in conversation
+    // ("câți ani ai?"), recorded here. Integer 18-120, nothing fancier.
+    case 'declaredAge': {
+      if (!/^\d{1,3}$/.test(trimmed)) return { valid: false, error: 'Declared age must be a whole number.' }
+      const age = Number(trimmed)
+      if (age < 18 || age > 120) return { valid: false, error: 'Declared age must be between 18 and 120.' }
+      return { valid: true }
+    }
+
     case 'address':
       if (!trimmed) return { valid: false, error: 'Address is required.' }
       return { valid: true }
@@ -180,9 +176,17 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
       return { success: false, error: validation.error }
     }
 
-    const trimmedValue = value.trim()
+    // T28: residency backs the eligibility fact (op equals 'Romania') — the
+    // canonical spelling is normalized deterministically so "românia"/"ROMANIA"
+    // never fails the equals rule.
+    const trimmedValue = field === 'residency' && /^rom[âa]nia$/i.test(value.trim())
+      ? 'Romania'
+      : value.trim()
 
-    const KNOWN_FIELDS: ProfileFieldName[] = ['name', 'cnp', 'dateOfBirth', 'declaredAge', 'email', 'phone', 'address']
+    // T28: name/cnp/dateOfBirth stay SETTABLE (a volunteered value is never
+    // refused) but live outside the collection ladder; residency backs the
+    // eligibility fact the CNP used to imply.
+    const KNOWN_FIELDS: ProfileFieldName[] = ['name', 'cnp', 'dateOfBirth', 'declaredAge', 'email', 'phone', 'address', 'residency']
     if (!KNOWN_FIELDS.includes(field as ProfileFieldName)) {
       return { success: false, error: `Unknown field: ${field}` }
     }

@@ -26,6 +26,30 @@ export interface ProcessResult {
 
 const COMPARED_FIELDS = ['name', 'cnp', 'dateOfBirth'] as const satisfies readonly ProfileFieldName[]
 
+/** The T14 rating-snapshot slice the reconciliation reads. */
+interface FrozenRatingInputs { ageUsed?: number; band?: { minAge: number; maxAge: number } | null; computedAt?: string }
+
+/**
+ * T28 (P5.1) reconciliation: the quote rated a DECLARED age (T14 froze
+ * ageUsed + the matched addon band); the document carries the real birth
+ * date. A document age OUTSIDE the frozen band means a DIFFERENT band would
+ * have matched (bands never overlap — same predicate quote-handlers used to
+ * pick it: minAge <= age <= maxAge); with no band frozen (no addon) the
+ * integer ages compare — conservative. Age is derived at the rating's own
+ * computedAt so a birthday between issue and upload never manufactures a
+ * mismatch.
+ */
+export function extractedAgeMismatchesRating(ri: FrozenRatingInputs, extractedDob: Date): boolean {
+  if (typeof ri.ageUsed !== 'number') return false
+  const at = ri.computedAt ? new Date(ri.computedAt) : new Date()
+  let age = at.getFullYear() - extractedDob.getFullYear()
+  const m = at.getMonth() - extractedDob.getMonth()
+  if (m < 0 || (m === 0 && at.getDate() < extractedDob.getDate())) age--
+  const band = ri.band ?? null
+  if (band) return !(age >= band.minAge && age <= band.maxAge)
+  return age !== ri.ageUsed
+}
+
 export async function processDocument(
   documentId: string,
   opts: { onFieldVerified: (e: FieldVerifiedEvent) => void; provider?: DocumentExtractionProvider },
@@ -66,6 +90,21 @@ export async function processDocument(
       opts.onFieldVerified({ customerId: doc.customerId, field, value })
     } else {
       findings.push(`field_mismatch:${field}`)
+    }
+  }
+
+  // T28: rated-age reconciliation — a live (ISSUED/ACCEPTED) quote priced on
+  // a declared age is checked against the document DOB; a band mismatch goes
+  // to DOCUMENT_REVIEW (referral), never a silent re-price of a frozen quote.
+  if (extracted.dateOfBirth) {
+    const quote = await prisma.quote.findFirst({
+      where: { customerId: doc.customerId, status: { in: ['ISSUED', 'ACCEPTED'] } },
+      orderBy: { createdAt: 'desc' },
+      select: { ratingInputs: true },
+    })
+    const ri = (quote?.ratingInputs ?? null) as FrozenRatingInputs | null
+    if (ri && extractedAgeMismatchesRating(ri, new Date(extracted.dateOfBirth))) {
+      findings.push('age_band_mismatch')
     }
   }
 

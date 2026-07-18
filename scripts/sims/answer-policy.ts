@@ -117,6 +117,10 @@ export function pickAnswer(
   // (2026-07-06 battery: phone never declared, close walled on identity).
   if (/telefon/.test(m) && /num[ăa]r|format|07/.test(m)) return '0722334455'
   if (/cu cine loc|gospod[ăa]r/.test(m)) return 'singur'
+  // T28: residency is asked in plain conversation now (the CNP that implied
+  // it is never asked by mouth) — AFTER the household rule ("cu cine
+  // locuiești" also contains 'locuie').
+  if (/rom[âa]nia/.test(m) && /locuie|reziden|domicili/.test(m)) return 'da, locuiesc in Romania'
   if (/sursa|provin/.test(m)) return 'din salariu'
   if (/2000_5000|interval/.test(m)) return 'intre 2000 si 5000'
   if (/venit|salar/.test(m)) return '5000'

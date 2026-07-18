@@ -103,8 +103,10 @@ export async function seedQuestions(prisma: PrismaClient) {
     }
 
     // B4: the seed is AUTHORITATIVE per group — questions removed from the
-    // catalog (e.g. the T5.D2 selection questions) are deleted, answers
-    // first (FK).
+    // catalog (e.g. the T5.D2 selection questions, T28's DNT_CNP) are
+    // deleted, answers first (FK — BOTH stores: Answer and DntAnswer).
+    // Deleting DNT_CNP DntAnswer rows is itself the point of T28's data
+    // minimization: the identifier's masked traces leave with the question.
     const stale = await prisma.question.findMany({
       where: { groupId: group.id, code: { notIn: questions.map((q) => q.code) } },
       select: { id: true },
@@ -112,6 +114,7 @@ export async function seedQuestions(prisma: PrismaClient) {
     if (stale.length > 0) {
       const staleIds = stale.map((s) => s.id)
       await prisma.answer.deleteMany({ where: { questionId: { in: staleIds } } })
+      await prisma.dntAnswer.deleteMany({ where: { questionId: { in: staleIds } } })
       await prisma.question.deleteMany({ where: { id: { in: staleIds } } })
     }
 
@@ -171,7 +174,10 @@ export async function seedQuestions(prisma: PrismaClient) {
   )
   console.log('    dnt_consent: 3 questions')
 
-  // ── 2. dnt_general — Demographics (6 questions) ──────────────────
+  // ── 2. dnt_general — Demographics (5 questions) ──────────────────
+  // T28 (P5.1): DNT_CNP is GONE — the CNP is never asked by mouth. It
+  // arrives document-grade via ID extraction (T27); the quote rates on the
+  // declared age asked directly in conversation.
   await seedGroup(
     {
       code: 'dnt_general',
@@ -181,21 +187,6 @@ export async function seedQuestions(prisma: PrismaClient) {
       phase: 'dnt',
     },
     [
-      {
-        code: 'DNT_CNP',
-        sensitivity: 'CONFIRM_ALWAYS',
-        text: {
-          en: 'Please enter your CNP (Personal Numeric Code)',
-          ro: 'Te rugăm să introduci CNP-ul tău (Codul Numeric Personal)',
-        },
-        helpText: {
-          en: 'Your 13-digit personal identification number. Required for insurance regulatory compliance.',
-          ro: 'Codul tău numeric personal din 13 cifre. Necesar pentru conformitatea cu reglementările de asigurări.',
-        },
-        type: 'OPEN_ENDED',
-        orderIndex: 0,
-        validationRules: { pattern: '^[1-9]\\d{12}$', minLength: 13, maxLength: 13 },
-      },
       {
         code: 'DNT_INCOME_SOURCE',
         text: {
@@ -295,7 +286,7 @@ export async function seedQuestions(prisma: PrismaClient) {
       },
     ],
   )
-  console.log('    dnt_general: 6 questions')
+  console.log('    dnt_general: 5 questions')
 
   // ── 3. dnt_life_type — Life insurance subtype (1 question) ────────
   await seedGroup(

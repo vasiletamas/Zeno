@@ -32,8 +32,6 @@ interface ReviewCard {
   payload: { sessionId: string; answers: ReviewAnswer[]; progress: { answered: number; total: number } }
 }
 
-const RAW_CNP = '1980418089861'
-
 async function openSession(customerId: string, conversationId: string) {
   const opened = await executeCommit({ tool: 'open_dnt_session', args: {}, actor: 'agent', customerId, conversationId, toolContext: ctx(customerId, conversationId) })
   if (opened.outcome !== 'applied') throw new Error(`fixture open failed: ${JSON.stringify(opened)}`)
@@ -49,8 +47,7 @@ async function answerAllViaGateway(customerId: string, conversationId: string) {
     const d = n.data as { complete: boolean; question: { code: string | null; type: string; options: unknown } | null }
     if (d.complete || !d.question?.code) break
     let value = 'da'
-    if (d.question.code === 'DNT_CNP') value = RAW_CNP
-    else if (d.question.type === 'NUMBER') value = '0'
+    if (d.question.type === 'NUMBER') value = '0'
     else if (Array.isArray(d.question.options) && d.question.options[0]) {
       const first = d.question.options[0] as { value?: unknown } | string
       value = typeof first === 'string' ? first : String((first as { value?: unknown }).value ?? 'da')
@@ -89,11 +86,8 @@ it('the write_dnt_answer commit that answers the LAST question carries show_dnt_
   expect(consent.question).toHaveProperty('ro')
   expect(consent.question).toHaveProperty('en')
 
-  // the CNP is shown as STORED — masked, never the raw identifier
-  const cnp = card!.payload.answers.find((a) => a.code === 'DNT_CNP')
-  expect(cnp).toBeTruthy()
-  expect(cnp!.value).toContain('*')
-  expect(cnp!.value).not.toBe(RAW_CNP)
+  // T28: the questionnaire never asks the CNP — no DNT_CNP row on the card
+  expect(card!.payload.answers.find((a) => a.code === 'DNT_CNP')).toBeUndefined()
 })
 
 it('get_dnt_next_question on a complete session emits the SAME review card and the completion message', async () => {
@@ -134,9 +128,6 @@ it('an all-prefilled UPDATE open_dnt_session emits the review card for the NEW s
   expect(card?.type).toBe('show_dnt_review')
   expect(card?.payload.sessionId).toBe(data.sessionId)
   expect(card?.payload.progress.answered).toBe(card?.payload.progress.total)
-  // the pre-filled CNP is the stored MASK, shown as-is
-  const cnp = card!.payload.answers.find((a) => a.code === 'DNT_CNP')
-  expect(cnp?.value).toContain('*')
   // the message says the card is shown and forbids prose confirmation / self-sign
   expect(data._message).toContain('review card')
   expect(data._message).toContain('do NOT call sign_dnt yourself')

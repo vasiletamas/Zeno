@@ -144,7 +144,6 @@ const DNT_CARD_ANSWERS: Record<string, string> = {
   DNT_CONSULTATION_CONSENT: 'yes_all',
   DNT_MARKETING_CONSENT: 'no',
   DNT_ELECTRONIC_COMMUNICATION: 'yes',
-  DNT_CNP: '1960229410015',
   DNT_INCOME_SOURCE: 'salary_pension',
   DNT_OCCUPATION: 'employee',
   DNT_FAMILY_SIZE: '2',
@@ -407,12 +406,8 @@ async function dntTypedFlowDbChecks(customerId: string, conversationId: string):
   for (const a of answers) {
     const code = a.question.code
     if (!code) continue
-    // P0-3 (merge): the DNT_CNP at-rest form is the MASK on both paths —
-    // compare mask to mask; the raw CNP never lands in the regulatory record.
-    const expectedRaw = DNT_CARD_ANSWERS[code]
-    const expected = code === 'DNT_CNP' && expectedRaw !== undefined
-      ? (await import('@/lib/security/encryption')).maskCnp(expectedRaw)
-      : expectedRaw
+    // T28: DNT_CNP is gone from the questionnaire — no mask special case left.
+    const expected = DNT_CARD_ANSWERS[code]
     if (expected !== undefined && a.value !== expected) {
       failures.push(`fact divergence at ${code}: typed path stored "${a.value}", card path stores "${expected}"`)
     }

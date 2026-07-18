@@ -24,7 +24,9 @@ export type QuoteIssueDecision =
   | { outcome: 'requires_identity'; needs: string[] }
 
 export function decideQuoteIssue(i: QuoteDecisionInput): QuoteIssueDecision {
-  if (!i.identity.hasDobOrCnp) return { outcome: 'requires_identity', needs: ['declared:cnp_or_dob'] }
+  // T28: the wording mirrors the #1 row's anyDeclaredOf join — declaredAge
+  // (the age asked directly) satisfies the gate like a DOB or CNP would.
+  if (!i.identity.hasDobOrCnp) return { outcome: 'requires_identity', needs: ['declared:cnp_or_dateOfBirth_or_declaredAge'] }
   if (!i.consents.gdprProcessing || !i.dnt.validForProductType) return { outcome: 'rejected', reason: 'compliance_block' }
   if (i.eligibility.verdict === 'ineligible') return { outcome: 'rejected', reason: i.eligibility.failedRules[0]?.reason ?? 'ineligible' }
   if (i.eligibility.verdict === 'unknown') return { outcome: 'requires_identity', needs: i.eligibility.missingFacts.map(f => `declared:${f}`) }

@@ -1180,12 +1180,16 @@ registerTool('change_payment_option', {
 // --- Data Collection ---
 
 registerTool('collect_customer_field', {
-  description: 'Validate and save a single customer data field (name, cnp, email, phone, dateOfBirth). Returns the next field to collect or success when all are done.',
+  description:
+    'Validate and save a single customer data field. Pre-acceptance collection is email and phone ONLY (the card ladder). ' +
+    'The customer\'s AGE is asked directly in conversation ("câți ani ai?") and saved as field declaredAge (integer); ' +
+    'residency ("locuiești în România?") saves as field residency with value "Romania". ' +
+    'NEVER ask for the CNP, full name, or birth date — those arrive automatically from the ID document with document-grade provenance; save them only if the customer volunteers one unprompted.',
   parameters: {
     type: 'object',
     properties: {
-      field: { type: 'string', description: 'Field to save: name, cnp, dateOfBirth, email, phone, address.' },
-      value: { type: 'string', description: 'The value for the field.' },
+      field: { type: 'string', description: 'Field to save: email, phone, declaredAge, residency (plus name, cnp, dateOfBirth, address ONLY for values the customer volunteered unprompted).' },
+      value: { type: 'string', description: 'The value for the field. declaredAge: the age in years as digits (e.g. "35"). residency: "Romania".' },
     },
     required: ['field', 'value'],
     additionalProperties: false,

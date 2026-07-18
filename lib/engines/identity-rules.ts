@@ -4,31 +4,34 @@
  * (which puts the derived tier on DomainSnapshot.identity) and by
  * deriveAndExpose / the A2 gateway through the identity-requirements rows
  * (requires_identity blocking with a needs payload).
+ *
+ * T28 (P5.1) data minimization: the pre-acceptance tiers are CONTACT tiers —
+ * 'declared' = email+phone present without conflict; 'verified_channel'
+ * additionally demands ≥1 consumed challenge. CNP validity no longer gates
+ * tiers: the CNP arrives document-grade via ID extraction (T27), so the
+ * pre-acceptance ladder must be climbable without it — a CNP checksum gate
+ * here would wall the funnel behind data nobody is allowed to ask by mouth.
  */
 
-import { validateCnpChecksum, cnpMatchesDob } from '@/lib/engines/cnp-validation'
 import { IDENTITY_REQUIREMENTS, evaluateRow, KYC_FIELDS } from '@/lib/engines/identity-requirements'
 import type { IdentityTier } from '@/lib/engines/domain-types'
 
 export { IDENTITY_REQUIREMENTS }
 
 export interface IdentityFacts {
-  fields: Partial<Record<'name' | 'cnp' | 'dateOfBirth' | 'email' | 'phone', { value: string; provenance: 'declared' | 'verified' | 'conflict' }>>
+  fields: Partial<Record<'name' | 'cnp' | 'dateOfBirth' | 'declaredAge' | 'email' | 'phone', { value: string; provenance: 'declared' | 'verified' | 'conflict' }>>
   verifiedChannels: ('email' | 'sms')[]
 }
 
 const KYC: (keyof IdentityFacts['fields'])[] = [...KYC_FIELDS]
 
 export function deriveIdentityTier(f: IdentityFacts): IdentityTier {
-  const all = KYC.every((k) => f.fields[k] && f.fields[k]!.provenance !== 'conflict')
-  const cnp = f.fields.cnp?.value
-  const dob = f.fields.dateOfBirth?.value
-  const cnpOk = !!cnp && validateCnpChecksum(cnp) && (!dob || cnpMatchesDob(cnp, new Date(dob)) !== false)
-  if (!all || !cnpOk) return 'anonymous'
+  const contact = KYC.every((k) => f.fields[k] && f.fields[k]!.provenance !== 'conflict')
+  if (!contact) return 'anonymous'
   return f.verifiedChannels.length > 0 ? 'verified_channel' : 'declared'
 }
 
-/** The KYC fields still missing (or in conflict) — surfaced to the GUI/profile payloads. */
+/** The KYC (contact) fields still missing (or in conflict) — surfaced to the GUI/profile payloads. */
 export function missingIdentityFields(f: IdentityFacts): string[] {
   return KYC.filter((k) => !f.fields[k] || f.fields[k]!.provenance === 'conflict')
 }

@@ -211,7 +211,6 @@ export const DEFAULT_ANSWERS: Record<string, string> = {
   DNT_ELECTRONIC_COMMUNICATION: 'true',
 
   // Personal data
-  DNT_CNP: '1880515123456',
   DNT_INCOME_SOURCE: 'salary_pension',
   DNT_OCCUPATION: 'employee',
   DNT_FAMILY_SIZE: '4',

@@ -38,7 +38,7 @@ const emittedInSource = () => {
 /** Minimal adaptable payload per client-posted type — keyed exactly by the registry. */
 const CLIENT_ACTION_FIXTURES: Record<string, Record<string, unknown>> = {
   select_tier: { tierCode: 'standard', levelCode: 'l1' },
-  answer_question: { answer: 'da', questionId: 'q1', questionCode: 'DNT_CNP', groupType: 'application' },
+  answer_question: { answer: 'da', questionId: 'q1', questionCode: 'DNT_FAMILY_SIZE', groupType: 'application' },
   medical_batch: { answers: { BD_CANCER_HISTORY: 'false', BD_CARDIOVASCULAR: 'true' } },
   accept_quote: { paymentOption: 'annual' },
   cancel_quote: {},

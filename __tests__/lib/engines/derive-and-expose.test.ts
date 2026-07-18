@@ -26,10 +26,15 @@ describe('deriveAndExpose — exposure over the FULL snapshot (contradiction #12
     const r = deriveAndExpose(makeSnapshot({ application: doneApp, dnt: validDnt, identity, consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true } }))
     expect(r.actions.available).toContain('generate_quote')
   })
-  it('generate_quote blocked requires_identity with declared:cnp_or_dateOfBirth when neither is declared (#1 row, B3.2)', () => {
+  it('generate_quote blocked requires_identity with declared:cnp_or_dateOfBirth_or_declaredAge when none is declared (#1 row, B3.2 + T28)', () => {
     const r = deriveAndExpose(makeSnapshot({ application: doneApp, dnt: validDnt, consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true } }))
     expect(r.actions.available).not.toContain('generate_quote')
-    expect(r.actions.blocked).toContainEqual(expect.objectContaining({ action: 'generate_quote', reason: 'requires_identity', params: { needs: ['declared:cnp_or_dateOfBirth'] } }))
+    expect(r.actions.blocked).toContainEqual(expect.objectContaining({ action: 'generate_quote', reason: 'requires_identity', params: { needs: ['declared:cnp_or_dateOfBirth_or_declaredAge'] } }))
+  })
+  it('T28: a declared AGE alone satisfies the generate_quote identity row', () => {
+    const identity = { tier: 'anonymous' as const, fields: { declaredAge: { provenance: 'declared' as const } }, verifiedChannels: [] as ('email' | 'sms')[], pendingChallenge: null }
+    const r = deriveAndExpose(makeSnapshot({ application: doneApp, dnt: validDnt, identity, consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true } }))
+    expect(r.actions.available).toContain('generate_quote')
   })
   // 2026-07-06 battery wall: the customer verified the email yet accept_quote
   // still said needs ['verified_channel'] — the agent gave up on the close.

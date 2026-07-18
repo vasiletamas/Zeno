@@ -54,7 +54,7 @@ describe('generate_quote commit (D1.4)', () => {
     const fx = await buildReadyApplication({ withoutDob: true })
     const res = await gq(fx)
     expect(res.outcome).toBe('requires_identity')
-    expect(res.needs).toContain('declared:cnp_or_dateOfBirth') // B3 needs vocabulary (pinned literal adapted)
+    expect(res.needs).toContain('declared:cnp_or_dateOfBirth_or_declaredAge') // B3 needs vocabulary (T28 tri-field)
     expect(await prisma.quote.findUnique({ where: { applicationId: fx.applicationId } })).toBeNull()
   })
 

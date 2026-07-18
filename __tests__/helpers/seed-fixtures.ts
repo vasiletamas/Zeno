@@ -21,6 +21,10 @@ export async function seedReferredApplication() {
   // #1 identity row (B3.2): generate_quote needs a declared cnp-or-dob — a
   // real pre-referral applicant declared these on the way to the quote.
   await setDeclaredField(customerId, 'dateOfBirth', '1990-01-01', 'fixture')
+  // T28: with DNT_CNP gone nothing infers residency from a CNP anymore
+  // (snapshot-loader's cnp→Romania fallback) — the eligibility fact is asked
+  // by mouth pre-quote, so the fixture declares it like a real applicant did.
+  await setDeclaredField(customerId, 'residency', 'Romania', 'fixture')
 
   const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: conversationId } })
   const productId = conversation.productId

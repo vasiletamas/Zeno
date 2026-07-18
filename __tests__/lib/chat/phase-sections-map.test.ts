@@ -98,8 +98,8 @@ describe('formatDerivedBriefing (new vocabulary)', () => {
     expect(text.toLowerCase()).toContain('already-answered')
   })
   it('briefing renders the pending DNT question code during APPLICATION/DNT too', () => {
-    const r = deriveAndExpose(makeSnapshot({ application: { id: 'a', status: 'OPEN', tier: null, level: null, addon: null, answeredCount: 0, requiredCount: 6, missingCodes: ['Q1'], frozen: false }, dnt: { signed: false, valid: false, validUntil: null, coversProductTypes: [], answeredCount: 2, totalCount: 5, sessionActive: true, latest: null, activeSessionId: 's1', sessionType: 'NEW', sessionAnswered: 2, sessionTotal: 5, facts: {}, pendingCode: 'DNT_CNP' } }))
-    expect(formatDerivedBriefing(r.state, r.actions)).toContain('DNT current question code: DNT_CNP')
+    const r = deriveAndExpose(makeSnapshot({ application: { id: 'a', status: 'OPEN', tier: null, level: null, addon: null, answeredCount: 0, requiredCount: 6, missingCodes: ['Q1'], frozen: false }, dnt: { signed: false, valid: false, validUntil: null, coversProductTypes: [], answeredCount: 2, totalCount: 5, sessionActive: true, latest: null, activeSessionId: 's1', sessionType: 'NEW', sessionAnswered: 2, sessionTotal: 5, facts: {}, pendingCode: 'DNT_INCOME_SOURCE' } }))
+    expect(formatDerivedBriefing(r.state, r.actions)).toContain('DNT current question code: DNT_INCOME_SOURCE')
   })
   it('briefing omits the code line when no DNT session is active', () => {
     const r = deriveAndExpose(makeSnapshot())

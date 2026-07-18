@@ -26,5 +26,5 @@ it('subtype gating is now enforced: simple_protection hides financial/investment
   const subtype = await prisma.question.findFirstOrThrow({ where: { code: 'DNT_LIFE_SUBTYPE' } })
   await prisma.dntAnswer.create({ data: { sessionId: s.id, questionId: subtype.id, value: 'simple_protection' } })
   const total = (await calculateProgress(codes, { kind: 'dntSession', sessionId: s.id })).total
-  expect(total).toBe(10) // 3 consent + 6 general + 1 subtype; 16 gated questions hidden
+  expect(total).toBe(9) // 3 consent + 5 general (T28 removed DNT_CNP) + 1 subtype; 16 gated questions hidden
 })

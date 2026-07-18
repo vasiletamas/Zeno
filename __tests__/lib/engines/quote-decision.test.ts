@@ -16,9 +16,9 @@ describe('decideQuoteIssue', () => {
   it('issues when everything passes', () => {
     expect(decideQuoteIssue(base)).toEqual({ outcome: 'issued' })
   })
-  it('missing DOB/CNP -> requires_identity with needs payload (never the silent age-30 fallback)', () => {
+  it('unknown age -> requires_identity with needs payload (never the silent age-30 fallback); wording matches the #1 row (T28)', () => {
     expect(decideQuoteIssue({ ...base, identity: { hasDobOrCnp: false } }))
-      .toEqual({ outcome: 'requires_identity', needs: ['declared:cnp_or_dob'] })
+      .toEqual({ outcome: 'requires_identity', needs: ['declared:cnp_or_dateOfBirth_or_declaredAge'] })
   })
   it('failed eligibility rule -> rejected with the C2 reason (incl. addon age-band no-match)', () => {
     const r = decideQuoteIssue({ ...base, eligibility: { verdict: 'ineligible', failedRules: [{ rule: 'age_max', reason: 'ineligible_age_maximum' }], missingFacts: [] } })

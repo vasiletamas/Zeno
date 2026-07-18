@@ -1,10 +1,7 @@
 import { it, expect, beforeEach } from 'vitest'
-import { prisma } from '@/lib/db'
-import { resetDb, createCustomer, resetFunnelTables } from '@/__tests__/helpers/test-db'
+import { createCustomer, resetFunnelTables } from '@/__tests__/helpers/test-db'
 import { collectCustomerField } from '@/lib/tools/handlers/data-handlers'
-import { openDntSession, writeDntAnswer, getDntNextQuestion } from '@/lib/tools/handlers/dnt-handlers'
-import { setDeclaredField } from '@/lib/customer/profile-service'
-import type { ToolContext } from '@/lib/tools/types'
+import { getProfile, setDeclaredField } from '@/lib/customer/profile-service'
 
 beforeEach(async () => { await resetFunnelTables() })
 
@@ -32,30 +29,25 @@ it('accepts a consistent CNP', async () => {
   expect((await collectCustomerField({ field: 'cnp', value: '1980418089861' }, ctx(c.id))).success).toBe(true)
 })
 
-// P0-4 (2026-07-06): the DNT path previously accepted checksum-invalid CNPs
-// silently (and silently skipped the profile mirror), while the identity path
-// rejected the SAME value — contradictory treatment of the same input, and an
-// unusable identifier persisted into the regulatory record.
-it('write_dnt_answer rejects a checksum-invalid DNT_CNP with the same precise reason as collect_customer_field', async () => {
-  await resetDb() // needs the seeded question groups
-  const c = await prisma.customer.create({ data: { isAnonymous: true, language: 'ro' } })
-  const p = await prisma.product.findFirstOrThrow()
-  const conv = await prisma.conversation.create({ data: { customerId: c.id, candidateProductId: p.id } })
-  const tctx = { customerId: c.id, conversationId: conv.id, language: 'ro', db: prisma, actor: 'gui' } as unknown as ToolContext
-  const opened = await openDntSession({}, tctx)
-  expect(opened.success).toBe(true)
-  // answer up to DNT_CNP
-  for (let i = 0; i < 10; i++) {
-    const n = await getDntNextQuestion({}, tctx)
-    const q = (n.data as { question: { code: string; options: unknown } | null }).question
-    if (!q) throw new Error('ran out of questions before DNT_CNP')
-    if (q.code === 'DNT_CNP') break
-    const opts = Array.isArray(q.options) ? (q.options as { value?: unknown }[]) : []
-    await writeDntAnswer({ questionCode: q.code, value: String(opts[0]?.value ?? 'da') }, tctx)
-  }
-  const bad = await writeDntAnswer({ questionCode: 'DNT_CNP', value: '1960229410014' }, tctx)
-  expect(bad.success).toBe(false)
-  expect(bad.error).toContain('cnp_checksum_invalid')
-  const good = await writeDntAnswer({ questionCode: 'DNT_CNP', value: '1960229410015' }, tctx)
-  expect(good.success).toBe(true)
+// T28 (P5.1): the DNT no longer asks the CNP at all (data minimization —
+// the CNP arrives document-grade via ID extraction). The write_dnt_answer
+// CNP special-cases died with the question; collect_customer_field above
+// remains the ONLY by-mouth CNP path (kept for volunteered values).
+
+// T28: the quote rates on the declared AGE asked directly ("câți ani ai?") —
+// collect_customer_field accepts field 'declaredAge' as an integer 18-120.
+it('collect_customer_field accepts declaredAge (integer 18-120) and writes it to the profile store', async () => {
+  const c = await createCustomer()
+  const r = await collectCustomerField({ field: 'declaredAge', value: '35' }, ctx(c.id))
+  expect(r.success).toBe(true)
+  const profile = await getProfile(c.id)
+  expect(profile.fields.declaredAge?.value).toBe('35')
+})
+
+it('collect_customer_field rejects a non-integer or out-of-range declaredAge', async () => {
+  const c = await createCustomer()
+  expect((await collectCustomerField({ field: 'declaredAge', value: 'treizeci' }, ctx(c.id))).success).toBe(false)
+  expect((await collectCustomerField({ field: 'declaredAge', value: '17' }, ctx(c.id))).success).toBe(false)
+  expect((await collectCustomerField({ field: 'declaredAge', value: '121' }, ctx(c.id))).success).toBe(false)
+  expect((await collectCustomerField({ field: 'declaredAge', value: '35.5' }, ctx(c.id))).success).toBe(false)
 })

@@ -96,13 +96,15 @@ export async function setVerifiedField(customerId: string, field: ProfileFieldNa
  * invalidated/expired challenges never count.
  */
 export async function getIdentityFacts(customerId: string, db: Db = prisma): Promise<{
-  fields: Partial<Record<'name' | 'cnp' | 'dateOfBirth' | 'email' | 'phone', { value: string; provenance: 'declared' | 'verified' | 'conflict' }>>
+  fields: Partial<Record<'name' | 'cnp' | 'dateOfBirth' | 'declaredAge' | 'email' | 'phone', { value: string; provenance: 'declared' | 'verified' | 'conflict' }>>
   verifiedChannels: ('email' | 'sms')[]
 }> {
   const rows = await db.customerProfileField.findMany({ where: { customerId } })
   const fields: Record<string, { value: string; provenance: 'declared' | 'verified' | 'conflict' }> = {}
   for (const r of rows) {
-    if (!['name', 'cnp', 'dateOfBirth', 'email', 'phone'].includes(r.field)) continue
+    // declaredAge included (T28): the generate_quote row's anyDeclaredOf
+    // reads it through the snapshot identity slice.
+    if (!['name', 'cnp', 'dateOfBirth', 'declaredAge', 'email', 'phone'].includes(r.field)) continue
     fields[r.field] = { value: decodeFieldValue(r.field, r.value), provenance: r.provenance as 'declared' | 'verified' | 'conflict' }
   }
   const consumed = await db.verificationChallenge.findMany({
