@@ -34,6 +34,20 @@ function mintAnonymous() {
   return prisma.customer.create({ data: { isAnonymous: true, language: 'ro' } })
 }
 
+/**
+ * T21: resume-by-default — a resumed session points the entry page at the
+ * customer's latest ACTIVE conversation (null when none). Only the resume
+ * paths carry this; reauth_required and fresh mints never do.
+ */
+async function latestActiveConversationId(customerId: string): Promise<string | null> {
+  const conv = await prisma.conversation.findFirst({
+    where: { customerId, status: 'ACTIVE' },
+    orderBy: { lastActivityAt: 'desc' },
+    select: { id: true },
+  })
+  return conv?.id ?? null
+}
+
 export async function POST(request: NextRequest) {
   const existingSession = request.cookies.get('zeno_session')
   const body = await request.json().catch(() => ({}))
@@ -52,7 +66,11 @@ export async function POST(request: NextRequest) {
       if (canonical) {
         const gate = await reauthGate(canonical.id)
         if (gate) return NextResponse.json({ status: 'reauth_required', maskedEmail: gate.maskedEmail })
-        const response = NextResponse.json({ customerId: canonical.id, isNew: false })
+        const response = NextResponse.json({
+          customerId: canonical.id,
+          isNew: false,
+          activeConversationId: await latestActiveConversationId(canonical.id),
+        })
         response.cookies.set('zeno_session', canonical.id, COOKIE_OPTS)
         return response
       }
@@ -60,7 +78,11 @@ export async function POST(request: NextRequest) {
     if (customer) {
       const gate = await reauthGate(customer.id)
       if (gate) return NextResponse.json({ status: 'reauth_required', maskedEmail: gate.maskedEmail })
-      return NextResponse.json({ customerId: customer.id, isNew: false })
+      return NextResponse.json({
+        customerId: customer.id,
+        isNew: false,
+        activeConversationId: await latestActiveConversationId(customer.id),
+      })
     }
   }
 

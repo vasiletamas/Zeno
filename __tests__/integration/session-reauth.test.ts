@@ -53,7 +53,8 @@ it('an account-holder cookie gets reauth_required with the masked email — neve
 it('an anonymous cookie (no linked User) still resumes silently', async () => {
   const c = await createCustomer({ isAnonymous: true })
   const res = await sessionPost(req('/api/session', { cookie: `zeno_session=${c.id}` }))
-  expect(await res.json()).toEqual({ customerId: c.id, isNew: false })
+  // T21: resumes also carry activeConversationId (null when no ACTIVE conversation)
+  expect(await res.json()).toEqual({ customerId: c.id, isNew: false, activeConversationId: null })
 })
 
 it('a merged-shell cookie follows the pointer, then the CANONICAL account demands reauth', async () => {

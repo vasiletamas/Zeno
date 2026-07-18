@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { X } from 'lucide-react'
 
@@ -16,7 +17,14 @@ export function ChatHeader() {
         <span className="text-[16px] font-medium text-night font-sans">Zeno</span>
       </div>
 
-      {/* Right: Close button */}
+      {/* Right: new-conversation link (T21 — /chat resumes by default) + Close button */}
+      <div className="flex items-center gap-2">
+      <Link
+        href="/chat?new=1"
+        className="text-sm text-muted hover:text-night underline underline-offset-2 transition-colors duration-150"
+      >
+        Conversație nouă
+      </Link>
       <button
         type="button"
         onClick={() => router.push('/')}
@@ -29,6 +37,7 @@ export function ChatHeader() {
       >
         <X className="w-5 h-5" />
       </button>
+      </div>
     </header>
   )
 }

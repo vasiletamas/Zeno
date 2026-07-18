@@ -1,4 +1,4 @@
-import { notFound } from 'next/navigation'
+import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/db'
 import { cookies } from 'next/headers'
 import ChatPage from '@/components/chat/chat-page'
@@ -31,7 +31,9 @@ export default async function ConversationPage({
     },
   })
 
-  if (!conversation) notFound()
+  // T21: a stray id (stale link, back-nav after merge) rejoins the funnel at
+  // /chat — which resumes the customer's open conversation — instead of 404ing.
+  if (!conversation) redirect('/chat')
 
   // Convert DB messages to ChatMessage format expected by ChatPage
   const initialMessages = conversation.messages.map((m) => ({

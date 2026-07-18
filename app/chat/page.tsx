@@ -1,22 +1,27 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useCallback, useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { SessionReauth, isReauthRequired, freshSessionRequest, type SessionInitResponse } from '@/components/chat/session-reauth'
+import { resolveEntryTarget } from '@/lib/chat/entry-target'
 
 /**
- * /chat — New conversation entry point.
+ * /chat — Conversation entry point.
  *
  * Client component that:
  * 1. Resolves or creates an anonymous session via POST /api/session
- * 2. Creates a new conversation via POST /api/chat/create
- * 3. Redirects to /chat/[conversationId]
+ * 2. T21: RESUMES the session's latest ACTIVE conversation when the session
+ *    response carries one (?new=1 opts out and forces a fresh conversation)
+ * 3. Otherwise creates a new conversation via POST /api/chat/create
+ * 4. Redirects to /chat/[conversationId]
  *
  * This is a client component because Next.js App Router server components
  * cannot set cookies and redirect in the same render pass.
  */
-export default function ChatEntry() {
+function ChatEntryInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const forceNew = searchParams.get('new') === '1'
   // T26: an account-holder cookie is challenged before the session resumes —
   // the entry renders the OTP prompt instead of silently continuing.
   const [reauthEmail, setReauthEmail] = useState<string | null>(null)
@@ -57,7 +62,14 @@ export default function ChatEntry() {
         }
         if (!session.customerId) throw new Error('Session API returned no customerId')
 
-        // 2-3. Create a new conversation and redirect
+        // 2. T21: resume the open conversation unless ?new=1 opted out
+        const target = resolveEntryTarget(session, forceNew)
+        if (target.kind === 'resume') {
+          router.replace(`/chat/${target.conversationId}`)
+          return
+        }
+
+        // 3-4. Create a new conversation and redirect
         await openConversation(session.customerId)
       } catch (error) {
         console.error('[ChatEntry] Failed to initialize chat:', error)
@@ -73,7 +85,7 @@ export default function ChatEntry() {
     return () => {
       cancelled = true
     }
-  }, [router, openConversation])
+  }, [router, openConversation, forceNew])
 
   if (reauthEmail) {
     return (
@@ -96,6 +108,10 @@ export default function ChatEntry() {
     )
   }
 
+  return <ChatEntryLoading />
+}
+
+function ChatEntryLoading() {
   return (
     <div className="h-dvh flex items-center justify-center bg-soft-white">
       <div className="flex flex-col items-center gap-3">
@@ -107,5 +123,14 @@ export default function ChatEntry() {
         <p className="text-muted text-sm font-sans">Se incarca...</p>
       </div>
     </div>
+  )
+}
+
+export default function ChatEntry() {
+  // useSearchParams demands a Suspense boundary during prerender
+  return (
+    <Suspense fallback={<ChatEntryLoading />}>
+      <ChatEntryInner />
+    </Suspense>
   )
 }

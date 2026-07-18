@@ -14,6 +14,8 @@ export interface SessionInitResponse {
   isNew?: boolean
   status?: 'reauth_required'
   maskedEmail?: string
+  /** T21: latest ACTIVE conversation on resume paths (null when none) */
+  activeConversationId?: string | null
 }
 
 export const isReauthRequired = (
