@@ -14,7 +14,8 @@
 import 'dotenv/config'
 import { prisma } from '@/lib/db'
 import { calculateQuote } from '@/lib/engines/quote-engine'
-import { derivePricingExamples, type PricingExampleGrid } from '@/lib/engines/pricing-examples'
+import { derivePricingExamples, pricingTreeNeedsFx, type PricingExampleGrid } from '@/lib/engines/pricing-examples'
+import { getFxProvider } from '@/lib/engines/fx'
 import { getToolHandler } from '@/lib/tools/registry'
 import { seedProductContent } from '@/prisma/seeds/seed-product-content'
 import type { ToolContext } from '@/lib/tools/types'
@@ -50,11 +51,14 @@ async function main() {
     tiers: product.pricingTiers.map((t) => ({
       code: t.code,
       name: t.name as { en: string; ro: string },
-      levels: t.levels.map((l) => ({ code: l.code, name: l.name as { en: string; ro: string }, premiumAnnual: l.premiumAnnual })),
+      levels: t.levels.map((l) => ({ code: l.code, name: l.name as { en: string; ro: string }, premiumAnnual: l.premiumAnnual, currency: l.currency })),
     })),
-    addonRules: (product.addons[0]?.pricingRules ?? []).map((r) => ({ minAge: r.minAge, maxAge: r.maxAge, premiumAnnual: r.premiumAnnual })),
+    addonRules: (product.addons[0]?.pricingRules ?? []).map((r) => ({ minAge: r.minAge, maxAge: r.maxAge, premiumAnnual: r.premiumAnnual, currency: r.currency })),
   }
-  const examples = derivePricingExamples(tree, grid)
+  // T18: the mixed-denomination rate card (T17: EUR addon tariffs) converts
+  // through ONE FX reference — derivation and recompute share it
+  const fx = pricingTreeNeedsFx(tree) ? await getFxProvider().getReference('EUR', 'RON') : null
+  const examples = derivePricingExamples(tree, grid, fx)
   const expectedCells = grid.samplePoints.length * grid.tiers.length * grid.levels.length
   check(`grid derives ${expectedCells} cells`, examples.length === expectedCells, { got: examples.length })
 
@@ -65,7 +69,7 @@ async function main() {
     const base = calculateQuote({
       tierCode: cell.tier, levelCode: cell.level, customerAge: cell.age, includesAddon: false,
       paymentFrequency: 'annual',
-      pricingLevel: { premiumAnnual: level.premiumAnnual, name: level.name },
+      pricingLevel: { premiumAnnual: level.premiumAnnual, name: level.name, currency: level.currency },
       pricingTier: { name: tier.name },
       baseCoverages: [], addonPricingRule: null, addonCoverages: [],
       quoteValidityDays: tree.quoteValidityDays,
@@ -79,10 +83,11 @@ async function main() {
       const withAddon = calculateQuote({
         tierCode: cell.tier, levelCode: cell.level, customerAge: cell.age, includesAddon: true,
         paymentFrequency: 'annual',
-        pricingLevel: { premiumAnnual: level.premiumAnnual, name: level.name },
+        pricingLevel: { premiumAnnual: level.premiumAnnual, name: level.name, currency: level.currency },
         pricingTier: { name: tier.name },
-        baseCoverages: [], addonPricingRule: { premiumAnnual: rule.premiumAnnual }, addonCoverages: [],
+        baseCoverages: [], addonPricingRule: { premiumAnnual: rule.premiumAnnual, currency: rule.currency }, addonCoverages: [],
         quoteValidityDays: tree.quoteValidityDays,
+        fx,
       })
       const w = cell.withAddon
       if (!w || !('premiumAnnual' in w) || w.premiumAnnual !== withAddon.premiumAnnual) {

@@ -22,7 +22,8 @@ import { logInfo } from '@/lib/errors/logger'
 import { calculateAge } from './age'
 import { workflowStepCodeFor } from './phase-sections-map'
 import { getPublishedProductContent, collectPublishedContentIds, registerPublishFlushHook } from '@/lib/products/product-content'
-import { derivePricingExamples, type PricingExampleGrid } from '@/lib/engines/pricing-examples'
+import { derivePricingExamples, pricingTreeNeedsFx, type PricingExampleGrid } from '@/lib/engines/pricing-examples'
+import { getFxProvider } from '@/lib/engines/fx'
 import type { PromptSections } from './prompt-builder'
 import type { DerivedStateV3 } from '@/lib/engines/domain-types'
 
@@ -284,20 +285,18 @@ export async function loadProductContext(
     parts.push('')
     parts.push('Pricing:')
     const grid = product.pricingExampleGrid as unknown as PricingExampleGrid | null
-    const examples = grid
-      ? derivePricingExamples(
-          {
-            quoteValidityDays: product.quoteValidityDays,
-            tiers: product.pricingTiers.map((t) => ({
-              code: t.code,
-              name: t.name as { en: string; ro: string },
-              levels: t.levels.map((l) => ({ code: l.code, name: l.name as { en: string; ro: string }, premiumAnnual: l.premiumAnnual })),
-            })),
-            addonRules: (product.addons[0]?.pricingRules ?? []).map((r) => ({ minAge: r.minAge, maxAge: r.maxAge, premiumAnnual: r.premiumAnnual })),
-          },
-          grid,
-        )
-      : []
+    // T18: currency projections + one FX reference when denominations mix
+    const pricingTree = {
+      quoteValidityDays: product.quoteValidityDays,
+      tiers: product.pricingTiers.map((t) => ({
+        code: t.code,
+        name: t.name as { en: string; ro: string },
+        levels: t.levels.map((l) => ({ code: l.code, name: l.name as { en: string; ro: string }, premiumAnnual: l.premiumAnnual, currency: l.currency })),
+      })),
+      addonRules: (product.addons[0]?.pricingRules ?? []).map((r) => ({ minAge: r.minAge, maxAge: r.maxAge, premiumAnnual: r.premiumAnnual, currency: r.currency })),
+    }
+    const pricingFx = grid && pricingTreeNeedsFx(pricingTree) ? await getFxProvider().getReference('EUR', 'RON') : null
+    const examples = grid ? derivePricingExamples(pricingTree, grid, pricingFx) : []
     if (examples.length > 0) {
       const bases = examples.map((e) => e.base.premiumAnnual)
       const withAddon = examples

@@ -14,6 +14,7 @@ import { getProductDisclosureDocuments } from '@/lib/documents/registry'
 import { toQuoteCoverageRow, type QuoteCoverageRow } from '@/lib/products/coverage-display'
 import { evaluateEligibility } from '@/lib/engines/eligibility'
 import { deriveSuitability, engineVersion } from '@/lib/engines/derive-and-expose'
+import { getFxProvider } from '@/lib/engines/fx'
 import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { loadMedicalDeclarationState } from '@/lib/engines/medical-declaration-state'
 import { getAgeWithSource } from '@/lib/customer/profile-service'
@@ -149,7 +150,7 @@ export const generateQuote: ToolHandler = async (_args, context) => {
         },
       }))
 
-    let addonPricingRule: { premiumAnnual: number } | null = null
+    let addonPricingRule: { premiumAnnual: number; currency: string } | null = null
     let addonBand: { minAge: number; maxAge: number } | null = null
     let addonCoverages: QuoteCoverageRow[] = []
     if (application.includesAddon) {
@@ -160,7 +161,7 @@ export const generateQuote: ToolHandler = async (_args, context) => {
       if (addon) {
         const matchingRule = addon.pricingRules.find(r => customerAge >= r.minAge && customerAge <= r.maxAge)
         if (matchingRule) {
-          addonPricingRule = { premiumAnnual: matchingRule.premiumAnnual }
+          addonPricingRule = { premiumAnnual: matchingRule.premiumAnnual, currency: matchingRule.currency }
           addonBand = { minAge: matchingRule.minAge, maxAge: matchingRule.maxAge }
         }
         addonCoverages = addon.coverageAmounts.map(ca => toQuoteCoverageRow({
@@ -178,18 +179,25 @@ export const generateQuote: ToolHandler = async (_args, context) => {
     }
 
     const product = await context.db.product.findUnique({ where: { id: application.productId } })
+    // T18: a mixed-denomination rate card (EUR addon tariff vs RON level)
+    // demands the FX reference BEFORE anything is priced or written — the
+    // default FixedFxProvider answers from env, only FX_PROVIDER=bnr fetches.
+    const fx = addonPricingRule && addonPricingRule.currency !== pricingLevel.currency
+      ? await getFxProvider().getReference('EUR', 'RON')
+      : null
     const quoteInput: QuoteInput = {
       tierCode: pricingLevel.tier.code,
       levelCode: pricingLevel.code,
       customerAge,
       includesAddon: application.includesAddon,
       paymentFrequency: 'annual', // display default; the CONTRACT frequency is elected at accept (T7.D3)
-      pricingLevel: { premiumAnnual: pricingLevel.premiumAnnual, name: pricingLevel.name as { en: string; ro: string } },
+      pricingLevel: { premiumAnnual: pricingLevel.premiumAnnual, name: pricingLevel.name as { en: string; ro: string }, currency: pricingLevel.currency },
       pricingTier: { name: pricingLevel.tier.name as { en: string; ro: string } },
       baseCoverages,
       addonPricingRule,
       addonCoverages,
       quoteValidityDays: product?.quoteValidityDays ?? 30,
+      fx,
     }
     const result = calculateQuote(quoteInput)
 
@@ -210,7 +218,7 @@ export const generateQuote: ToolHandler = async (_args, context) => {
       // no required sensitive set (addon off) → null, not a hash of nothing
       medicalAnswersHash: medical.requiredCodes.length > 0 ? medical.currentHash : null,
       dntId: snapshot.dnt.latest?.id ?? null,
-      fx: null as { rate: number; date: string; source: string } | null, // T18 fills this
+      fx: result.fx, // T18: the reference the conversion ACTUALLY used (null when same-currency)
       engineVersion,
       computedAt: new Date().toISOString(),
     }

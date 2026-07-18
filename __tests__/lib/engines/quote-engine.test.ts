@@ -7,7 +7,10 @@ import { calculateQuote, type QuoteInput } from '@/lib/engines/quote-engine'
 
 /**
  * Build a QuoteInput with sensible defaults.
- * Pricing data matches prisma/seeds/seed-product.ts exactly.
+ * Pricing data matches prisma/seeds/seed-product.ts exactly — T17: the
+ * addon rate card is denominated in EUR (its true denomination), so
+ * addon-inclusive cases carry the currencies + the default fixed FX
+ * reference (5.06 RON/EUR) and expect CONVERTED premiums.
  */
 function buildInput(overrides: Partial<QuoteInput> = {}): QuoteInput {
   return {
@@ -36,6 +39,12 @@ const addonCoverages = [
   { code: 'HOSPITALIZATION_ABROAD', name: { en: 'Daily hospitalization abroad', ro: 'Indemnizație spitalizare' }, amount: 100, currency: 'EUR' },
   { code: 'POST_TREATMENT_MEDICATION', name: { en: 'Post-treatment medication', ro: 'Medicație post-tratament' }, amount: 50000, currency: 'EUR' },
 ]
+
+// T17: the seeded rate card's true shape — RON level, EUR addon tariff,
+// converted through the default fixed reference (FX_EUR_RON 5.06)
+const RON_LEVEL_1 = { premiumAnnual: 190, name: { en: 'Level I', ro: 'Nivelul I' }, currency: 'RON' }
+const FX_506 = { rate: 5.06, date: '2026-07-17', source: 'fixed:env' }
+const eurAddonRule = (premiumAnnual: number) => ({ premiumAnnual, currency: 'EUR' })
 
 // ==========================================
 // Tests
@@ -72,52 +81,60 @@ describe('calculateQuote', () => {
     expect(result.basePremiumAnnual).toBe(430)
   })
 
-  // Test 4: Standard Level I + addon (age 25, band 18-30 = 200 RON)
-  it('calculates Standard Level I with addon age 25: premiumAnnual = 390', () => {
+  // Test 4: Standard Level I + addon (age 25, band 18-30 = 200 EUR → 1012 RON @5.06)
+  it('calculates Standard Level I with addon age 25: premiumAnnual = 190 + 200*5.06 = 1202', () => {
     const result = calculateQuote(buildInput({
       customerAge: 25,
       includesAddon: true,
-      addonPricingRule: { premiumAnnual: 200 },
+      pricingLevel: RON_LEVEL_1,
+      addonPricingRule: eurAddonRule(200),
       addonCoverages,
+      fx: FX_506,
     }))
-    expect(result.premiumAnnual).toBe(390)
+    expect(result.premiumAnnual).toBe(1202)
     expect(result.basePremiumAnnual).toBe(190)
-    expect(result.addonPremiumAnnual).toBe(200)
+    expect(result.addonPremiumAnnual).toBe(1012)
   })
 
-  // Test 5: Standard Level I + addon (age 50, band 46-55 = 500 RON)
-  it('calculates Standard Level I with addon age 50: premiumAnnual = 690', () => {
+  // Test 5: Standard Level I + addon (age 50, band 46-55 = 500 EUR → 2530 RON @5.06)
+  it('calculates Standard Level I with addon age 50: premiumAnnual = 190 + 500*5.06 = 2720', () => {
     const result = calculateQuote(buildInput({
       customerAge: 50,
       includesAddon: true,
-      addonPricingRule: { premiumAnnual: 500 },
+      pricingLevel: RON_LEVEL_1,
+      addonPricingRule: eurAddonRule(500),
       addonCoverages,
+      fx: FX_506,
     }))
-    expect(result.premiumAnnual).toBe(690)
+    expect(result.premiumAnnual).toBe(2720)
     expect(result.basePremiumAnnual).toBe(190)
-    expect(result.addonPremiumAnnual).toBe(500)
+    expect(result.addonPremiumAnnual).toBe(2530)
   })
 
   // Test 6: Payment frequency — monthly
-  it('calculates premiumMonthly = round(390/12, 2) = 32.5', () => {
+  it('calculates premiumMonthly = round(1202/12, 2) = 100.17', () => {
     const result = calculateQuote(buildInput({
       includesAddon: true,
-      addonPricingRule: { premiumAnnual: 200 },
+      pricingLevel: RON_LEVEL_1,
+      addonPricingRule: eurAddonRule(200),
       addonCoverages,
+      fx: FX_506,
     }))
-    expect(result.premiumAnnual).toBe(390)
-    expect(result.premiumMonthly).toBe(32.5)
+    expect(result.premiumAnnual).toBe(1202)
+    expect(result.premiumMonthly).toBe(100.17)
   })
 
   // Test 7: Payment frequency — quarterly
-  it('calculates premiumQuarterly = round(390/4, 2) = 97.5', () => {
+  it('calculates premiumQuarterly = round(1202/4, 2) = 300.5', () => {
     const result = calculateQuote(buildInput({
       paymentFrequency: 'quarterly',
       includesAddon: true,
-      addonPricingRule: { premiumAnnual: 200 },
+      pricingLevel: RON_LEVEL_1,
+      addonPricingRule: eurAddonRule(200),
       addonCoverages,
+      fx: FX_506,
     }))
-    expect(result.premiumQuarterly).toBe(97.5)
+    expect(result.premiumQuarterly).toBe(300.5)
   })
 
   // Test 8: No addon (null rule) → addonPremiumAnnual = 0
@@ -177,19 +194,71 @@ describe('calculateQuote', () => {
   })
 
   // Test: Semi-annual calculation
-  it('calculates premiumSemiAnnual = round(690/2, 2) = 345', () => {
+  it('calculates premiumSemiAnnual = round(2720/2, 2) = 1360', () => {
     const result = calculateQuote(buildInput({
       customerAge: 50,
       includesAddon: true,
-      addonPricingRule: { premiumAnnual: 500 },
+      pricingLevel: RON_LEVEL_1,
+      addonPricingRule: eurAddonRule(500),
       addonCoverages,
+      fx: FX_506,
     }))
-    expect(result.premiumSemiAnnual).toBe(345)
+    expect(result.premiumSemiAnnual).toBe(1360)
   })
 
   // Test: Monthly for 190 (not evenly divisible by 12)
   it('calculates premiumMonthly for 190 = round(190/12, 2) = 15.83', () => {
     const result = calculateQuote(buildInput())
     expect(result.premiumMonthly).toBe(15.83)
+  })
+
+  // ── T18 (P4.2): currency guard + FX conversion ──────────────────────────
+
+  describe('T18: currency guard', () => {
+    it('same-currency addon: math unchanged, a supplied fx is ignored and NOT echoed', () => {
+      const result = calculateQuote(buildInput({
+        includesAddon: true,
+        pricingLevel: { premiumAnnual: 190, name: { en: 'Level I', ro: 'Nivelul I' }, currency: 'RON' },
+        addonPricingRule: { premiumAnnual: 200, currency: 'RON' },
+        addonCoverages,
+        fx: { rate: 5.06, date: '2026-07-17', source: 'fixed:env' },
+      }))
+      expect(result.premiumAnnual).toBe(390)
+      expect(result.addonPremiumAnnual).toBe(200)
+      expect(result.fx).toBeNull()
+    })
+
+    it('EUR addon vs RON level WITHOUT an fx reference throws mixed_currency_without_conversion', () => {
+      expect(() => calculateQuote(buildInput({
+        includesAddon: true,
+        pricingLevel: { premiumAnnual: 190, name: { en: 'Level I', ro: 'Nivelul I' }, currency: 'RON' },
+        addonPricingRule: { premiumAnnual: 200, currency: 'EUR' },
+        addonCoverages,
+      }))).toThrow(/mixed_currency_without_conversion: addon EUR vs level RON/)
+    })
+
+    it('EUR addon + fx 5.0: addon converts quote-per-base (RON per EUR) and the fx used echoes', () => {
+      const fx = { rate: 5, date: '2026-07-17', source: 'fixed:env' }
+      const result = calculateQuote(buildInput({
+        includesAddon: true,
+        pricingLevel: { premiumAnnual: 190, name: { en: 'Level I', ro: 'Nivelul I' }, currency: 'RON' },
+        addonPricingRule: { premiumAnnual: 200, currency: 'EUR' },
+        addonCoverages,
+        fx,
+      }))
+      expect(result.addonPremiumAnnual).toBe(1000) // 200 EUR * 5.0 RON/EUR
+      expect(result.premiumAnnual).toBe(1190)
+      expect(result.fx).toEqual(fx)
+    })
+
+    it('currency-less inputs (legacy callers) behave exactly as before — no guard, no echo', () => {
+      const result = calculateQuote(buildInput({
+        includesAddon: true,
+        addonPricingRule: { premiumAnnual: 200 },
+        addonCoverages,
+      }))
+      expect(result.premiumAnnual).toBe(390)
+      expect(result.fx).toBeNull()
+    })
   })
 })

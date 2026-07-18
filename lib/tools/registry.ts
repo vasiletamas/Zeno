@@ -14,7 +14,8 @@ import { LRUCache } from '@/lib/cache/lru-cache'
 import { resolveProductRef, listAvailableProductRefs } from './resolve-product'
 import { shapeProductInfo, type RawProduct, type DerivedProductInputs } from './shape-product-info'
 import { getAge } from '@/lib/customer/profile-service'
-import { derivePricingExamples, type PricingExampleGrid, type PricingTree } from '@/lib/engines/pricing-examples'
+import { derivePricingExamples, pricingTreeNeedsFx, type PricingExampleGrid, type PricingTree } from '@/lib/engines/pricing-examples'
+import { getFxProvider } from '@/lib/engines/fx'
 import { deriveEligibilityBounds, parseEligibilityRuleSet, type EligibilityBounds } from '@/lib/engines/eligibility'
 import { getPublishedProductContent, type PublishedProductContent, type PublishedFieldSet } from '@/lib/products/product-content'
 import type { LocalizedContent } from './shape-product-info'
@@ -278,20 +279,21 @@ const listProductsHandler: ToolHandler = async (
 
 // ── E1.7 (erratum 5): concrete derived-input mappers ─────────────────
 
-/** The prisma include tree → the pure PricingTree derivePricingExamples eats. */
+/** The prisma include tree → the pure PricingTree derivePricingExamples eats.
+ * T18: currency rides along so a mixed-denomination rate card converts. */
 function buildPricingTree(product: {
   quoteValidityDays: number
-  pricingTiers: { code: string; name: unknown; levels: { code: string; name: unknown; premiumAnnual: number }[] }[]
-  addons: { pricingRules: { minAge: number; maxAge: number; premiumAnnual: number }[] }[]
+  pricingTiers: { code: string; name: unknown; levels: { code: string; name: unknown; premiumAnnual: number; currency: string }[] }[]
+  addons: { pricingRules: { minAge: number; maxAge: number; premiumAnnual: number; currency: string }[] }[]
 }): PricingTree {
   return {
     quoteValidityDays: product.quoteValidityDays,
     tiers: product.pricingTiers.map((t) => ({
       code: t.code,
       name: t.name as { en: string; ro: string },
-      levels: t.levels.map((l) => ({ code: l.code, name: l.name as { en: string; ro: string }, premiumAnnual: l.premiumAnnual })),
+      levels: t.levels.map((l) => ({ code: l.code, name: l.name as { en: string; ro: string }, premiumAnnual: l.premiumAnnual, currency: l.currency })),
     })),
-    addonRules: (product.addons[0]?.pricingRules ?? []).map((r) => ({ minAge: r.minAge, maxAge: r.maxAge, premiumAnnual: r.premiumAnnual })),
+    addonRules: (product.addons[0]?.pricingRules ?? []).map((r) => ({ minAge: r.minAge, maxAge: r.maxAge, premiumAnnual: r.premiumAnnual, currency: r.currency })),
   }
 }
 
@@ -404,7 +406,10 @@ const getProductInfoHandler: ToolHandler = async (
     }
 
     const grid = product.pricingExampleGrid as unknown as PricingExampleGrid | null
-    const pricingExamples = grid ? derivePricingExamples(buildPricingTree(product), grid) : []
+    const pricingTree = buildPricingTree(product)
+    // T18: a mixed-denomination rate card needs the FX reference exactly once
+    const pricingFx = grid && pricingTreeNeedsFx(pricingTree) ? await getFxProvider().getReference('EUR', 'RON') : null
+    const pricingExamples = grid ? derivePricingExamples(pricingTree, grid, pricingFx) : []
 
     let eligibilityBounds: EligibilityBounds = { minAge: null, maxAge: null, otherRuleCodes: [] }
     try {

@@ -6,7 +6,7 @@
  * from the same pass; an addon age-band no-match is an explicit
  * ineligibility fact, never a silent 0 (#9 folded fix).
  */
-import { calculateQuote, type QuoteInput } from '@/lib/engines/quote-engine'
+import { calculateQuote, type QuoteInput, type FxReference } from '@/lib/engines/quote-engine'
 
 export interface PricingExampleGrid {
   /**
@@ -23,10 +23,23 @@ export interface PricingExampleGrid {
 }
 export const KNOWN_GRID_PARAMETERS = ['age'] as const
 
-export interface PricingTreeLevel { code: string; name: { en: string; ro: string }; premiumAnnual: number }
+export interface PricingTreeLevel { code: string; name: { en: string; ro: string }; premiumAnnual: number; currency?: string }
 export interface PricingTreeTier { code: string; name: { en: string; ro: string }; levels: PricingTreeLevel[] }
-export interface PricingTreeAddonRule { minAge: number; maxAge: number; premiumAnnual: number }
+export interface PricingTreeAddonRule { minAge: number; maxAge: number; premiumAnnual: number; currency?: string }
 export interface PricingTree { tiers: PricingTreeTier[]; addonRules: PricingTreeAddonRule[]; quoteValidityDays: number }
+
+/**
+ * T18: does this tree mix denominations (an addon tariff in a different
+ * currency than some level)? Callers use it to obtain the FX reference ONCE
+ * before deriving — trees without currency projections (legacy) never do.
+ */
+export function pricingTreeNeedsFx(tree: PricingTree): boolean {
+  const ruleCurrencies = tree.addonRules.map((r) => r.currency).filter((c): c is string => c !== undefined)
+  if (ruleCurrencies.length === 0) return false
+  return tree.tiers.some((t) =>
+    t.levels.some((l) => l.currency !== undefined && ruleCurrencies.some((rc) => rc !== l.currency)),
+  )
+}
 
 export interface PricingExample {
   age: number
@@ -40,7 +53,7 @@ export interface PricingExample {
     | null
 }
 
-export function derivePricingExamples(tree: PricingTree, grid: PricingExampleGrid): PricingExample[] {
+export function derivePricingExamples(tree: PricingTree, grid: PricingExampleGrid, fx: FxReference | null = null): PricingExample[] {
   if (!(KNOWN_GRID_PARAMETERS as readonly string[]).includes(grid.parameter)) return []
   const out: PricingExample[] = []
   for (const age of grid.samplePoints) {
@@ -53,7 +66,7 @@ export function derivePricingExamples(tree: PricingTree, grid: PricingExampleGri
         const baseInput: QuoteInput = {
           tierCode, levelCode, customerAge: age, includesAddon: false,
           paymentFrequency: 'annual',
-          pricingLevel: { premiumAnnual: level.premiumAnnual, name: level.name },
+          pricingLevel: { premiumAnnual: level.premiumAnnual, name: level.name, currency: level.currency },
           pricingTier: { name: tier.name },
           baseCoverages: [], addonPricingRule: null, addonCoverages: [],
           quoteValidityDays: tree.quoteValidityDays,
@@ -64,8 +77,11 @@ export function derivePricingExamples(tree: PricingTree, grid: PricingExampleGri
           const rule = tree.addonRules.find((r) => age >= r.minAge && age <= r.maxAge)
           withAddon = rule
             ? (() => {
-                const q = calculateQuote({ ...baseInput, includesAddon: true, addonPricingRule: { premiumAnnual: rule.premiumAnnual } })
-                return { premiumAnnual: q.premiumAnnual, premiumMonthly: q.premiumMonthly, addonDelta: rule.premiumAnnual }
+                // T18: the fx reference rides into the SAME arithmetic that
+                // prices real quotes; the delta is the CONVERTED component
+                // (engine output), so examples and quotes cannot drift.
+                const q = calculateQuote({ ...baseInput, includesAddon: true, addonPricingRule: { premiumAnnual: rule.premiumAnnual, currency: rule.currency }, fx })
+                return { premiumAnnual: q.premiumAnnual, premiumMonthly: q.premiumMonthly, addonDelta: q.addonPremiumAnnual }
               })()
             : { ineligible: true as const, reason: 'addon_age_band_unavailable' as const }
         }
