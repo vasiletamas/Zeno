@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { SessionReauth, isReauthRequired, freshSessionRequest, type SessionInitResponse } from '@/components/chat/session-reauth'
 
 /**
  * /chat — New conversation entry point.
@@ -16,6 +17,25 @@ import { useRouter } from 'next/navigation'
  */
 export default function ChatEntry() {
   const router = useRouter()
+  // T26: an account-holder cookie is challenged before the session resumes —
+  // the entry renders the OTP prompt instead of silently continuing.
+  const [reauthEmail, setReauthEmail] = useState<string | null>(null)
+
+  const openConversation = useCallback(
+    async (customerId: string) => {
+      const convRes = await fetch('/api/chat/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customerId }),
+      })
+      if (!convRes.ok) {
+        throw new Error(`Create conversation failed: ${convRes.status}`)
+      }
+      const { conversationId } = await convRes.json()
+      router.replace(`/chat/${conversationId}`)
+    },
+    [router],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -27,25 +47,18 @@ export default function ChatEntry() {
         if (!sessionRes.ok) {
           throw new Error(`Session API failed: ${sessionRes.status}`)
         }
-        const { customerId } = await sessionRes.json()
+        const session: SessionInitResponse = await sessionRes.json()
 
         if (cancelled) return
 
-        // 2. Create a new conversation
-        const convRes = await fetch('/api/chat/create', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ customerId }),
-        })
-        if (!convRes.ok) {
-          throw new Error(`Create conversation failed: ${convRes.status}`)
+        if (isReauthRequired(session)) {
+          setReauthEmail(session.maskedEmail)
+          return
         }
-        const { conversationId } = await convRes.json()
+        if (!session.customerId) throw new Error('Session API returned no customerId')
 
-        if (cancelled) return
-
-        // 3. Redirect to conversation (replace to avoid back-button loop)
-        router.replace(`/chat/${conversationId}`)
+        // 2-3. Create a new conversation and redirect
+        await openConversation(session.customerId)
       } catch (error) {
         console.error('[ChatEntry] Failed to initialize chat:', error)
         // On error, redirect to home rather than showing a broken state
@@ -60,7 +73,28 @@ export default function ChatEntry() {
     return () => {
       cancelled = true
     }
-  }, [router])
+  }, [router, openConversation])
+
+  if (reauthEmail) {
+    return (
+      <div className="h-dvh flex items-center justify-center bg-soft-white">
+        <SessionReauth
+          maskedEmail={reauthEmail}
+          onAuthenticated={(customerId) => { void openConversation(customerId).catch(() => router.replace('/')) }}
+          onContinueFresh={() => {
+            const r = freshSessionRequest()
+            void fetch(r.url, r.init)
+              .then((res) => res.json())
+              .then((s: SessionInitResponse) => {
+                if (!s.customerId) throw new Error('fresh session returned no customerId')
+                return openConversation(s.customerId)
+              })
+              .catch(() => router.replace('/'))
+          }}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="h-dvh flex items-center justify-center bg-soft-white">
