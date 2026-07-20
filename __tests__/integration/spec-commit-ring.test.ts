@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { prisma } from '@/lib/db'
 import { spec } from '@/lib/spec/registry'
-import { executeCommit } from '@/lib/tools/gateway'
+import { executeCommit, REPLAY_NOTICE } from '@/lib/tools/gateway'
 import { resetDb, seedMinimalProtectFixture, ensureTestProduct } from '../helpers/test-db'
 import { buildAcceptReadyQuote, buildReadyApplication, fixtureCtx } from '../helpers/funnel-fixtures'
 import { writeRevision } from '@/lib/engines/answer-store'
@@ -25,8 +25,18 @@ describe.skipIf(!process.env.DATABASE_URL)('Feature: agent is a client of the do
     const first = await accept({ paymentOption: 'quarterly', confirmToken: ask.confirmToken })
     const second = await accept({ paymentOption: 'quarterly', confirmToken: ask.confirmToken })
     expect(first.outcome).toBe('applied')
-    // ORIGINAL envelope returned (gateway order #8 step 2), replay-stamped
-    expect(second).toEqual({ ...first, disposition: 'replay' })
+    // ORIGINAL facts returned (gateway order #8 step 2), replay-stamped;
+    // presentation is STRIPPED on replay (spec 2026-07-20 §3): _uiAction
+    // dropped, card-directive _message swapped for the neutral notice.
+    const { data: freshData, ...freshRest } = first
+    const { data: replayData, ...replayRest } = second
+    expect(replayRest).toEqual({ ...freshRest, disposition: 'replay' })
+    const fd = freshData as Record<string, unknown>
+    const rd = replayData as Record<string, unknown>
+    expect(rd.acceptedAt).toBe(fd.acceptedAt)                 // facts untouched
+    expect(rd.firstInstallment).toEqual(fd.firstInstallment)  // facts untouched
+    expect(rd._uiAction).toBeUndefined()
+    expect(rd._message).toBe(REPLAY_NOTICE)
     expect(await prisma.paymentSchedule.count({ where: { quoteId: fx.quoteId } })).toBe(1)
     const ledger = await prisma.commitLedger.findMany({ where: { tool: 'accept_quote', conversationId: fx.conversationId, outcome: 'applied' } })
     expect(ledger.map((r) => r.idempotencyDisposition).sort()).toEqual(['fresh', 'replay'])
