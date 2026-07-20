@@ -51,6 +51,17 @@ const FIELD_META: Record<
   },
 }
 
+/** Card payloads shared with deriveActiveCards (spec 2026-07-20 §1). */
+export const FIELD_META_FOR_CARDS: Record<CollectableField, Record<string, unknown>> = Object.fromEntries(
+  FIELD_ORDER.map((f) => [f, {
+    field: f,
+    label: FIELD_META[f].label,
+    type: FIELD_META[f].type,
+    validation: FIELD_META[f].validation ?? null,
+    placeholder: FIELD_META[f].placeholder ?? null,
+  }]),
+) as unknown as Record<CollectableField, Record<string, unknown>>
+
 // ─────────────────────────────────────────────
 // Validation helpers
 // ─────────────────────────────────────────────
