@@ -111,3 +111,38 @@ describe('stale_card_replayed (2026-07-20 ratchet)', () => {
     expect(CHECK_CATALOG.some((c) => c.id === 'stale_card_replayed')).toBe(true)
   })
 })
+
+describe('card_for_committed_fact (2026-07-20 ratchet)', () => {
+  const appliedRow = (targetRef: string, createdAt: string, disposition = 'fresh') => ({
+    id: `L-${targetRef}-${createdAt}`, tool: 'collect_customer_field', actor: 'gui', outcome: 'applied', effects: [],
+    reasonCode: null, phaseFrom: 'DISCOVERY', phaseTo: 'DISCOVERY', idempotencyDisposition: disposition,
+    targetRef, createdAt,
+  })
+  const phoneCardCall = (id: string) => ({ round: 1, toolCallId: id, name: 'collect_customer_field',
+    args: { field: 'residency', value: 'Romania' }, partition: 'writing',
+    result: { success: true, durationMs: 5, cached: false, uiAction: { type: 'show_data_field', payload: { field: 'phone' } } } })
+
+  it('flags a data-field card for a field with an earlier applied commit', () => {
+    const e = makeExport({
+      turns: [turn(12, { startedAt: Date.parse('2026-07-19T08:27:50.000Z'), endedAt: Date.parse('2026-07-19T08:27:56.000Z'),
+        toolCalls: [phoneCardCall('x')] })] as never,
+      ledger: [appliedRow('field:phone', '2026-07-19T08:27:51.410Z')] as never,
+    })
+    const f = runDiagnostics(e).filter((x) => x.checkId === 'card_for_committed_fact')
+    expect(f).toHaveLength(1)
+    expect(f[0]).toMatchObject({ severity: 'error', turn: 12, evidence: { cardField: 'phone' } })
+  })
+
+  it('is silent when the field commit happens AFTER the emitting turn (legit ladder progression)', () => {
+    const e = makeExport({
+      turns: [turn(8, { startedAt: Date.parse('2026-07-19T08:06:00.000Z'), endedAt: Date.parse('2026-07-19T08:06:10.000Z'),
+        toolCalls: [phoneCardCall('y')] })] as never,
+      ledger: [appliedRow('field:phone', '2026-07-19T08:27:51.410Z')] as never,
+    })
+    expect(runDiagnostics(e).some((x) => x.checkId === 'card_for_committed_fact')).toBe(false)
+  })
+
+  it('is registered in the catalog', () => {
+    expect(CHECK_CATALOG.some((c) => c.id === 'card_for_committed_fact')).toBe(true)
+  })
+})

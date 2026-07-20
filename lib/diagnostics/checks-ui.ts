@@ -85,3 +85,26 @@ export const staleCardReplayed: DiagnosticCheck = {
     })
   },
 }
+
+/**
+ * Ratchet origin: 2026-07-20, conv cmrrhruba turn 12 — a phone card was
+ * emitted two seconds AFTER an applied field:phone commit in the same turn.
+ * A show_data_field card whose field already has an applied collect commit
+ * at (or before) the emitting turn's end is demanding a known fact.
+ */
+export const cardForCommittedFact: DiagnosticCheck = {
+  id: 'card_for_committed_fact',
+  description: 'A show_data_field card asked for a field that already had an applied commit at emission time (2026-07-20, conv cmrrhruba turn 12)',
+  run: (e) => e.turns.flatMap((t) => t.toolCalls.flatMap((c): Finding[] => {
+    const ui = c.result?.uiAction as { type?: unknown; payload?: { field?: unknown } } | undefined
+    if (ui?.type !== 'show_data_field' || typeof ui.payload?.field !== 'string') return []
+    const field = ui.payload.field
+    const turnEnd = (t as { endedAt?: number }).endedAt ?? Number.MAX_SAFE_INTEGER
+    const committed = (e.ledger ?? []).some((r) =>
+      r.tool === 'collect_customer_field' && r.outcome === 'applied' &&
+      r.idempotencyDisposition === 'fresh' && r.targetRef === `field:${field}` &&
+      Date.parse(r.createdAt) <= turnEnd)
+    if (!committed) return []
+    return [{ checkId: 'card_for_committed_fact', severity: 'error', turn: t.messageIndex, evidence: { cardField: field, tool: c.name } }]
+  })),
+}
