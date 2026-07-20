@@ -96,7 +96,12 @@ describe('gui-actor exemption (2026-07-20)', () => {
       ] as never,
       turns: [turn(0, {
         userMessage: '⟦action⟧✓ Telefon: ***607',
-        startedAt: Date.parse('2026-07-19T08:27:50.000Z'), endedAt: Date.parse('2026-07-19T08:27:56.000Z'),
+        // Real persisted shape: TurnDebug stamps startedAt === endedAt at
+        // reduction time, AFTER the turn's mid-turn ledger writes — so the
+        // gui row (08:27:51.410) sits BEFORE this instant. A floor reverted
+        // to t.startedAt would exclude it and resurrect the turn-12
+        // masked-phone false positive; this fixture kills that mutant.
+        startedAt: Date.parse('2026-07-19T08:27:56.000Z'), endedAt: Date.parse('2026-07-19T08:27:56.000Z'),
         toolCalls: [{ round: 0, toolCallId: 'x', name: 'collect_customer_field', args: { field: 'phone', value: '0735226607' }, partition: 'writing',
           result: { success: true, durationMs: 5, cached: false } }],
       })] as never,
@@ -126,12 +131,10 @@ describe('gui-actor exemption (2026-07-20)', () => {
     expect(runDiagnostics(e).some((x) => x.checkId === 'questionnaire_answer_fabricated')).toBe(true)
   })
 
-  // Pins the window-floor semantics (same mechanism as stale_card_replayed
-  // in checks-ui.ts): a gui-actor commit from an EARLIER turn must not
-  // exempt a collect in a LATER turn. Fails if the floor reverts to
-  // t.startedAt (which equals t.endedAt in real data, so this would still
-  // pass) or the window is dropped entirely (all ledger rows considered
-  // regardless of turn, which would wrongly exempt this collect).
+  // Pins the window-CEILING/turn-scoping semantics: a gui-actor commit from
+  // an EARLIER turn must not exempt a collect in a LATER turn — fails if the
+  // window is dropped entirely. (The floor-revert mutant is killed by the
+  // startedAt===endedAt fixture in the first exemption test above.)
   it('the exemption is scoped to THIS turn\'s window — a gui row from an earlier turn (two-turn fixture) does not exempt a later collect', () => {
     const T1 = Date.parse('2026-07-19T08:06:10.000Z')
     const T2 = Date.parse('2026-07-19T08:27:56.000Z')
