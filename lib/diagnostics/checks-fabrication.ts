@@ -7,7 +7,7 @@
  */
 import { isValueGrounded } from '@/lib/engines/anti-fabrication'
 import { stripDiacritics } from '@/lib/products/aliases'
-import type { DiagnosticCheck, Finding } from './types'
+import { turnLedgerWindow, type DiagnosticCheck, type Finding } from './types'
 
 const VALUE_ARGS: Record<string, string> = {
   write_dnt_answer: 'value',
@@ -45,27 +45,19 @@ export const questionnaireAnswerFabricated: DiagnosticCheck = {
         // 2026-07-20 (conv cmrrhruba turn 12): a card-submitted value is
         // grounded by the card itself — the persisted prose only carries a
         // mask (⟦action⟧✓ Telefon: ***607). The gui-actor ledger row in this
-        // turn's window, matching this tool (and, for collects, this field's
+        // turn's window (turnLedgerWindow, ./types), matching this tool
+        // (and, for collects/DNT answers, the addressed field/question's
         // targetRef), is the deterministic card-submission trace.
-        //
-        // TurnDebug persistence stamps startedAt/endedAt with two Date.now()
-        // calls in the same synchronous post-hoc reduction pass, so every
-        // recorded turn has startedAt === endedAt (verified across all 33
-        // turns of conv cmrrhruba), landing AFTER the turn's own mid-turn
-        // ledger writes (turn 12: gui commit at 08:27:51.410Z, recorded
-        // startedAt/endedAt 08:27:55.920Z). t.startedAt is therefore not a
-        // usable window floor; turns are strictly sequential, so the
-        // preceding turn's endedAt is used instead (same fix as
-        // stale_card_replayed in checks-ui.ts).
-        const tStart = (ordered[ti - 1] as { endedAt?: number } | undefined)?.endedAt ?? 0
-        const tEnd = (t as { endedAt?: number }).endedAt ?? Number.MAX_SAFE_INTEGER
+        const { floor, ceil } = turnLedgerWindow(ordered, ti)
         const guiCommitted = (e.ledger ?? []).some((r) => {
           if (r.actor !== 'gui' || r.tool !== c.name || r.outcome !== 'applied') return false
           const at = Date.parse(r.createdAt)
-          if (at < tStart || at > tEnd) return false
-          if (c.name === 'collect_customer_field') {
-            return r.targetRef === `field:${String((c.args as Record<string, unknown>)?.field ?? '')}`
-          }
+          if (at <= floor || at > ceil) return false
+          if (c.name === 'collect_customer_field') return r.targetRef === `field:${String(c.args.field ?? '')}`
+          // resolveTargetRef (lib/tools/gateway.ts) keys write_dnt_answer on
+          // questionCode — without this, a gui submit of Q1 would exempt an
+          // unrelated agent-recorded write of Q2 in the same turn.
+          if (c.name === 'write_dnt_answer') return r.targetRef === `dnt_answer:${String(c.args.questionCode ?? '')}`
           return true
         })
         if (guiCommitted) continue

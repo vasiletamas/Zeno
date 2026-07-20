@@ -159,4 +159,28 @@ describe('gui-actor exemption (2026-07-20)', () => {
     })
     expect(runDiagnostics(e).some((x) => x.checkId === 'questionnaire_answer_fabricated')).toBe(true)
   })
+
+  // resolveTargetRef (lib/tools/gateway.ts) keys write_dnt_answer on
+  // questionCode ('dnt_answer:${questionCode}') — mirrors the
+  // collect_customer_field field-disambiguation fixtures above. Without the
+  // per-question targetRef check, a gui submit of one DNT question would
+  // exempt any agent-recorded write in the same turn's window.
+  it('the write_dnt_answer exemption is scoped by questionCode — a Q1 gui submit does not exempt a same-turn agent write of Q2', () => {
+    const e = makeExport({
+      messages: [
+        { id: 'u', role: 'user', content: 'buna', toolCalls: null, toolResults: null, createdAt: 'x' },
+        { id: 'a', role: 'assistant', content: 'ok', toolCalls: null, toolResults: null, createdAt: 'x' },
+      ] as never,
+      turns: [turn(0, {
+        userMessage: 'buna',
+        startedAt: Date.parse('2026-07-19T08:27:56.000Z'), endedAt: Date.parse('2026-07-19T08:27:56.000Z'),
+        toolCalls: [{ round: 0, toolCallId: 'x', name: 'write_dnt_answer', args: { questionCode: 'Q2', value: '3500' }, partition: 'writing',
+          result: { success: true, durationMs: 5, cached: false } }],
+      })] as never,
+      ledger: [{ id: 'L1', tool: 'write_dnt_answer', actor: 'gui', outcome: 'applied', effects: [], reasonCode: null,
+        phaseFrom: 'DISCOVERY', phaseTo: 'DISCOVERY', idempotencyDisposition: 'fresh', targetRef: 'dnt_answer:Q1',
+        createdAt: '2026-07-19T08:27:51.410Z' }] as never,
+    })
+    expect(runDiagnostics(e).some((x) => x.checkId === 'questionnaire_answer_fabricated')).toBe(true)
+  })
 })
