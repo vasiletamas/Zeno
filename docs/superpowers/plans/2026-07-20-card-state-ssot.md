@@ -8,6 +8,18 @@
 
 **Tech Stack:** Next.js 15 / React, Prisma (postgres, docker `zeno-db-1` :5435), Vitest (`npx vitest run`, projects: unit + integration), tsx scripts for runtime verification.
 
+## Progress ledger (updated as tasks land)
+
+| Task | Status | Commits | Evidence |
+|---|---|---|---|
+| T1 stale_card_replayed | ✅ done + spec-reviewed | 7f1056d0 (+39eb710b tests) | fires @turn 12 live; window semantics mutation-pinned |
+| T2 card_for_committed_fact | ✅ done + spec-reviewed | f8b325b3 | fires @turn 12 live |
+| T3 competing_input_cards | ✅ done + spec-reviewed | 924ac79e | fires @turn 8 live |
+| T4 gui-actor fabrication exemption | ✅ done + spec-reviewed | 41a8b1de (+00c2391d fixture) | turn-12 false positive gone; floor-revert mutant killed |
+| T5–T16 | ⬜ pending | — | — |
+
+**Deviation log:** T1/T4 — TurnDebug stamps `startedAt === endedAt` at reduction time (AFTER mid-turn ledger writes), so the ledger-window floor is the PRECEDING turn's `endedAt`, not `t.startedAt`. Systemic: any future check correlating ledger rows to turns must use the same floor. Diagnostics ring: 88/88 green.
+
 **Evidence base (read these before starting):**
 - Spec: `docs/superpowers/specs/2026-07-20-card-state-ssot-design.md`
 - Incident analysis: `docs/superpowers/specs/2026-07-19-card-state-awareness-design.md`
@@ -60,7 +72,7 @@ A replayed commit must never deliver a card. Detects the turn-12 zombie: a toolC
 - Modify: `lib/diagnostics/checks-ui.ts`
 - Test: `__tests__/lib/diagnostics/checks-ui.test.ts`
 
-- [ ] **Step 1.1: Write the failing test** — append to `__tests__/lib/diagnostics/checks-ui.test.ts`:
+- [x] **Step 1.1: Write the failing test** — append to `__tests__/lib/diagnostics/checks-ui.test.ts`:
 
 ```ts
 describe('stale_card_replayed (2026-07-20 ratchet)', () => {
@@ -110,12 +122,12 @@ describe('stale_card_replayed (2026-07-20 ratchet)', () => {
 })
 ```
 
-- [ ] **Step 1.2: Run to verify failure**
+- [x] **Step 1.2: Run to verify failure**
 
 Run: `npx vitest run __tests__/lib/diagnostics/checks-ui.test.ts`
 Expected: FAIL — the two positive/registration tests fail (check id unknown).
 
-- [ ] **Step 1.3: Implement** — append to `lib/diagnostics/checks-ui.ts` (do NOT export helpers):
+- [x] **Step 1.3: Implement** — append to `lib/diagnostics/checks-ui.ts` (do NOT export helpers):
 
 ```ts
 /** Ledger rows inside a turn's [startedAt, endedAt] window (ledger createdAt
@@ -151,17 +163,17 @@ export const staleCardReplayed: DiagnosticCheck = {
 }
 ```
 
-- [ ] **Step 1.4: Run to verify pass**
+- [x] **Step 1.4: Run to verify pass**
 
 Run: `npx vitest run __tests__/lib/diagnostics/`
 Expected: all PASS (including the pre-existing 74).
 
-- [ ] **Step 1.5: Prove it fires on the live conversation**
+- [x] **Step 1.5: Prove it fires on the live conversation**
 
 Run: `npx tsx scripts/diagnose-conversation.ts cmrrhruba0001g40yh3am7peo --json`
 Expected: exit 1; findings include `{"checkId":"stale_card_replayed","turn":12}`. (Exit 1 = findings exist — correct.)
 
-- [ ] **Step 1.6: Commit**
+- [x] **Step 1.6: Commit**
 
 ```bash
 git add lib/diagnostics/checks-ui.ts __tests__/lib/diagnostics/checks-ui.test.ts
@@ -176,7 +188,7 @@ A `show_data_field` card demanding a field that was ALREADY committed at emissio
 
 **Files:** same two as Task 1.
 
-- [ ] **Step 2.1: Write the failing test** — append to `__tests__/lib/diagnostics/checks-ui.test.ts`:
+- [x] **Step 2.1: Write the failing test** — append to `__tests__/lib/diagnostics/checks-ui.test.ts`:
 
 ```ts
 describe('card_for_committed_fact (2026-07-20 ratchet)', () => {
@@ -215,9 +227,9 @@ describe('card_for_committed_fact (2026-07-20 ratchet)', () => {
 })
 ```
 
-- [ ] **Step 2.2: Run to verify failure** — `npx vitest run __tests__/lib/diagnostics/checks-ui.test.ts` → FAIL on the new describe.
+- [x] **Step 2.2: Run to verify failure** — `npx vitest run __tests__/lib/diagnostics/checks-ui.test.ts` → FAIL on the new describe.
 
-- [ ] **Step 2.3: Implement** — append to `lib/diagnostics/checks-ui.ts`:
+- [x] **Step 2.3: Implement** — append to `lib/diagnostics/checks-ui.ts`:
 
 ```ts
 /**
@@ -244,9 +256,9 @@ export const cardForCommittedFact: DiagnosticCheck = {
 }
 ```
 
-- [ ] **Step 2.4: Run to verify pass** — `npx vitest run __tests__/lib/diagnostics/` → all PASS.
-- [ ] **Step 2.5: Live proof** — `npx tsx scripts/diagnose-conversation.ts cmrrhruba0001g40yh3am7peo --json` → includes `card_for_committed_fact` at turn 12.
-- [ ] **Step 2.6: Commit** — `git add` same files; message `feat(diagnostics): card_for_committed_fact — cards must not demand already-committed fields`.
+- [x] **Step 2.4: Run to verify pass** — `npx vitest run __tests__/lib/diagnostics/` → all PASS.
+- [x] **Step 2.5: Live proof** — `npx tsx scripts/diagnose-conversation.ts cmrrhruba0001g40yh3am7peo --json` → includes `card_for_committed_fact` at turn 12.
+- [x] **Step 2.6: Commit** — `git add` same files; message `feat(diagnostics): card_for_committed_fact — cards must not demand already-committed fields`.
 
 ---
 
@@ -256,7 +268,7 @@ Two input-collection cards in one turn (turn 8: phone card + OTP card; the clien
 
 **Files:** same two as Task 1.
 
-- [ ] **Step 3.1: Write the failing test** — append:
+- [x] **Step 3.1: Write the failing test** — append:
 
 ```ts
 describe('competing_input_cards (2026-07-20 ratchet)', () => {
@@ -287,9 +299,9 @@ describe('competing_input_cards (2026-07-20 ratchet)', () => {
 })
 ```
 
-- [ ] **Step 3.2: Verify failure** — same command → FAIL.
+- [x] **Step 3.2: Verify failure** — same command → FAIL.
 
-- [ ] **Step 3.3: Implement** — append to `lib/diagnostics/checks-ui.ts` (private const — do NOT export):
+- [x] **Step 3.3: Implement** — append to `lib/diagnostics/checks-ui.ts` (private const — do NOT export):
 
 ```ts
 /** Input-COLLECTION card types: the customer types/taps an answer into them.
@@ -315,9 +327,9 @@ export const competingInputCards: DiagnosticCheck = {
 }
 ```
 
-- [ ] **Step 3.4: Verify pass** — diagnostics ring green.
-- [ ] **Step 3.5: Live proof** — diagnose the conversation → `competing_input_cards` at turn 8.
-- [ ] **Step 3.6: Commit** — `feat(diagnostics): competing_input_cards — one input card per turn`.
+- [x] **Step 3.4: Verify pass** — diagnostics ring green.
+- [x] **Step 3.5: Live proof** — diagnose the conversation → `competing_input_cards` at turn 8.
+- [x] **Step 3.6: Commit** — `feat(diagnostics): competing_input_cards — one input card per turn`.
 
 ---
 
@@ -329,7 +341,7 @@ A value submitted via a card (`⟦action⟧` turn, actor `'gui'` ledger row) is 
 - Modify: `lib/diagnostics/checks-fabrication.ts`
 - Test: `__tests__/lib/diagnostics/checks-fabrication.test.ts`
 
-- [ ] **Step 4.1: Write the failing test** — append to the existing fabrication describe file (reuse its export builders; if it has none for ledger, use `makeExport`/`turn` from `./export-helpers`):
+- [x] **Step 4.1: Write the failing test** — append to the existing fabrication describe file (reuse its export builders; if it has none for ledger, use `makeExport`/`turn` from `./export-helpers`):
 
 ```ts
 describe('gui-actor exemption (2026-07-20)', () => {
@@ -375,9 +387,9 @@ describe('gui-actor exemption (2026-07-20)', () => {
 
 NOTE for the implementer: check the existing test file's imports first — it may already import `makeExport`/`turn`; if its local builders differ, adapt the scaffolding but keep the assertions verbatim.
 
-- [ ] **Step 4.2: Verify failure** — `npx vitest run __tests__/lib/diagnostics/checks-fabrication.test.ts` → the first new test FAILS (value `0735226607` is numeric-shaped, in scope, unanchored → currently flagged).
+- [x] **Step 4.2: Verify failure** — `npx vitest run __tests__/lib/diagnostics/checks-fabrication.test.ts` → the first new test FAILS (value `0735226607` is numeric-shaped, in scope, unanchored → currently flagged).
 
-- [ ] **Step 4.3: Implement** — in `lib/diagnostics/checks-fabrication.ts`, inside the `for (const c of t.toolCalls)` loop of `questionnaireAnswerFabricated`, after the `if (!inScope(value)) continue` line, add:
+- [x] **Step 4.3: Implement** — in `lib/diagnostics/checks-fabrication.ts`, inside the `for (const c of t.toolCalls)` loop of `questionnaireAnswerFabricated`, after the `if (!inScope(value)) continue` line, add:
 
 ```ts
         // 2026-07-20 (conv cmrrhruba turn 12): a card-submitted value is
@@ -399,9 +411,9 @@ NOTE for the implementer: check the existing test file's imports first — it ma
         if (guiCommitted) continue
 ```
 
-- [ ] **Step 4.4: Verify pass** — diagnostics ring green.
-- [ ] **Step 4.5: Live proof** — diagnose the conversation → the turn-12 `questionnaire_answer_fabricated` warn is GONE; `stale_card_replayed`/`card_for_committed_fact`/`competing_input_cards`/`unsolicited_contact_card` remain.
-- [ ] **Step 4.6: Commit** — `fix(diagnostics): card-submitted (gui-actor) values are grounded — exempt from fabrication check`.
+- [x] **Step 4.4: Verify pass** — diagnostics ring green.
+- [x] **Step 4.5: Live proof** — diagnose the conversation → the turn-12 `questionnaire_answer_fabricated` warn is GONE; `stale_card_replayed`/`card_for_committed_fact`/`competing_input_cards`/`unsolicited_contact_card` remain.
+- [x] **Step 4.6: Commit** — `fix(diagnostics): card-submitted (gui-actor) values are grounded — exempt from fabrication check`.
 
 ---
 
