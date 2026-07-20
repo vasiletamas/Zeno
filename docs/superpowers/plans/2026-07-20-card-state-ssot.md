@@ -12,10 +12,10 @@
 
 | Task | Status | Commits | Evidence |
 |---|---|---|---|
-| T1 stale_card_replayed | ✅ done + spec-reviewed | 7f1056d0 (+39eb710b tests) | fires @turn 12 live; window semantics mutation-pinned |
-| T2 card_for_committed_fact | ✅ done + spec-reviewed | f8b325b3 | fires @turn 12 live |
-| T3 competing_input_cards | ✅ done + spec-reviewed | 924ac79e | fires @turn 8 live |
-| T4 gui-actor fabrication exemption | ✅ done + spec-reviewed | 41a8b1de (+00c2391d fixture) | turn-12 false positive gone; floor-revert mutant killed |
+| T1 stale_card_replayed | ✅ done + spec+quality approved | 7f1056d0 (+39eb710b, 94d1a71c) | fires @turn 12 live; window semantics mutation-pinned |
+| T2 card_for_committed_fact | ✅ done + spec+quality approved | f8b325b3 | fires @turn 12 live |
+| T3 competing_input_cards | ✅ done + spec+quality approved | 924ac79e | fires @turn 8 live |
+| T4 gui-actor fabrication exemption | ✅ done + spec+quality approved | 41a8b1de (+00c2391d, 94d1a71c) | turn-12 false positive gone; floor-revert + targetRef mutants killed |
 | T5–T16 | ⬜ pending | — | — |
 
 **Deviation log:** T1/T4 — TurnDebug stamps `startedAt === endedAt` at reduction time (AFTER mid-turn ledger writes), so the ledger-window floor is the PRECEDING turn's `endedAt`, not `t.startedAt`. Systemic: any future check correlating ledger rows to turns must use the same floor. Diagnostics ring: 88/88 green.
