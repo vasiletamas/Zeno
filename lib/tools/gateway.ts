@@ -223,19 +223,40 @@ async function writeLedger(db: Db, req: CommitRequest, targetRef: string, argsHa
   return stamped
 }
 
+/** Model-facing notice replacing a replayed card directive (spec 2026-07-20 §3). */
+export const REPLAY_NOTICE =
+  'Already recorded — no change. Ignore any earlier card instruction from this tool; the state briefing lists any input still needed.'
+
+/**
+ * Spec 2026-07-20 §3 (conv cmrrhruba turn 12): a replay confirms a fact — it
+ * must never re-deliver presentation computed against dead state. Facts and
+ * effects replay verbatim; _uiAction is dropped and a card-directive _message
+ * is replaced by the neutral notice. _confirmation stays (an idempotent ✓
+ * line is truthful).
+ */
+export function sanitizeReplayEnvelope(envelope: CommitResult): CommitResult {
+  if (envelope.data === undefined || envelope.data === null || typeof envelope.data !== 'object') return envelope
+  const d = { ...(envelope.data as Record<string, unknown>) }
+  if (!('_uiAction' in d) && !('_message' in d)) return { ...envelope, data: d }
+  delete d._uiAction
+  if (typeof d._message === 'string') d._message = REPLAY_NOTICE
+  return { ...envelope, data: d }
+}
+
 async function writeReplayRow(db: Db, req: CommitRequest, prior: CommitLedger): Promise<CommitResult> {
+  const sanitized = sanitizeReplayEnvelope(prior.envelope as unknown as CommitResult)
   await db.commitLedger.create({
     data: {
       conversationId: req.conversationId, customerId: req.customerId, actor: req.actor, tool: req.tool,
       targetRef: prior.targetRef, argsHash: prior.argsHash, outcome: prior.outcome, effects: prior.effects,
       reasonCode: prior.reasonCode, phaseFrom: prior.phaseFrom, phaseTo: prior.phaseTo,
-      idempotencyDisposition: 'replay', envelope: prior.envelope as Prisma.InputJsonValue,
+      idempotencyDisposition: 'replay', envelope: sanitized as unknown as Prisma.InputJsonValue,
     },
   })
-  // The ORIGINAL envelope, verbatim — a replay never recomputes. Only the
+  // Facts verbatim, presentation stripped (sanitizeReplayEnvelope); only the
   // disposition marker changes so callers can count replays (F2.4); the
   // ledgerId stays the ORIGINAL applied row's id (the semantic join target).
-  return { ...(prior.envelope as unknown as CommitResult), disposition: 'replay' }
+  return { ...sanitized, disposition: 'replay' }
 }
 
 /**
