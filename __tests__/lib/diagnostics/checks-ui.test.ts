@@ -90,7 +90,7 @@ describe('stale_card_replayed (2026-07-20 ratchet)', () => {
     expect(f[0]).toMatchObject({ severity: 'error', turn: 12, evidence: { tool: 'collect_customer_field', cardType: 'show_data_field' } })
   })
 
-  it('is silent when the replay row is outside the turn window, the tool differs, or no card rides the result', () => {
+  it('is silent when a same-tool call carries no card, or a card-bearing call\'s tool has no matching replay row', () => {
     const e = makeExport({
       turns: [turn(12, {
         startedAt: Date.parse('2026-07-19T08:27:50.000Z'), endedAt: Date.parse('2026-07-19T08:27:56.000Z'),
@@ -105,6 +105,48 @@ describe('stale_card_replayed (2026-07-20 ratchet)', () => {
       ] as never,
     })
     expect(runDiagnostics(e).some((x) => x.checkId === 'stale_card_replayed')).toBe(false)
+  })
+
+  // Pins the window-floor semantics: a turn's own startedAt/endedAt are both
+  // stamped at persist time (see the implementation comment) and cannot
+  // bound anything on their own — the floor is the PRECEDING turn's endedAt.
+  // These two two-turn fixtures fail if the floor reverts to t.startedAt
+  // (T2, since startedAt===endedAt in real data) or the window is dropped
+  // entirely (all ledger rows considered regardless of turn).
+  it('a same-tool replay row created BEFORE the preceding turn (10) ended belongs to turn 10\'s window, not turn 12\'s — no finding', () => {
+    const T1 = Date.parse('2026-07-19T08:20:00.000Z')
+    const T2 = Date.parse('2026-07-19T08:27:56.000Z')
+    const e = makeExport({
+      turns: [
+        turn(10, { startedAt: T1, endedAt: T1, toolCalls: [] }),
+        turn(12, {
+          startedAt: T2, endedAt: T2,
+          toolCalls: [{ round: 1, toolCallId: 'x', name: 'collect_customer_field', args: { field: 'residency', value: 'Romania' }, partition: 'writing', result: cardResult }],
+        }),
+      ] as never,
+      // createdAt is BEFORE T1 — belongs to turn 10's window (floor 0..T1), not turn 12's (floor T1..T2)
+      ledger: [replayLedgerRow('collect_customer_field', '2026-07-19T08:15:00.000Z')] as never,
+    })
+    expect(runDiagnostics(e).some((x) => x.checkId === 'stale_card_replayed')).toBe(false)
+  })
+
+  it('positive complement: the same row created BETWEEN turn 10\'s and turn 12\'s endedAt DOES flag turn 12', () => {
+    const T1 = Date.parse('2026-07-19T08:20:00.000Z')
+    const T2 = Date.parse('2026-07-19T08:27:56.000Z')
+    const e = makeExport({
+      turns: [
+        turn(10, { startedAt: T1, endedAt: T1, toolCalls: [] }),
+        turn(12, {
+          startedAt: T2, endedAt: T2,
+          toolCalls: [{ round: 1, toolCallId: 'x', name: 'collect_customer_field', args: { field: 'residency', value: 'Romania' }, partition: 'writing', result: cardResult }],
+        }),
+      ] as never,
+      // createdAt is BETWEEN T1 and T2 — belongs to turn 12's window
+      ledger: [replayLedgerRow('collect_customer_field', '2026-07-19T08:23:00.000Z')] as never,
+    })
+    const f = runDiagnostics(e).filter((x) => x.checkId === 'stale_card_replayed')
+    expect(f).toHaveLength(1)
+    expect(f[0]).toMatchObject({ severity: 'error', turn: 12, evidence: { tool: 'collect_customer_field', cardType: 'show_data_field' } })
   })
 
   it('is registered in the catalog', () => {

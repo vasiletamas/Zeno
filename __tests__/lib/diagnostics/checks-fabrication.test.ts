@@ -125,4 +125,35 @@ describe('gui-actor exemption (2026-07-20)', () => {
     })
     expect(runDiagnostics(e).some((x) => x.checkId === 'questionnaire_answer_fabricated')).toBe(true)
   })
+
+  // Pins the window-floor semantics (same mechanism as stale_card_replayed
+  // in checks-ui.ts): a gui-actor commit from an EARLIER turn must not
+  // exempt a collect in a LATER turn. Fails if the floor reverts to
+  // t.startedAt (which equals t.endedAt in real data, so this would still
+  // pass) or the window is dropped entirely (all ledger rows considered
+  // regardless of turn, which would wrongly exempt this collect).
+  it('the exemption is scoped to THIS turn\'s window — a gui row from an earlier turn (two-turn fixture) does not exempt a later collect', () => {
+    const T1 = Date.parse('2026-07-19T08:06:10.000Z')
+    const T2 = Date.parse('2026-07-19T08:27:56.000Z')
+    const e = makeExport({
+      messages: [
+        { id: 'u', role: 'user', content: 'buna', toolCalls: null, toolResults: null, createdAt: 'x' },
+        { id: 'a', role: 'assistant', content: 'ok', toolCalls: null, toolResults: null, createdAt: 'x' },
+      ] as never,
+      turns: [
+        turn(8, { startedAt: T1, endedAt: T1, toolCalls: [] }),
+        turn(12, {
+          userMessage: 'buna',
+          startedAt: T2, endedAt: T2,
+          toolCalls: [{ round: 0, toolCallId: 'x', name: 'collect_customer_field', args: { field: 'phone', value: '0735226607' }, partition: 'writing',
+            result: { success: true, durationMs: 5, cached: false } }],
+        }),
+      ] as never,
+      // gui row createdAt is BEFORE T1 — belongs to turn 8's window, not turn 12's
+      ledger: [{ id: 'L1', tool: 'collect_customer_field', actor: 'gui', outcome: 'applied', effects: [], reasonCode: null,
+        phaseFrom: 'DISCOVERY', phaseTo: 'DISCOVERY', idempotencyDisposition: 'fresh', targetRef: 'field:phone',
+        createdAt: '2026-07-19T08:00:00.000Z' }] as never,
+    })
+    expect(runDiagnostics(e).some((x) => x.checkId === 'questionnaire_answer_fabricated')).toBe(true)
+  })
 })
