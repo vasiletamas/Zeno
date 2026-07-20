@@ -16,7 +16,12 @@
 | T2 card_for_committed_fact | ✅ done + spec+quality approved | f8b325b3 | fires @turn 12 live |
 | T3 competing_input_cards | ✅ done + spec+quality approved | 924ac79e | fires @turn 8 live |
 | T4 gui-actor fabrication exemption | ✅ done + spec+quality approved | 41a8b1de (+00c2391d, 94d1a71c) | turn-12 false positive gone; floor-revert + targetRef mutants killed |
-| T5–T16 | ⬜ pending | — | — |
+| T5 replay presentation strip | ✅ done + spec+quality approved | 79825621 (+b115d61e, 6ac38741) | sanitize stored+returned; stale pins aligned, never weakened |
+| T6 ladder gate + due-timing + OTP-owns-turn | ✅ done + spec+quality approved | 0c34f72c | 16/16 collect ring green; plan code verbatim |
+| T7 deferral facts (defer_customer_field) | ✅ done + spec+quality approved | b944fa1f (+6ac38741 GDPR+FK) | migrations verified; erasure covers deferrals (TDD) |
+| T8–T16 | ⬜ pending | — | — |
+
+**T5-7 deviation log:** integration suites must run ONE at a time (shared postgres wedges concurrent runs); `.env` EMAIL_PROVIDER restored to `mock` (uncommitted — flip back if resend was deliberate); accepted quality observations: getFieldDeferrals db param half-threaded, snapshot cost on email-save path, deferral message says "this conversation" while the fact is customer-scoped.
 
 **Deviation log:** T1/T4 — TurnDebug stamps `startedAt === endedAt` at reduction time (AFTER mid-turn ledger writes), so the ledger-window floor is the PRECEDING turn's `endedAt`, not `t.startedAt`. Systemic: any future check correlating ledger rows to turns must use the same floor. Diagnostics ring: 88/88 green.
 
