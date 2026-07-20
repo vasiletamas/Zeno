@@ -19,7 +19,7 @@ import type { ToolHandler, ToolContext } from '@/lib/tools/types'
 // ONLY. name/DOB/CNP arrive document-grade via ID extraction (T27) and are
 // never demanded pre-acceptance; declaredAge is asked conversationally
 // ("câți ani ai?") and recorded directly — it is NOT a ladder card.
-const FIELD_ORDER = ['email', 'phone'] as const
+export const FIELD_ORDER = ['email', 'phone'] as const
 
 type CollectableField = (typeof FIELD_ORDER)[number]
 
