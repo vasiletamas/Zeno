@@ -195,6 +195,9 @@ export const ACTION_RULES: ActionRule[] = [
   // there (no blocked entry — not-reached is not an obstacle).
   { action: 'set_purchase_intent', kind: 'commit', exposedWhen: (_s, d) => d.phase !== 'POLICY' },
   { action: 'collect_customer_field', kind: 'commit', exposedWhen: always },
+  // Spec 2026-07-20 §1 (Ruling 6): a contact-ask declination is recordable
+  // whenever the ask itself is possible — same surface as the collect.
+  { action: 'defer_customer_field', kind: 'commit', exposedWhen: always },
   { action: 'withdraw_consent', kind: 'commit', exposedWhen: (s) => s.consents.hasAnyEvents },
   // B3.5: verification is offerable at any point (soft, never a wall pre-gate);
   // confirm only makes sense while a live challenge is pending. Task 1.1 (D5):

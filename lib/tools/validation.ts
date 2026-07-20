@@ -197,6 +197,12 @@ const collectCustomerFieldSchema = z.object({
   value: z.string().min(1, 'Field value is required'),
 }).strict()
 
+// Spec 2026-07-20 §1 (Ruling 6): declination facts for contact asks
+const deferCustomerFieldSchema = z.object({
+  field: z.string().min(1, 'Field name is required'),
+  reason: z.string().optional(),
+}).strict()
+
 // ==============================================
 // UTILITY / BACKGROUND SCHEMAS
 // ==============================================
@@ -330,6 +336,7 @@ const toolSchemas: Record<string, ZodType> = {
 
   // Data Collection
   collect_customer_field: collectCustomerFieldSchema,
+  defer_customer_field: deferCustomerFieldSchema,
 
   // Utility / Background
   escalate_to_human: escalateToHumanSchema,

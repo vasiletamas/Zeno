@@ -35,7 +35,7 @@ import { setPurchaseIntent } from './handlers/intent-handlers'
 import { getCustomerProfile } from './handlers/profile-handlers'
 import { withdrawConsent } from './handlers/consent-handlers'
 import { getObjectionStrategy } from './handlers/objection-handlers'
-import { collectCustomerField } from './handlers/data-handlers'
+import { collectCustomerField, deferCustomerField } from './handlers/data-handlers'
 import { escalateToHuman } from './handlers/utility-handlers'
 import { ensurePaymentSession, getPaymentStatus, changePaymentOption } from './handlers/payment-handlers'
 import { resolveReferral, resolveWorkItem } from './handlers/operator-handlers'
@@ -1200,6 +1200,28 @@ registerTool('collect_customer_field', {
   allowedRoles: ALL_ROLES,
   kind: 'commit',
 }, collectCustomerField)
+
+registerTool('defer_customer_field', {
+  description:
+    'Record that the customer declined to provide a contact field (email/phone) for now. ' +
+    'Call when the customer refuses or postpones a contact ask — never invent a refusal. ' +
+    'The pending contact card is released by this fact.',
+  parameters: {
+    type: 'object',
+    properties: {
+      field: { type: 'string', description: 'The declined contact field: email or phone.' },
+      reason: { type: 'string', description: "The customer's stated reason, verbatim or briefly paraphrased (optional)." },
+    },
+    required: ['field'],
+    additionalProperties: false,
+  },
+  executionMode: 'blocking',
+  customerVisible: false,
+  statusMessage: null,
+  allowedRoles: ALL_ROLES,
+  sideEffect: 'save',
+  kind: 'commit',
+}, deferCustomerField)
 
 // --- Utility / Background ---
 

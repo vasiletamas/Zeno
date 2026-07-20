@@ -21,7 +21,7 @@ export type ProfileWriteResult =
   | { outcome: 'applied'; provenance: FieldRecord['provenance']; mirrorConflict?: string }
   | { outcome: 'rejected'; reason: 'field_verified_immutable' }
 
-type Db = Pick<typeof prisma, 'customerProfileField' | 'customer' | 'verificationChallenge'>
+type Db = Pick<typeof prisma, 'customerProfileField' | 'customer' | 'verificationChallenge' | 'profileFieldDeferral'>
 
 const MIRROR: Partial<Record<ProfileFieldName, (v: string) => Record<string, unknown>>> = {
   email: v => ({ email: v }),
@@ -157,4 +157,15 @@ export async function getAgeWithSource(customerId: string, now = new Date(), db:
 
 export async function getAge(customerId: string, now = new Date(), db: Db = prisma): Promise<number | null> {
   return (await getAgeWithSource(customerId, now, db))?.age ?? null
+}
+
+/** Spec 2026-07-20 §1: fields the customer explicitly declined to provide
+ * now, MINUS any field that has since been provided (presence wins). */
+export async function getFieldDeferrals(customerId: string, db: Db = prisma): Promise<string[]> {
+  const rows = await db.profileFieldDeferral.findMany({
+    where: { customerId }, select: { field: true }, distinct: ['field'],
+  })
+  if (rows.length === 0) return []
+  const profile = await getProfile(customerId)
+  return rows.map((r) => r.field).filter((f) => !(f in profile.fields))
 }

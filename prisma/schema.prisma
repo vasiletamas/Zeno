@@ -685,6 +685,20 @@ model CustomerProfileField {
   @@unique([customerId, field])
 }
 
+/// Spec 2026-07-20 §1 (Ruling 6): a customer's refusal to provide a contact
+/// field NOW is a recorded fact the card derivation reads as status
+/// 'deferred'. A later provided value simply supersedes (field presence wins).
+model ProfileFieldDeferral {
+  id             String   @id @default(cuid())
+  customerId     String
+  field          String
+  conversationId String?
+  reason         String?
+  createdAt      DateTime @default(now())
+
+  @@index([customerId, field, createdAt])
+}
+
 model Conversation {
   id                  String             @id @default(cuid())
   customerId          String

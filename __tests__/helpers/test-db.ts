@@ -28,6 +28,7 @@ export const DOMAIN_TABLES: string[] = [
   'ConsentEvent',
   'PurchaseIntent',
   'CustomerProfileField',
+  'ProfileFieldDeferral',
   'CommitLedger',
   'DisclosureAck',
   'PaymentEvent',

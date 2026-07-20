@@ -279,3 +279,27 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
     return { success: false, error: String(error) }
   }
 }
+
+// ─────────────────────────────────────────────
+// defer_customer_field (spec 2026-07-20 §1, Ruling 6)
+// ─────────────────────────────────────────────
+
+/**
+ * A customer's "not now" on a contact ask is a recorded FACT, not a card
+ * operation. The deferral row derives the card to status 'deferred' (Task 8);
+ * a later provided value simply supersedes (field presence wins).
+ */
+export const deferCustomerField: ToolHandler = async (args, context) => {
+  const { field, reason } = args as { field: string; reason?: string }
+  if (!(FIELD_ORDER as readonly string[]).includes(field)) {
+    return { success: false, error: `invalid_args: only contact fields (${FIELD_ORDER.join(', ')}) can be deferred.` }
+  }
+  await context.db.profileFieldDeferral.create({
+    data: { customerId: context.customerId, field, conversationId: context.conversationId, reason: reason ?? null },
+  })
+  return {
+    success: true,
+    data: { fieldDeferred: field },
+    message: `${field} deferral recorded — do not ask again this conversation; the card is released.`,
+  }
+}

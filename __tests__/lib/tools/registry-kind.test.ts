@@ -22,13 +22,15 @@ import { getRegisteredToolNames, getToolDefinition } from '@/lib/tools/registry'
 // batch affirmation of the CONFIRM_ALWAYS medical answers (sign_dnt precedent);
 // T10 (2026-07-16): write_medical_batch added — the ONE-card bulk BD write
 // ("none of these apply" + toggles), per-question consequences in one commit
-const COMMITS = ['set_candidate_product', 'open_dnt_session', 'write_dnt_answer', 'sign_dnt', 'set_application', 'write_question_answer', 'write_medical_batch', 'modify_answer', 'select_coverage', 'resume_application', 'cancel_application', 'acknowledge_suitability_warning', 'sign_medical_declarations', 'generate_quote', 'accept_quote', 'cancel_quote', 'acknowledge_disclosures', 'ensure_payment_session', 'change_payment_option', 'collect_customer_field', 'escalate_to_human', 'withdraw_consent', 'resolve_referral', 'resolve_work_item', 'mark_submitted', 'activate_policy', 'cancel_submission', 'request_cancellation', 'start_channel_verification', 'confirm_channel_verification', 'request_document_upload']
+// Card-state SSOT (2026-07-20, Ruling 6): defer_customer_field added — the
+// declination fact for contact asks (deferred card status derives from it)
+const COMMITS = ['set_candidate_product', 'open_dnt_session', 'write_dnt_answer', 'sign_dnt', 'set_application', 'write_question_answer', 'write_medical_batch', 'modify_answer', 'select_coverage', 'resume_application', 'cancel_application', 'acknowledge_suitability_warning', 'sign_medical_declarations', 'generate_quote', 'accept_quote', 'cancel_quote', 'acknowledge_disclosures', 'ensure_payment_session', 'change_payment_option', 'collect_customer_field', 'defer_customer_field', 'escalate_to_human', 'withdraw_consent', 'resolve_referral', 'resolve_work_item', 'mark_submitted', 'activate_policy', 'cancel_submission', 'request_cancellation', 'start_channel_verification', 'confirm_channel_verification', 'request_document_upload']
 
 describe('tool kind classification', () => {
   it('every registered tool carries a kind', () => {
     for (const name of getRegisteredToolNames()) expect(['read', 'commit', 'internal']).toContain(getToolDefinition(name)?.kind)
   })
-  it('the 31 committing tools are kind=commit', () => {
+  it('the 32 committing tools are kind=commit', () => {
     for (const name of COMMITS) expect(getToolDefinition(name)?.kind, name).toBe('commit')
   })
   it('the retired mutators are gone', () => {
