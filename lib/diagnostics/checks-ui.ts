@@ -108,3 +108,25 @@ export const cardForCommittedFact: DiagnosticCheck = {
     return [{ checkId: 'card_for_committed_fact', severity: 'error', turn: t.messageIndex, evidence: { cardField: field, tool: c.name } }]
   })),
 }
+
+/** Input-COLLECTION card types: the customer types/taps an answer into them.
+ * Review/confirm/quote/payment cards are presentations, not competing inputs. */
+const INPUT_CARD_TYPES = new Set(['show_data_field', 'show_otp_entry', 'show_question', 'show_medical_batch'])
+
+/**
+ * Ratchet origin: 2026-07-20, conv cmrrhruba turn 8 — phone card + OTP card
+ * in one turn; the client's one-card-per-message Map silently dropped the
+ * phone card. Two simultaneous input cards is an emission defect regardless
+ * of which one survives rendering.
+ */
+export const competingInputCards: DiagnosticCheck = {
+  id: 'competing_input_cards',
+  description: 'A single turn emitted more than one input-collection card (2026-07-20, conv cmrrhruba turn 8)',
+  run: (e) => e.turns.flatMap((t): Finding[] => {
+    const types = t.toolCalls
+      .map((c) => (c.result?.uiAction as { type?: unknown } | undefined)?.type)
+      .filter((x): x is string => typeof x === 'string' && INPUT_CARD_TYPES.has(x))
+    if (types.length <= 1) return []
+    return [{ checkId: 'competing_input_cards', severity: 'warn', turn: t.messageIndex, evidence: { types } }]
+  }),
+}

@@ -146,3 +146,30 @@ describe('card_for_committed_fact (2026-07-20 ratchet)', () => {
     expect(CHECK_CATALOG.some((c) => c.id === 'card_for_committed_fact')).toBe(true)
   })
 })
+
+describe('competing_input_cards (2026-07-20 ratchet)', () => {
+  const call = (id: string, name: string, type: string) => ({ round: 0, toolCallId: id, name, args: {}, partition: 'writing',
+    result: { success: true, durationMs: 5, cached: false, uiAction: { type, payload: {} } } })
+
+  it('flags a turn emitting two input-type cards (conv cmrrhruba turn 8: data_field + otp)', () => {
+    const e = makeExport({ turns: [turn(8, { toolCalls: [
+      call('a', 'collect_customer_field', 'show_data_field'),
+      call('b', 'start_channel_verification', 'show_otp_entry'),
+    ] })] as never })
+    const f = runDiagnostics(e).filter((x) => x.checkId === 'competing_input_cards')
+    expect(f).toHaveLength(1)
+    expect(f[0]).toMatchObject({ severity: 'warn', turn: 8, evidence: { types: ['show_data_field', 'show_otp_entry'] } })
+  })
+
+  it('is silent for one input card, or an input card + a non-input card (quote)', () => {
+    const e = makeExport({ turns: [turn(2, { toolCalls: [
+      call('a', 'write_dnt_answer', 'show_question'),
+      call('b', 'generate_quote', 'show_quote'),
+    ] })] as never })
+    expect(runDiagnostics(e).some((x) => x.checkId === 'competing_input_cards')).toBe(false)
+  })
+
+  it('is registered in the catalog', () => {
+    expect(CHECK_CATALOG.some((c) => c.id === 'competing_input_cards')).toBe(true)
+  })
+})
