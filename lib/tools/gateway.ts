@@ -230,14 +230,14 @@ export const REPLAY_NOTICE =
 /**
  * Spec 2026-07-20 §3 (conv cmrrhruba turn 12): a replay confirms a fact — it
  * must never re-deliver presentation computed against dead state. Facts and
- * effects replay verbatim; _uiAction is dropped and a card-directive _message
- * is replaced by the neutral notice. _confirmation stays (an idempotent ✓
+ * effects replay verbatim; _uiAction is dropped and ANY string _message
+ * (handler prose was written for the fresh apply, cards included) is
+ * replaced by the neutral notice. _confirmation stays (an idempotent ✓
  * line is truthful).
  */
 export function sanitizeReplayEnvelope(envelope: CommitResult): CommitResult {
   if (envelope.data === undefined || envelope.data === null || typeof envelope.data !== 'object') return envelope
   const d = { ...(envelope.data as Record<string, unknown>) }
-  if (!('_uiAction' in d) && !('_message' in d)) return { ...envelope, data: d }
   delete d._uiAction
   if (typeof d._message === 'string') d._message = REPLAY_NOTICE
   return { ...envelope, data: d }

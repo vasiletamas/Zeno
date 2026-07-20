@@ -43,6 +43,7 @@ export async function executeErasure(customerId: string, executedBy: string, db:
   // ── customer_profile (erase in both contexts) ────────────────────────
   bump('customer_profile', (await db.customerInsight.deleteMany({ where: { customerId } })).count)
   bump('customer_profile', (await db.customerProfileField.deleteMany({ where: { customerId } })).count)
+  bump('customer_profile', (await db.profileFieldDeferral.deleteMany({ where: { customerId } })).count)
 
   // ── dnt_unsigned_sessions (erase; the signed Dnt's source survives) ──
   const draftSessions = (await db.dntSession.findMany({ where: { customerId, dnt: { is: null } }, select: { id: true } })).map((s) => s.id)

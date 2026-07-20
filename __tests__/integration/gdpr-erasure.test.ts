@@ -30,11 +30,15 @@ describe('GDPR erasure executor (E3.2, M3)', () => {
     const conv = await prisma.conversation.create({ data: { customerId: customer.id } })
     await prisma.message.create({ data: { conversationId: conv.id, role: 'user', content: 'date personale' } })
     await prisma.customerInsight.create({ data: { customerId: customer.id, key: 'budgetPreference', category: 'BUYING_SIGNAL', value: 'lowest', source: 'test' } })
+    // spec 2026-07-20 §1 (Ruling 6): the deferral row carries customerId + a
+    // free-text reason — customer_profile data, erased with the profile.
+    await prisma.profileFieldDeferral.create({ data: { customerId: customer.id, field: 'phone', conversationId: conv.id, reason: 'nu acum, sunt la serviciu' } })
 
     const report = await executeErasure(customer.id, 'operator:op-1', prisma)
 
     expect(await prisma.conversation.count({ where: { customerId: customer.id } })).toBe(0)
     expect(await prisma.customerInsight.count({ where: { customerId: customer.id } })).toBe(0)
+    expect(await prisma.profileFieldDeferral.count({ where: { customerId: customer.id } })).toBe(0)
     const after = await prisma.customer.findUniqueOrThrow({ where: { id: customer.id } })
     expect(after).toMatchObject({ name: null, email: null, phone: null, isAnonymous: true })
     expect(after.erasedAt).not.toBeNull()

@@ -12,7 +12,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { randomUUID } from 'crypto'
 import { prisma } from '@/lib/db'
-import { resetDb, createCustomer } from '@/__tests__/helpers/test-db'
+import { resetDb, createCustomer, ensureTestProduct, issueTestQuote } from '@/__tests__/helpers/test-db'
 import { collectCustomerField } from '@/lib/tools/handlers/data-handlers'
 import type { ToolContext } from '@/lib/tools/types'
 
@@ -41,10 +41,11 @@ async function seedPendingChallenge(customerId: string, conversationId: string) 
   })
 }
 
-/** Application + ISSUED quote bound to THIS conversation (mirrors the
- * test-db seedMinimalProtectFixture + issueTestQuote shape). */
+/** Application + ISSUED quote bound to THIS conversation: the quote row
+ * comes from the shared issueTestQuote helper; only the conversation
+ * binding (the snapshot's activeApplicationId pointer) is local. */
 async function seedIssuedQuote(customerId: string, conversationId: string) {
-  const product = await prisma.product.findFirstOrThrow({ where: { code: 'protect' } })
+  const product = await ensureTestProduct()
   const app = await prisma.application.create({
     data: { customerId, productId: product.id, status: 'OPEN' },
   })
@@ -52,13 +53,7 @@ async function seedIssuedQuote(customerId: string, conversationId: string) {
     where: { id: conversationId },
     data: { productId: product.id, activeApplicationId: app.id },
   })
-  await prisma.quote.create({
-    data: {
-      applicationId: app.id, productId: product.id, customerId,
-      premiumAnnual: 190, premiumMonthly: 15.83, coverages: {},
-      status: 'ISSUED', validUntil: new Date(Date.now() + 30 * 86400e3),
-    },
-  })
+  await issueTestQuote({ customerId, applicationId: app.id })
 }
 
 describe.skipIf(!process.env.DATABASE_URL)('ladder gate (spec 2026-07-20 §4, conv cmrrhruba turns 6/10/12)', () => {

@@ -432,6 +432,7 @@ model Customer {
   user              User?
   insights          CustomerInsight[]
   profileFields     CustomerProfileField[]
+  fieldDeferrals    ProfileFieldDeferral[]
   consentEvents     ConsentEvent[]
   suitabilityWarningAcks SuitabilityWarningAck[]
   dnts              Dnt[]
@@ -695,6 +696,8 @@ model ProfileFieldDeferral {
   conversationId String?
   reason         String?
   createdAt      DateTime @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id])
 
   @@index([customerId, field, createdAt])
 }
