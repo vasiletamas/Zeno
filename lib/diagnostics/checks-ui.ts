@@ -38,3 +38,50 @@ export const unrenderedUiAction: DiagnosticCheck = {
     return [{ checkId: 'unrendered_ui_action', severity: 'error', turn: t.messageIndex, evidence: { type, tool: c.name } }]
   })),
 }
+
+/** Ledger rows inside a turn's [startedAt, endedAt] window (ledger createdAt
+ * is ISO, turn bounds are epoch ms). Small windows; O(n·m) is fine. */
+const ledgerRowsInTurn = (
+  ledger: { tool: string; idempotencyDisposition: string; createdAt: string }[] | undefined,
+  t: { startedAt: number; endedAt?: number },
+) => (ledger ?? []).filter((r) => {
+  const at = Date.parse(r.createdAt)
+  return at >= t.startedAt && at <= (t.endedAt ?? Number.MAX_SAFE_INTEGER)
+})
+
+/**
+ * Ratchet origin: 2026-07-20, conv cmrrhruba0001g40yh3am7peo turn 12 — an
+ * idempotent replay returned the stored envelope verbatim, re-emitting a
+ * show_data_field(phone) card computed when phone was genuinely missing.
+ * A replay confirms a fact; it must never deliver a card.
+ *
+ * Verified against the live row (conv cmrrhruba, all 33 turns): TurnDebug
+ * persistence (lib/chat/turn-debug-persistence.ts) reduces the whole turn's
+ * event list in one synchronous pass, so startedAt and endedAt are BOTH
+ * Date.now() calls a fraction of a millisecond apart — every turn in this
+ * conversation has startedAt === endedAt (or a 1ms jitter), and that single
+ * instant lands AFTER the turn's own mid-turn ledger writes (turn 12: ledger
+ * createdAt 08:27:53.738Z, recorded startedAt/endedAt 08:27:55.920Z — 2.18s
+ * later). t.startedAt is therefore not a usable lower bound. Turns ARE
+ * strictly sequential (endedAt strictly increasing turn-to-turn), so the
+ * preceding turn's endedAt is used as the window floor instead.
+ */
+export const staleCardReplayed: DiagnosticCheck = {
+  id: 'stale_card_replayed',
+  description: 'A replayed commit\'s result carried a uiAction — a card computed against dead state was re-delivered (2026-07-20, conv cmrrhruba turn 12)',
+  run: (e) => {
+    const ordered = [...e.turns].sort((a, b) => a.messageIndex - b.messageIndex)
+    return ordered.flatMap((t, i) => {
+      const windowFloor = (ordered[i - 1] as { endedAt?: number } | undefined)?.endedAt ?? 0
+      const replays = ledgerRowsInTurn(e.ledger, { startedAt: windowFloor, endedAt: (t as { endedAt?: number }).endedAt })
+        .filter((r) => r.idempotencyDisposition === 'replay')
+      if (replays.length === 0) return []
+      return t.toolCalls.flatMap((c): Finding[] => {
+        const type = (c.result?.uiAction as { type?: unknown } | undefined)?.type
+        if (typeof type !== 'string') return []
+        if (!replays.some((r) => r.tool === c.name)) return []
+        return [{ checkId: 'stale_card_replayed', severity: 'error', turn: t.messageIndex, evidence: { tool: c.name, cardType: type } }]
+      })
+    })
+  },
+}

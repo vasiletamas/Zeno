@@ -65,3 +65,49 @@ describe('unsolicited_contact_card (2026-07-19 ratchet)', () => {
     expect(CHECK_CATALOG.some((c) => c.id === 'unsolicited_contact_card')).toBe(true)
   })
 })
+
+describe('stale_card_replayed (2026-07-20 ratchet)', () => {
+  // Ratchet origin: conv cmrrhruba0001g40yh3am7peo turn 12 — the gateway
+  // replayed turn 10's stored envelope verbatim, re-emitting a phone card
+  // computed against dead state. Effects replay; cards must not.
+  const replayLedgerRow = (tool: string, createdAt: string) => ({
+    id: 'L1', tool, actor: 'agent', outcome: 'applied', effects: [], reasonCode: null,
+    phaseFrom: 'DISCOVERY', phaseTo: 'DISCOVERY', idempotencyDisposition: 'replay',
+    targetRef: 'field:residency', createdAt,
+  })
+  const cardResult = { success: true, durationMs: 5, cached: false, uiAction: { type: 'show_data_field', payload: { field: 'phone' } } }
+
+  it('flags a card-bearing toolCall in a turn window containing a same-tool replay ledger row', () => {
+    const e = makeExport({
+      turns: [turn(12, {
+        startedAt: Date.parse('2026-07-19T08:27:50.000Z'), endedAt: Date.parse('2026-07-19T08:27:56.000Z'),
+        toolCalls: [{ round: 1, toolCallId: 'x', name: 'collect_customer_field', args: { field: 'residency', value: 'Romania' }, partition: 'writing', result: cardResult }],
+      })] as never,
+      ledger: [replayLedgerRow('collect_customer_field', '2026-07-19T08:27:53.738Z')] as never,
+    })
+    const f = runDiagnostics(e).filter((x) => x.checkId === 'stale_card_replayed')
+    expect(f).toHaveLength(1)
+    expect(f[0]).toMatchObject({ severity: 'error', turn: 12, evidence: { tool: 'collect_customer_field', cardType: 'show_data_field' } })
+  })
+
+  it('is silent when the replay row is outside the turn window, the tool differs, or no card rides the result', () => {
+    const e = makeExport({
+      turns: [turn(12, {
+        startedAt: Date.parse('2026-07-19T08:27:50.000Z'), endedAt: Date.parse('2026-07-19T08:27:56.000Z'),
+        toolCalls: [
+          { round: 0, toolCallId: 'a', name: 'collect_customer_field', args: { field: 'phone', value: '07' }, partition: 'writing', result: { success: true, durationMs: 5, cached: false } },
+          { round: 1, toolCallId: 'b', name: 'get_product_info', args: {}, partition: 'readOnly', result: cardResult },
+        ],
+      })] as never,
+      ledger: [
+        replayLedgerRow('collect_customer_field', '2026-07-19T08:20:00.000Z'),
+        replayLedgerRow('set_candidate_product', '2026-07-19T08:27:53.000Z'),
+      ] as never,
+    })
+    expect(runDiagnostics(e).some((x) => x.checkId === 'stale_card_replayed')).toBe(false)
+  })
+
+  it('is registered in the catalog', () => {
+    expect(CHECK_CATALOG.some((c) => c.id === 'stale_card_replayed')).toBe(true)
+  })
+})
