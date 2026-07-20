@@ -32,7 +32,8 @@ export const questionnaireAnswerFabricated: DiagnosticCheck = {
     // is idempotent, not invention (run cmr9eli9n: email re-collected 15
     // turns after the customer gave it)
     const seen = new Set<string>()
-    for (const t of ordered) {
+    for (let ti = 0; ti < ordered.length; ti++) {
+      const t = ordered[ti]
       for (const c of t.toolCalls) {
         const argKey = VALUE_ARGS[c.name]
         if (!argKey || c.result?.success !== true) continue
@@ -41,6 +42,33 @@ export const questionnaireAnswerFabricated: DiagnosticCheck = {
         const key = value.toLowerCase().trim()
         if (seen.has(key)) continue
         seen.add(key)
+        // 2026-07-20 (conv cmrrhruba turn 12): a card-submitted value is
+        // grounded by the card itself — the persisted prose only carries a
+        // mask (⟦action⟧✓ Telefon: ***607). The gui-actor ledger row in this
+        // turn's window, matching this tool (and, for collects, this field's
+        // targetRef), is the deterministic card-submission trace.
+        //
+        // TurnDebug persistence stamps startedAt/endedAt with two Date.now()
+        // calls in the same synchronous post-hoc reduction pass, so every
+        // recorded turn has startedAt === endedAt (verified across all 33
+        // turns of conv cmrrhruba), landing AFTER the turn's own mid-turn
+        // ledger writes (turn 12: gui commit at 08:27:51.410Z, recorded
+        // startedAt/endedAt 08:27:55.920Z). t.startedAt is therefore not a
+        // usable window floor; turns are strictly sequential, so the
+        // preceding turn's endedAt is used instead (same fix as
+        // stale_card_replayed in checks-ui.ts).
+        const tStart = (ordered[ti - 1] as { endedAt?: number } | undefined)?.endedAt ?? 0
+        const tEnd = (t as { endedAt?: number }).endedAt ?? Number.MAX_SAFE_INTEGER
+        const guiCommitted = (e.ledger ?? []).some((r) => {
+          if (r.actor !== 'gui' || r.tool !== c.name || r.outcome !== 'applied') return false
+          const at = Date.parse(r.createdAt)
+          if (at < tStart || at > tEnd) return false
+          if (c.name === 'collect_customer_field') {
+            return r.targetRef === `field:${String((c.args as Record<string, unknown>)?.field ?? '')}`
+          }
+          return true
+        })
+        if (guiCommitted) continue
         const userMessages = e.messages
           .map((m, i) => ({ ...m, i }))
           .filter((m) => m.role === 'user' && m.i <= t.messageIndex)

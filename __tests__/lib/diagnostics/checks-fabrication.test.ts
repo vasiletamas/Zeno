@@ -86,3 +86,43 @@ describe('state_claim_without_commit', () => {
     expect(runDiagnostics(e).some((f) => f.checkId === 'state_claim_without_commit')).toBe(false)
   })
 })
+
+describe('gui-actor exemption (2026-07-20)', () => {
+  it('does not flag a value committed by the gui actor (card submit), even when prose only shows a mask', () => {
+    const e = makeExport({
+      messages: [
+        { id: 'u', role: 'user', content: '⟦action⟧✓ Telefon: ***607', toolCalls: null, toolResults: null, createdAt: 'x' },
+        { id: 'a', role: 'assistant', content: 'Mulțumesc.', toolCalls: null, toolResults: null, createdAt: 'x' },
+      ] as never,
+      turns: [turn(0, {
+        userMessage: '⟦action⟧✓ Telefon: ***607',
+        startedAt: Date.parse('2026-07-19T08:27:50.000Z'), endedAt: Date.parse('2026-07-19T08:27:56.000Z'),
+        toolCalls: [{ round: 0, toolCallId: 'x', name: 'collect_customer_field', args: { field: 'phone', value: '0735226607' }, partition: 'writing',
+          result: { success: true, durationMs: 5, cached: false } }],
+      })] as never,
+      ledger: [{ id: 'L1', tool: 'collect_customer_field', actor: 'gui', outcome: 'applied', effects: [], reasonCode: null,
+        phaseFrom: 'DISCOVERY', phaseTo: 'DISCOVERY', idempotencyDisposition: 'fresh', targetRef: 'field:phone',
+        createdAt: '2026-07-19T08:27:51.410Z' }] as never,
+    })
+    expect(runDiagnostics(e).some((x) => x.checkId === 'questionnaire_answer_fabricated')).toBe(false)
+  })
+
+  it('still flags an agent-actor value with no anchor (net intact)', () => {
+    const e = makeExport({
+      messages: [
+        { id: 'u', role: 'user', content: 'buna', toolCalls: null, toolResults: null, createdAt: 'x' },
+        { id: 'a', role: 'assistant', content: 'ok', toolCalls: null, toolResults: null, createdAt: 'x' },
+      ] as never,
+      turns: [turn(0, {
+        userMessage: 'buna',
+        startedAt: Date.parse('2026-07-19T08:27:50.000Z'), endedAt: Date.parse('2026-07-19T08:27:56.000Z'),
+        toolCalls: [{ round: 0, toolCallId: 'x', name: 'collect_customer_field', args: { field: 'phone', value: '0735226607' }, partition: 'writing',
+          result: { success: true, durationMs: 5, cached: false } }],
+      })] as never,
+      ledger: [{ id: 'L1', tool: 'collect_customer_field', actor: 'agent', outcome: 'applied', effects: [], reasonCode: null,
+        phaseFrom: 'DISCOVERY', phaseTo: 'DISCOVERY', idempotencyDisposition: 'fresh', targetRef: 'field:phone',
+        createdAt: '2026-07-19T08:27:51.410Z' }] as never,
+    })
+    expect(runDiagnostics(e).some((x) => x.checkId === 'questionnaire_answer_fabricated')).toBe(true)
+  })
+})
