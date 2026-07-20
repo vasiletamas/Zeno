@@ -8,6 +8,7 @@
 import { setDeclaredField, getProfile, type ProfileFieldName } from '@/lib/customer/profile-service'
 import { verifiedChannelsFor, maskVerificationTarget } from '@/lib/customer/verification-service'
 import { validateCnpChecksum, cnpMatchesDob } from '@/lib/engines/cnp-validation'
+import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { valueNotGroundedError } from './grounding-guard'
 import type { ToolHandler, ToolContext } from '@/lib/tools/types'
 
@@ -224,30 +225,39 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
     // orchestrator executes the hop; this handler only DECLARES it.
     const autoChain = field === 'email' ? await emailAutoChain(context, trimmedValue) : null
 
-    // 3. Determine next needed field from the provenance store
-    const profile = await getProfile(context.customerId)
+    // 3. Ladder auto-advance (spec 2026-07-20 §4). ONLY a ladder-member save
+    // may advance the contact ladder (conv cmrrhruba turns 6/10: declaredAge/
+    // residency must not demand contact), the next field must be DUE (phone
+    // waits for a quote — Ruling 2), and a declared auto-chain hands the turn
+    // to the OTP card (turn 8: two competing input cards).
+    const isLadderSave = (FIELD_ORDER as readonly string[]).includes(field)
     let nextField: CollectableField | null = null
-    for (const f of FIELD_ORDER) {
-      if (!(f in profile.fields)) {
-        nextField = f
-        break
+    if (isLadderSave && !autoChain) {
+      const profile = await getProfile(context.customerId)
+      for (const f of FIELD_ORDER) {
+        if (!(f in profile.fields)) {
+          nextField = f
+          break
+        }
+      }
+      if (nextField === 'phone') {
+        const snap = await loadDomainSnapshot(context.conversationId, context.db)
+        if (snap.quote === null) nextField = null
       }
     }
 
-    // 4. If more fields needed: return uiAction show_data_field with next field
+    // 4. Result assembly — card only when the ladder produced a due nextField.
+    const baseData: Record<string, unknown> = {
+      fieldSaved: field,
+      ...(w.mirrorConflict ? { mirrorConflict: w.mirrorConflict } : {}),
+      ...(autoChain ? { _autoChain: autoChain } : {}),
+    }
     if (nextField) {
       const meta = FIELD_META[nextField]
       return {
         success: true,
-        data: {
-          fieldSaved: field,
-          nextField,
-          ...(w.mirrorConflict ? { mirrorConflict: w.mirrorConflict } : {}),
-          ...(autoChain ? { _autoChain: autoChain } : {}),
-        },
-        message: autoChain
-          ? emailAutoChainMessage(trimmedValue)
-          : `${field} saved. Please provide ${nextField}.`,
+        data: { ...baseData, nextField },
+        message: `${field} saved. Please provide ${nextField}.`,
         uiAction: {
           type: 'show_data_field',
           payload: {
@@ -260,20 +270,10 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
         },
       }
     }
-
-    // 5. All collected. Identity tier is DERIVED (T4-R2) — collecting
-    // declared fields never flips isAnonymous (B0.ADD-1).
     return {
       success: true,
-      data: {
-        fieldSaved: field,
-        allFieldsCollected: true,
-        ...(w.mirrorConflict ? { mirrorConflict: w.mirrorConflict } : {}),
-        ...(autoChain ? { _autoChain: autoChain } : {}),
-      },
-      message: autoChain
-        ? emailAutoChainMessage(trimmedValue)
-        : 'All customer information collected successfully.',
+      data: baseData,
+      message: autoChain ? emailAutoChainMessage(trimmedValue) : `${field} saved.`,
     }
   } catch (error) {
     return { success: false, error: String(error) }
