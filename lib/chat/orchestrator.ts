@@ -55,7 +55,7 @@ import { detectToolNarration, type ToolNarrationResult } from './tool-narration-
 import { debugYield, isDev, buildIdentityPayload, buildLegalityPayload, recordDebugEvent, type DebugEvent, type DebugGatePayload } from './debug'
 import { serializeToolResultForModel } from './tool-result-serializer'
 import { persistTurnDebug } from './turn-debug-persistence'
-import { deriveActiveCards } from './derive-active-cards'
+import { deriveActiveCards, type ActiveCard } from './derive-active-cards'
 
 // ==============================================
 // CONSTANTS
@@ -645,8 +645,31 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     })
   }
 
+  // Card-state SSOT (spec 2026-07-20 §5): the ON-SCREEN CARDS block needs the
+  // TURN-START card set — a genuinely different instant from the turn-end set
+  // the `cards_state` SSE event carries, so this second derivation is by
+  // design. Derived ONCE here and reused by the debug event below. Same
+  // failure posture as everywhere else on this path: never break a turn.
+  let briefedCards: ActiveCard[] = []
+  if (exposure) {
+    try {
+      briefedCards = await deriveActiveCards(state.conversationId)
+    } catch (err) {
+      logError({ layer: 'orchestrator', category: 'cards_state', message: 'deriveActiveCards failed for the briefing; continuing without the ON-SCREEN CARDS block', context: { conversationId: state.conversationId }, error: err })
+    }
+  }
+
   // Patch situationalBriefing from the derived state (phase/subphase + next best action)
-  sections.situationalBriefing = exposure ? formatDerivedBriefing(exposure.state, exposure.actions) : null
+  sections.situationalBriefing = exposure ? formatDerivedBriefing(exposure.state, exposure.actions, briefedCards) : null
+
+  // Offline evidence for the T11 amendment (a briefing-listed card is legally
+  // referenceable — lib/diagnostics/checks-cards.ts). Always recorded, even
+  // when empty: absence of the event and an empty set must stay distinguishable
+  // for turns that ran before this landed.
+  recordDebugEvent(state, {
+    event: 'debug:cards_briefed',
+    data: { traceId: state.traceId, cards: briefedCards.map((c) => ({ key: c.key, status: c.status })) },
+  })
 
   // Patch capabilityManifest from the exposure set (A3.1 erratum 3 — same
   // patch-after-gate pattern as the briefing, keeping gate ∥ context intact).

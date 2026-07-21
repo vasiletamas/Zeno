@@ -1,5 +1,6 @@
 import type { Phase, AppSubphase, DerivedStateV3, ExposedActions } from '@/lib/engines/domain-types'
 import { maskVerificationTarget } from '@/lib/customer/verification-service'
+import type { ActiveCard } from './derive-active-cards'
 
 // TARGET map (A4.3, T10.D4). Every removal from the A1 content-preserving map
 // carries its 'retired because X' note in
@@ -102,7 +103,7 @@ function formatIntentLine(state: DerivedStateV3): string | null {
   return `Active intent (${intent.sameSession ? 'stale' : 'from a previous conversation'}, ${daysAgo} days old): ${intent.goal} ${intent.productCode}${cfgSuffix} — captured ${capturedDate}. Do not silently assume it still holds — RENEW WITH CONTEXT: ask ONE question anchored in the recorded state, e.g. "Acum ${daysAgo} zile te interesa ${intent.productCode}${cfgSuffix} — lipsea ${missingThen}; acum ${nowText}. Continuăm?" — then proceed on a yes, or call set_purchase_intent with {renounce: true} if they decline.`
 }
 
-export function formatDerivedBriefing(state: DerivedStateV3, actions: ExposedActions): string {
+export function formatDerivedBriefing(state: DerivedStateV3, actions: ExposedActions, activeCards?: ActiveCard[]): string {
   const lines: string[] = []
   lines.push(`Phase: ${state.phase}${state.subphase ? '/' + state.subphase : ''}`)
   // T8: momentum first — the intent line precedes the objective so the
@@ -120,6 +121,17 @@ export function formatDerivedBriefing(state: DerivedStateV3, actions: ExposedAct
   // P0-5: a confirm card is on screen — override any push toward the tool.
   for (const tool of state.pendingConfirmationTools ?? []) {
     lines.push(`AWAITING CUSTOMER CONFIRMATION: ${tool} — a confirmation card is displayed in the chat; do NOT call ${tool} again yourself, invite the customer to tap Confirm on the card (their tap completes it).`)
+  }
+  // Spec 2026-07-20 §5 (conv cmrrhruba msgs 13-39: the model talked past a
+  // stale phone card + an expired OTP card for 13 turns): the briefing subset
+  // that has NO other durable surface — contact-field cards and expired OTP.
+  // ACTIVE otp keeps the Verification line below, confirm:* keeps P0-5 above,
+  // question:* keeps the DNT-code line — printing them here would duplicate.
+  const printable = (activeCards ?? []).filter((c) =>
+    c.key.startsWith('data_field:') || (c.key.startsWith('otp:') && c.status === 'expired'))
+  if (printable.length > 0) {
+    lines.push('ON-SCREEN CARDS:')
+    for (const c of printable) lines.push(`- ${c.key} [${c.status.toUpperCase()}] — ${c.hint}`)
   }
   if (state.product) lines.push(`Product: ${state.product.code}`)
   if (state.selection.tier) lines.push(`Selection: tier ${state.selection.tier}${state.selection.level ? ', level ' + state.selection.level : ''}${state.selection.addon ? ', add-on included' : ''}`)

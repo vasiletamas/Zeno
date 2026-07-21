@@ -170,3 +170,32 @@ describe('formatDerivedBriefing (new vocabulary)', () => {
     expect(text).toContain('NEVER work around a blocked action')
   })
 })
+
+describe('ON-SCREEN CARDS briefing (spec 2026-07-20 §5)', () => {
+  // The briefing prints ONLY the gap-filling subset: contact-field cards (any
+  // status) and EXPIRED otp. An ACTIVE otp keeps the existing Verification
+  // line, confirm:* keeps P0-5, question:* keeps the DNT-code line.
+  const baseState = () => deriveAndExpose(makeSnapshot()).state
+  const baseActions = () => deriveAndExpose(makeSnapshot()).actions
+
+  it('prints data_field entries and EXPIRED otp entries with their hints', () => {
+    const briefing = formatDerivedBriefing(baseState(), baseActions(), [
+      { key: 'data_field:phone', status: 'active', hint: 'the phone card owns this input — invite the customer to fill it; do not re-ask in prose' },
+      { key: 'data_field:email', status: 'deferred', hint: 'customer declined email for now — do NOT re-ask; resumes only if they offer it' },
+      { key: 'otp:email', status: 'expired', hint: 'the code EXPIRED — offer to resend (start_channel_verification); never ask for the old code' },
+      { key: 'otp:sms', status: 'active', hint: 'x' },
+      { key: 'confirm:sign_dnt', status: 'active', hint: 'x' },
+    ])
+    expect(briefing).toContain('ON-SCREEN CARDS:')
+    expect(briefing).toContain('data_field:phone [ACTIVE] — the phone card owns this input')
+    expect(briefing).toContain('data_field:email [DEFERRED] — customer declined email')
+    expect(briefing).toContain('otp:email [EXPIRED] — the code EXPIRED')
+    expect(briefing).not.toContain('otp:sms')
+    expect(briefing).not.toMatch(/ON-SCREEN CARDS:[\s\S]*confirm:sign_dnt/)
+  })
+
+  it('omits the block entirely when no printable entries exist', () => {
+    expect(formatDerivedBriefing(baseState(), baseActions(), [])).not.toContain('ON-SCREEN CARDS')
+    expect(formatDerivedBriefing(baseState(), baseActions())).not.toContain('ON-SCREEN CARDS')
+  })
+})

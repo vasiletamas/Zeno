@@ -7,6 +7,7 @@
  */
 
 import type {
+  DebugCardsBriefedPayload,
   DebugEvent,
   DebugGatePayload,
   DebugIdentityPayload,
@@ -40,6 +41,10 @@ export interface DebugTurn {
   /** F2.1 (T14.D2): per-turn legality snapshots in arrival order, turn_start first. */
   legality?: Omit<DebugLegalityPayload, 'traceId'>[]
   prompt?: Omit<DebugPromptPayload, 'traceId'>
+  /** Spec 2026-07-20 §5: the cards the ON-SCREEN CARDS briefing listed for the
+   * model at turn start — the offline licence for a card reference (T11
+   * amendment, lib/diagnostics/checks-cards.ts). */
+  briefedCards?: DebugCardsBriefedPayload['cards']
   toolCalls: DebugTurnToolCall[]
   toolNarration?: Omit<DebugToolNarrationPayload, 'traceId'>
   endedAt?: number
@@ -99,6 +104,11 @@ export function reduceDebugEvent(state: DebugState, event: DebugEvent): DebugSta
     case 'debug:prompt': {
       const { traceId, ...rest } = event.data
       return updateTurn(state, traceId, (t) => ({ ...t, prompt: rest }))
+    }
+
+    case 'debug:cards_briefed': {
+      const { traceId, cards } = event.data
+      return updateTurn(state, traceId, (t) => ({ ...t, briefedCards: cards }))
     }
 
     case 'debug:tool_call': {

@@ -108,6 +108,18 @@ describe('reduceDebugEvent', () => {
     })
     expect(s.turns[0].toolNarration).toEqual({ clean: true, violations: [] })
   })
+
+  // Card-state SSOT (spec 2026-07-20 §5): the card set the ON-SCREEN CARDS
+  // briefing printed this turn — offline evidence for the T11 amendment's
+  // hallucinated_ui_reference exemption.
+  it('attaches debug:cards_briefed cards to the matching turn', () => {
+    let s = reduceDebugEvent(EMPTY_STATE, start('t1', 0))
+    s = reduceDebugEvent(s, {
+      event: 'debug:cards_briefed',
+      data: { traceId: 't1', cards: [{ key: 'data_field:phone', status: 'active' }] },
+    })
+    expect(s.turns[0].briefedCards).toEqual([{ key: 'data_field:phone', status: 'active' }])
+  })
 })
 
 describe('buildTurnDebugPayload', () => {

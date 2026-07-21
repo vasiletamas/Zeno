@@ -112,6 +112,19 @@ export interface DebugToolNarrationPayload extends ToolNarrationResult {
   traceId: string
 }
 
+/**
+ * Card-state SSOT (spec 2026-07-20 §5): the card set the ON-SCREEN CARDS
+ * briefing printed to the model this turn — derived at TURN START (the SSE
+ * `cards_state` set is a different instant, turn END). Recorded so the
+ * offline net (`hallucinated_ui_reference`, T11 amendment) can tell a
+ * briefing-licensed card reference from a hallucinated one. Key + status
+ * only: the hint is prompt text, and the payloads carry personal data.
+ */
+export interface DebugCardsBriefedPayload {
+  traceId: string
+  cards: { key: string; status: string }[]
+}
+
 export interface DebugTurnEndPayload {
   traceId: string
   phases: Record<string, unknown>
@@ -223,6 +236,7 @@ export type DebugEvent =
   | { event: 'debug:tool_call'; data: DebugToolCallPayload }
   | { event: 'debug:tool_result'; data: DebugToolResultPayload }
   | { event: 'debug:tool_narration'; data: DebugToolNarrationPayload }
+  | { event: 'debug:cards_briefed'; data: DebugCardsBriefedPayload }
   | { event: 'debug:turn_end'; data: DebugTurnEndPayload }
 
 // ==============================================
