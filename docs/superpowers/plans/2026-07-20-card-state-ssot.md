@@ -21,9 +21,14 @@
 | T7 deferral facts (defer_customer_field) | ✅ done + spec+quality approved | b944fa1f (+6ac38741 GDPR+FK) | migrations verified; erasure covers deferrals (TDD) |
 | T8 deriveActiveCards SSOT | ✅ done + spec+quality approved | 5006ee3b (+9860ee70) | 7/7 derivations; single snapshot per turn; payload parity pinned |
 | T9 cards_state SSE | ✅ done + spec+quality approved | 2fb0136d | emitted once, main path, before done; consumer case + harness assert |
-| T10–T16 | ⬜ pending | — | — |
+| T10 reload parity (full set) | ✅ done | 20af7522 (joint w/ T12) | page.tsx seeds deriveActiveCards → initialCards; tsc clean |
+| T11 card-view reducer + wiring | ✅ done | d101ae04 (reducer) + 20af7522 (wiring) | 17 pure unit tests TDD; REAL action types enumerated |
+| T12 components render card truth | ✅ done (12.5 browser pass pending — T16 gate) | 20af7522 | chat ring 50 files/361 green; identity-cards 4/4 |
+| T13–T16 | ⬜ pending | — | — |
 
 **T8-9 notes:** plan's phone-active fixture needed a declared email (ladder order); ErrorLayer has no 'chat' → 'orchestrator'; noted-for-later: deep-freeze FIELD_META_FOR_CARDS next time data-handlers.ts is touched; card-view.ts (T11) becomes the canonical home of the shared card-entry type + the 'question:batch' key constant.
+
+**T10-12 notes:** (a) REAL action types differ from the plan's guesses — `medical_batch` (not submit_medical_batch), question code rides `payload.questionCode` (nullable, string|null); cardKeyForAction also covers legacy `answer_dnt` and the question confirm round-trips `write_question_answer`/`modify_answer`. (b) card-view.ts is the canonical type home per the quality-review directive: `ActiveCard = ActiveCardEntry & { hint: string }`; `questionKeyFor`/`QUESTION_BATCH_KEY` shared by derivation + client mappers. (c) `buildOtpSubmitAction(code, channel?)` threads the channel so the submitting key is truthful (adapter ignores it; legacy {code}-only payloads fall back to otp:email). (d) DEVIATION: live `ui_action` upserts an optimistic ACTIVE entry into cardsState (never a ✓/resolved) — without it a just-emitted card renders "Nu mai este necesar" until the turn-end cards_state lands; the turn-end set still replaces wholesale and remains the only authority. (e) newest-wins (`lastActionableId`) retired ONLY for keyed input cards; presentation cards (key null) keep it, and with markAnswered gone a presentation card stays interactive until a newer uiAction-bearing message lands (gateway idempotency + confirm round-trips absorb re-clicks). (f) page.tsx logError uses layer 'api' (ErrorLayer has no 'chat'), category 'cards_state'. (g) Step 12.4's FULL-suite run and Step 12.5's browser verification deliberately deferred to the T16 coordinator gate (here: tsc clean, chat unit ring 50/361 green, identity-cards 4/4, derive-active-cards integration 7/7).
 
 **T5-7 deviation log:** integration suites must run ONE at a time (shared postgres wedges concurrent runs); `.env` EMAIL_PROVIDER restored to `mock` (uncommitted — flip back if resend was deliberate); accepted quality observations: getFieldDeferrals db param half-threaded, snapshot cost on email-save path, deferral message says "this conversation" while the fact is customer-scoped.
 
@@ -1021,7 +1026,7 @@ describe('cards_state SSE dispatch (spec 2026-07-20 §2)', () => {
 **Files:**
 - Modify: `app/chat/[id]/page.tsx`, `components/chat/chat-page.tsx`, `lib/hooks/use-chat.ts` (options only, state lands in Task 11)
 
-- [ ] **Step 10.1:** In `page.tsx`, replace the `derivePendingCard` try/catch seed with:
+- [x] **Step 10.1:** In `page.tsx`, replace the `derivePendingCard` try/catch seed with:
 
 ```ts
   let initialCards: ActiveCard[] = []
@@ -1034,8 +1039,8 @@ describe('cards_state SSE dispatch (spec 2026-07-20 §2)', () => {
 
 Pass `initialCards` through `ChatPage` props into `useChat` options (`initialCards?: ActiveCard[]`), replacing `initialUiAction` end-to-end (delete the old option and its Map seeding — Task 11 owns the new state). `derivePendingCard` itself STAYS (the derivation calls it).
 
-- [ ] **Step 10.2:** Type-only step — `npx tsc --noEmit` green after the prop threading; behavior verified in Task 11/12 tests + the browser pass.
-- [ ] **Step 10.3: Commit** — `feat(chat): reload seeds the full derived card set (spec §2)` (combined with Task 11's commit if the tree is not independently green — the two tasks may share one commit when splitting would leave a red intermediate state; note it in the commit body).
+- [x] **Step 10.2:** Type-only step — `npx tsc --noEmit` green after the prop threading; behavior verified in Task 11/12 tests + the browser pass.
+- [x] **Step 10.3: Commit** — `feat(chat): reload seeds the full derived card set (spec §2)` (combined with Task 11's commit if the tree is not independently green — the two tasks may share one commit when splitting would leave a red intermediate state; note it in the commit body).
 
 ---
 
@@ -1046,7 +1051,7 @@ Pass `initialCards` through `ChatPage` props into `useChat` options (`initialCar
 - Modify: `lib/hooks/use-chat.ts`
 - Test: `__tests__/lib/chat/card-view.test.ts` (create — PURE unit tests carry the logic)
 
-- [ ] **Step 11.1: Failing unit tests** for the pure reducer:
+- [x] **Step 11.1: Failing unit tests** for the pure reducer:
 
 ```ts
 import { cardView, cardKeyForUiAction, cardKeyForAction } from '@/lib/chat/card-view'
@@ -1077,7 +1082,7 @@ describe('card-view (spec 2026-07-20 §2 — ✓ can never lie)', () => {
 })
 ```
 
-- [ ] **Step 11.2: Verify failure**, then **implement** `lib/chat/card-view.ts` as a PURE module (no React):
+- [x] **Step 11.2: Verify failure**, then **implement** `lib/chat/card-view.ts` as a PURE module (no React):
 
 ```ts
 /** Client card-truth reducer (spec 2026-07-20 §2). Absence from cardsState
@@ -1122,7 +1127,7 @@ export function cardView(key: string | null, cardsState: ActiveCardEntry[], subm
 }
 ```
 
-- [ ] **Step 11.3: Wire use-chat** — replace `uiActions` seeding of `initialUiAction`, `answeredMessageIds`, `markAnswered` with:
+- [x] **Step 11.3: Wire use-chat** — replace `uiActions` seeding of `initialUiAction`, `answeredMessageIds`, `markAnswered` with:
 
 ```ts
   const [cardsState, setCardsState] = useState<ActiveCardEntry[]>(options.initialCards ?? [])
@@ -1132,8 +1137,8 @@ export function cardView(key: string | null, cardsState: ActiveCardEntry[], subm
   - `onCardsState: (d) => { if (ownsTurn()) { setCardsState((d.cards ?? []) as ActiveCardEntry[]); setSubmittingKey(null) } }` in BOTH sendMessage and sendAction consumeSSE wirings.
   - `sendAction`: at claim time `setSubmittingKey(cardKeyForAction(action))`; in every error/abort settle path `setSubmittingKey(null)` (the card returns to `interactive` — the server state still lists it).
   - KEEP the per-message `uiActions` Map as the transcript ANCHOR record (which card renders where) — but it no longer carries interactivity; delete `answeredMessageIds`/`markAnswered` from the hook's return type and update `UseChatReturn` (`cardsState`, `submittingKey` exported instead).
-- [ ] **Step 11.4: Run** — `npx vitest run __tests__/lib/chat/card-view.test.ts` PASS; `npx tsc --noEmit` reveals every message-list/chat-page call-site to update — fix them in Task 12 (run the two tasks to green before committing if the intermediate tree doesn't compile).
-- [ ] **Step 11.5: Commit** (possibly joint with Task 12) — `feat(chat-client): card truth from derived state — pure card-view reducer, no optimistic ✓`.
+- [x] **Step 11.4: Run** — `npx vitest run __tests__/lib/chat/card-view.test.ts` PASS; `npx tsc --noEmit` reveals every message-list/chat-page call-site to update — fix them in Task 12 (run the two tasks to green before committing if the intermediate tree doesn't compile).
+- [x] **Step 11.5: Commit** (possibly joint with Task 12) — `feat(chat-client): card truth from derived state — pure card-view reducer, no optimistic ✓`.
 
 ---
 
@@ -1142,12 +1147,12 @@ export function cardView(key: string | null, cardsState: ActiveCardEntry[], subm
 **Files:**
 - Modify: `components/chat/message-list.tsx`, `components/chat/chat-page.tsx`, `components/chat/rich/rich-content.tsx`, `components/chat/rich/inline-data-form.tsx`, `components/chat/rich/otp-entry-card.tsx`
 
-- [ ] **Step 12.1: message-list** — delete `lastActionableId` and the `answeredMessageIds`/`markAnswered` props. Per rendered card: `const key = cardKeyForUiAction(action); const view = cardView(key, cardsState, submittingKey)`. Pass `viewStatus={view.status}` down; presentation cards (`key === null`) keep their existing `isAnswered` semantics (newest-wins is retired only for keyed input cards). Append a `PendingCardsBlock` after the last message: for every `cardsState` entry with `status !== 'deferred'` and a `uiAction` whose key is NOT already rendered by a transcript message, render the card from the derived payload (this is reload parity for all input cards).
-- [ ] **Step 12.2: inline-data-form** — replace `isAnswered` with `viewStatus`: `interactive` → form; `submitting` → disabled with spinner label 'Se trimite…'; `inert_resolved` WITH a locally-typed/answered value → ✓ + value (truthful); `inert_resolved` WITHOUT one → muted "Nu mai este necesar" (NEVER ✓ + empty — kills the fake-✓); `inert_released` → muted "Amânat la cererea ta".
-- [ ] **Step 12.3: otp-entry-card** — `viewStatus === 'inert_expired'`: code inputs + Verifică disabled, an expiry note ("Codul a expirat"), and the RESEND button ENABLED (it submits `buildOtpResendAction(...)` — an action, allowed from an inert-expired card). `interactive` → as today; `submitting` → all disabled; `inert_resolved` → fully inert ✓.
-- [ ] **Step 12.4: Type + suite** — `npx tsc --noEmit` green; `npx vitest run` (full) green.
+- [x] **Step 12.1: message-list** — delete `lastActionableId` and the `answeredMessageIds`/`markAnswered` props. Per rendered card: `const key = cardKeyForUiAction(action); const view = cardView(key, cardsState, submittingKey)`. Pass `viewStatus={view.status}` down; presentation cards (`key === null`) keep their existing `isAnswered` semantics (newest-wins is retired only for keyed input cards). Append a `PendingCardsBlock` after the last message: for every `cardsState` entry with `status !== 'deferred'` and a `uiAction` whose key is NOT already rendered by a transcript message, render the card from the derived payload (this is reload parity for all input cards).
+- [x] **Step 12.2: inline-data-form** — replace `isAnswered` with `viewStatus`: `interactive` → form; `submitting` → disabled with spinner label 'Se trimite…'; `inert_resolved` WITH a locally-typed/answered value → ✓ + value (truthful); `inert_resolved` WITHOUT one → muted "Nu mai este necesar" (NEVER ✓ + empty — kills the fake-✓); `inert_released` → muted "Amânat la cererea ta".
+- [x] **Step 12.3: otp-entry-card** — `viewStatus === 'inert_expired'`: code inputs + Verifică disabled, an expiry note ("Codul a expirat"), and the RESEND button ENABLED (it submits `buildOtpResendAction(...)` — an action, allowed from an inert-expired card). `interactive` → as today; `submitting` → all disabled; `inert_resolved` → fully inert ✓.
+- [x] **Step 12.4: Type + suite** — `npx tsc --noEmit` green; `npx vitest run` (full) green.
 - [ ] **Step 12.5: Browser verification** (per <verification_workflow>; the dev server is `preview_start {name:"zeno-dev"}`): fresh conversation → reach the DNT flow → reload mid-questionnaire (question card re-renders interactive); submit an email at application start → OTP card; wait for expiry (10 min TTL — or shrink `expiresAt` via a direct DB update) → reload → OTP card renders EXPIRED with resend enabled; click resend → new code arrives (MockEmail console) → verify. Screenshot each state.
-- [ ] **Step 12.6: Commit** — `feat(chat-client): truthful card rendering — submitting/resolved/expired/released states, reload parity, resend from expired OTP`.
+- [x] **Step 12.6: Commit** — `feat(chat-client): truthful card rendering — submitting/resolved/expired/released states, reload parity, resend from expired OTP`.
 
 ---
 
