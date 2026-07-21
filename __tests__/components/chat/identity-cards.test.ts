@@ -22,6 +22,12 @@ describe('identity GUI cards (T29 — the emitted-but-never-rendered controls)',
     expect(adaptAction(action!)).toMatchObject({ name: 'confirm_channel_verification', arguments: { code: '123456' } })
   })
 
+  it('otp submit threads the channel so the card-view submitting key is truthful (adapter ignores it)', () => {
+    const action = buildOtpSubmitAction('123456', 'sms')
+    expect(action).toEqual({ type: 'otp_submit', payload: { code: '123456', channel: 'sms' } })
+    expect(adaptAction(action!)).toMatchObject({ name: 'confirm_channel_verification', arguments: { code: '123456' } })
+  })
+
   it('the resend affordance round-trips to start_channel_verification with resend:true (verificationResendEscape)', () => {
     const action = buildOtpResendAction('email', 'otp@example.ro')
     expect(action).toEqual({ type: 'otp_resend', payload: { channel: 'email', target: 'otp@example.ro' } })

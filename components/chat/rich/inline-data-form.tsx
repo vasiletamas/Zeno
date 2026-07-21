@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { Check, AlertCircle, Loader2 } from 'lucide-react'
 import { t, type Language } from '@/lib/i18n/translations'
+import type { CardViewStatus } from '@/lib/chat/card-view'
 
 interface Validation {
   pattern?: string
@@ -18,9 +19,19 @@ interface InlineDataFormProps {
   placeholder?: { en: string; ro: string }
   onSubmit: (value: string) => void
   language: Language
-  isAnswered?: boolean
+  /** Derived card truth (spec 2026-07-20 §2): interactive | submitting |
+   *  inert_resolved | inert_expired | inert_released. The ✓ renders ONLY
+   *  with a locally-typed value — never a fake empty-✓. */
+  viewStatus?: CardViewStatus
   isLoading?: boolean
-  answeredValue?: string
+}
+
+/* ── State copy (server derives status; the card localizes) ── */
+
+const STATE_COPY = {
+  submitting: { ro: 'Se trimite…', en: 'Submitting…' },
+  noLongerNeeded: { ro: 'Nu mai este necesar', en: 'No longer needed' },
+  released: { ro: 'Amânat la cererea ta', en: 'Deferred at your request' },
 }
 
 /* ── Built-in validation patterns ─────────────────── */
@@ -147,11 +158,10 @@ export function InlineDataForm({
   placeholder,
   onSubmit,
   language,
-  isAnswered = false,
+  viewStatus = 'interactive',
   isLoading = false,
-  answeredValue,
 }: InlineDataFormProps) {
-  const [value, setValue] = useState(answeredValue ?? '')
+  const [value, setValue] = useState('')
   const [touched, setTouched] = useState(false)
 
   const labelText = language === 'ro' ? label.ro : label.en
@@ -208,23 +218,49 @@ export function InlineDataForm({
     }
   }
 
-  /* ── Answered state ──────────────────────────────── */
+  /* ── Inert states (derived truth — spec 2026-07-20 §2) ── */
 
-  if (isAnswered) {
+  const pick = (key: { ro: string; en: string }) => (language === 'ro' ? key.ro : key.en)
+
+  if (viewStatus === 'inert_released') {
     return (
       <div className="bg-soft-white border border-warm-border rounded-xl p-5 animate-[message-appear_300ms_ease-out]">
         <label className="text-[13px] font-medium text-muted block mb-1">
           {labelText}
         </label>
-        <div className="flex items-center gap-2">
-          <Check className="w-4 h-4 text-sage flex-shrink-0" />
-          <span className="text-[15px] text-night">
-            {answeredValue ?? value}
-          </span>
-        </div>
+        <span className="text-[14px] text-muted">{pick(STATE_COPY.released)}</span>
       </div>
     )
   }
+
+  if (viewStatus === 'inert_resolved' || viewStatus === 'inert_expired') {
+    // ✓ ONLY beside the value this session actually typed — a resolved card
+    // with no local value renders "no longer needed" (kills the fake-✓).
+    if (value.trim()) {
+      return (
+        <div className="bg-soft-white border border-warm-border rounded-xl p-5 animate-[message-appear_300ms_ease-out]">
+          <label className="text-[13px] font-medium text-muted block mb-1">
+            {labelText}
+          </label>
+          <div className="flex items-center gap-2">
+            <Check className="w-4 h-4 text-sage flex-shrink-0" />
+            <span className="text-[15px] text-night">{value}</span>
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div className="bg-soft-white border border-warm-border rounded-xl p-5 animate-[message-appear_300ms_ease-out]">
+        <label className="text-[13px] font-medium text-muted block mb-1">
+          {labelText}
+        </label>
+        <span className="text-[14px] text-muted">{pick(STATE_COPY.noLongerNeeded)}</span>
+      </div>
+    )
+  }
+
+  const submitting = viewStatus === 'submitting'
+  const disabled = isLoading || submitting
 
   /* ── Date type ───────────────────────────────────── */
 
@@ -234,12 +270,12 @@ export function InlineDataForm({
         <label className="text-[13px] font-medium text-night block mb-3">
           {labelText}
         </label>
-        <DateFieldInput onSubmit={onSubmit} isLoading={isLoading} language={language} />
+        <DateFieldInput onSubmit={onSubmit} isLoading={disabled} language={language} />
       </div>
     )
   }
 
-  /* ── Active state ────────────────────────────────── */
+  /* ── Active / submitting state ───────────────────── */
 
   const showError = touched && validationResult.error
   const showValid = touched && validationResult.valid && value.trim()
@@ -259,7 +295,7 @@ export function InlineDataForm({
             setValue(e.target.value)
             if (!touched) setTouched(true)
           }}
-          disabled={isLoading}
+          disabled={disabled}
           placeholder={placeholderText}
           maxLength={validation?.maxLength}
           {...(type === 'textarea' ? { rows: 3 } : {})}
@@ -297,7 +333,7 @@ export function InlineDataForm({
       <button
         type="button"
         onClick={handleSubmit}
-        disabled={isLoading || !value.trim()}
+        disabled={disabled || !value.trim()}
         className="
           mt-3 w-full min-h-[44px] bg-forest text-linen text-[15px] font-medium
           rounded-[10px] px-6 py-3
@@ -307,7 +343,12 @@ export function InlineDataForm({
           flex items-center justify-center gap-2
         "
       >
-        {isLoading ? (
+        {submitting ? (
+          <>
+            <Loader2 className="w-5 h-5 animate-spin text-linen" />
+            <span>{pick(STATE_COPY.submitting)}</span>
+          </>
+        ) : isLoading ? (
           <Loader2 className="w-5 h-5 animate-spin text-linen" />
         ) : (
           t('data_form_save', language)

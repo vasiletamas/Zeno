@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useChat, type ChatMessage } from '@/lib/hooks/use-chat'
+// type-only, from the PURE module (never derive-active-cards — server code)
+import type { ActiveCardEntry } from '@/lib/chat/card-view'
 import { useLanguage } from '@/lib/i18n/language-context'
 import { t } from '@/lib/i18n/translations'
 import { ChatHeader } from './chat-header'
@@ -17,9 +19,9 @@ interface ChatPageProps {
   conversationId: string
   customerId: string
   initialMessages: ChatMessage[]
-  /** T9/T12 reload parity: the server-derived pending question card, anchored
-   *  on the last assistant message so it renders as the actionable card. */
-  initialUiAction?: { messageId: string; action: { type: string; payload: Record<string, unknown> } } | null
+  /** Reload parity (spec 2026-07-20 §2): the FULL server-derived card set —
+   *  seeds useChat's cardsState so every pending input card re-renders. */
+  initialCards?: ActiveCardEntry[]
   language: 'ro' | 'en'
 }
 
@@ -27,7 +29,7 @@ export default function ChatPage({
   conversationId,
   customerId,
   initialMessages,
-  initialUiAction,
+  initialCards,
 }: ChatPageProps) {
   const { lang } = useLanguage()
   const debug = useDebug()
@@ -42,11 +44,11 @@ export default function ChatPage({
     retryLastMessage,
     suggestions,
     uiActions,
-    answeredMessageIds,
-    markAnswered,
+    cardsState,
+    submittingKey,
   } = useChat(conversationId, customerId, {
     initialMessages,
-    initialUiAction,
+    initialCards,
     onDebugEvent: debug.onDebugEvent,
     extraHeaders: debug.extraHeaders,
   })
@@ -84,9 +86,9 @@ export default function ChatPage({
           typingStatus={toolStatus?.message ?? null}
           error={error}
           uiActions={uiActions}
-          answeredMessageIds={answeredMessageIds}
+          cardsState={cardsState}
+          submittingKey={submittingKey}
           onAction={sendAction}
-          markAnswered={markAnswered}
           onRetry={retryLastMessage}
           language={lang}
         />

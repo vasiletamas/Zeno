@@ -1,6 +1,7 @@
 'use client'
 
 import type { Language } from '@/lib/i18n/translations'
+import type { CardViewStatus } from '@/lib/chat/card-view'
 import { ProductCard } from './product-card'
 import { QuoteCard } from './quote-card'
 import { QuestionCard } from './question-card'
@@ -30,6 +31,9 @@ interface RichContentProps {
   language: Language
   isAnswered: boolean
   isLoading: boolean
+  /** Derived card-view status (spec 2026-07-20 §2) — set for keyed INPUT
+   *  cards only; presentation cards render from isAnswered as before. */
+  viewStatus?: CardViewStatus
 }
 
 /* ── Payload type helpers ─────────────────────────── */
@@ -89,8 +93,12 @@ export function RichContent({
   language,
   isAnswered,
   isLoading,
+  viewStatus,
 }: RichContentProps) {
   const p = action.payload
+  // For the two state-refactored input cards: fall back to the legacy
+  // boolean mapping when no derived status was provided.
+  const inputViewStatus: CardViewStatus = viewStatus ?? (isAnswered ? 'inert_resolved' : 'interactive')
 
   // The case list below is mirrored by RENDERED_UI_ACTION_TYPES in
   // lib/chat/ui-action-registry.ts — the parity test
@@ -298,7 +306,7 @@ export function RichContent({
             })
           }
           language={language}
-          isAnswered={isAnswered}
+          viewStatus={inputViewStatus}
           isLoading={isLoading}
         />
       )
@@ -489,7 +497,7 @@ export function RichContent({
           target={p.target as string | undefined}
           onAction={onAction}
           language={language}
-          isAnswered={isAnswered}
+          viewStatus={inputViewStatus}
           isLoading={isLoading}
         />
       )

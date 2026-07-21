@@ -3,7 +3,8 @@ import { prisma } from '@/lib/db'
 import { cookies } from 'next/headers'
 import ChatPage from '@/components/chat/chat-page'
 import { DebugProvider } from '@/components/debug/debug-provider'
-import { derivePendingCard } from '@/lib/chat/derive-pending-card'
+import { deriveActiveCards, type ActiveCard } from '@/lib/chat/derive-active-cards'
+import { logError } from '@/lib/errors/logger'
 
 /**
  * /chat/[id] — Conversation UI page.
@@ -44,19 +45,15 @@ export default async function ConversationPage({
     createdAt: m.createdAt,
   }))
 
-  // T9/T12 reload parity: uiActions are live-SSE-only client state — a
-  // reload mid-questionnaire loses the pending card. Re-derive it server-side
-  // and anchor it on the LAST assistant message so lastActionableId renders
-  // it interactive. A derive failure must never break the chat page.
-  const lastAssistantId = [...conversation.messages].reverse().find((m) => m.role === 'assistant')?.id ?? null
-  let initialUiAction: { messageId: string; action: { type: string; payload: Record<string, unknown> } } | null = null
-  if (lastAssistantId) {
-    try {
-      const pending = await derivePendingCard(conversation.id)
-      if (pending) initialUiAction = { messageId: lastAssistantId, action: pending }
-    } catch {
-      initialUiAction = null
-    }
+  // Reload parity (spec 2026-07-20 §2): the FULL derived card set replaces
+  // the old single-card derivePendingCard seed — every pending input card
+  // (data_field/otp/question) re-renders after a reload with its true
+  // status. A derive failure must never break the chat page.
+  let initialCards: ActiveCard[] = []
+  try {
+    initialCards = await deriveActiveCards(conversation.id)
+  } catch (e) {
+    logError({ layer: 'api', category: 'cards_state', message: 'reload card derivation failed', context: { conversationId: conversation.id }, error: e })
   }
 
   const isDev = process.env.NODE_ENV === 'development'
@@ -65,7 +62,7 @@ export default async function ConversationPage({
       conversationId={conversation.id}
       customerId={customerId ?? conversation.customerId}
       initialMessages={initialMessages}
-      initialUiAction={initialUiAction}
+      initialCards={initialCards}
       language={(conversation.language as 'ro' | 'en') ?? 'ro'}
     />
   )

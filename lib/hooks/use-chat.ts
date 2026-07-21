@@ -2,6 +2,9 @@
 
 import { useState, useCallback, useRef } from 'react'
 import { consumeSSE } from '@/lib/chat/sse-consumer'
+// PURE module — never import from derive-active-cards here (server module,
+// drags prisma toward the client bundle)
+import { cardKeyForAction, cardKeyForUiAction, type ActiveCardEntry } from '@/lib/chat/card-view'
 
 // ==============================================
 // TYPES
@@ -32,9 +35,13 @@ export interface UseChatReturn {
   /** P1-12: resend the message whose turn aborted (no-op when none failed) */
   retryLastMessage: () => void
   suggestions: string[]
+  /** Transcript ANCHOR record only (which card renders where) — interactivity
+   *  comes from cardsState, never from Map membership (spec 2026-07-20 §2). */
   uiActions: Map<string, { type: string; payload: Record<string, unknown> }>
-  answeredMessageIds: Set<string>
-  markAnswered: (messageId: string) => void
+  /** The server-derived active card set — the ONLY source of card truth. */
+  cardsState: ActiveCardEntry[]
+  /** Semantic key of the card whose submit is in flight; null otherwise. */
+  submittingKey: string | null
 }
 
 // ==============================================
@@ -66,12 +73,12 @@ interface InFlightTurn {
 export interface UseChatOptions {
   initialMessages?: ChatMessage[]
   /**
-   * T9/T12 reload parity: the server-derived pending question card
-   * (lib/chat/derive-pending-card.ts), keyed to an assistant message id from
-   * initialMessages. Seeds the uiActions map so a reload mid-questionnaire
-   * renders the same card the live turn emitted.
+   * Reload parity (spec 2026-07-20 §2): the FULL server-derived card set from
+   * deriveActiveCards — every pending input card re-renders after a reload
+   * (via message-list's PendingCardsBlock), replacing the old single-card
+   * derivePendingCard seed.
    */
-  initialUiAction?: { messageId: string; action: UIAction } | null
+  initialCards?: ActiveCardEntry[]
   onDebugEvent?: (event: { event: string; data: Record<string, unknown> }) => void
   extraHeaders?: Record<string, string>
 }
@@ -81,21 +88,19 @@ export function useChat(
   customerId: string,
   options: UseChatOptions = {},
 ): UseChatReturn {
-  const { initialMessages, initialUiAction, onDebugEvent, extraHeaders } = options
+  const { initialMessages, initialCards, onDebugEvent, extraHeaders } = options
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages ?? [])
   const [isStreaming, setIsStreaming] = useState(false)
   const [toolStatus, setToolStatus] = useState<{ tool: string; message: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>([])
-  // Seeded with the server-derived pending card (reload parity, T9/T12):
-  // keyed to the LAST assistant message, it is the newest entry and therefore
-  // message-list's lastActionableId — it renders interactive on load.
-  const [uiActions, setUiActions] = useState<Map<string, { type: string; payload: Record<string, unknown> }>>(() => {
-    const seeded = new Map<string, { type: string; payload: Record<string, unknown> }>()
-    if (initialUiAction) seeded.set(initialUiAction.messageId, initialUiAction.action)
-    return seeded
-  })
-  const [answeredMessageIds, setAnsweredMessageIds] = useState<Set<string>>(new Set())
+  // Transcript anchors only (live SSE ui_action → message id); on reload the
+  // Map starts empty and the derived set renders via PendingCardsBlock.
+  const [uiActions, setUiActions] = useState<Map<string, { type: string; payload: Record<string, unknown> }>>(new Map())
+  // The server-derived card truth (spec 2026-07-20 §2): seeded from the
+  // reload derivation, replaced wholesale by every turn-end cards_state.
+  const [cardsState, setCardsState] = useState<ActiveCardEntry[]>(initialCards ?? [])
+  const [submittingKey, setSubmittingKey] = useState<string | null>(null)
 
   // Synchronous concurrency guard: checked-and-set before any await. React's
   // isStreaming STATE is stale within the same tick and must only drive UI
@@ -109,12 +114,18 @@ export function useChat(
   // resends exactly this text
   const lastFailedMessageRef = useRef<string | null>(null)
 
-  const markAnswered = useCallback((messageId: string) => {
-    setAnsweredMessageIds((prev) => {
-      const next = new Set(prev)
-      next.add(messageId)
-      return next
-    })
+  // Pre-reconciliation truth: a just-emitted input card must never render
+  // "no longer needed" while its turn is still streaming (cardsState is the
+  // PREVIOUS turn's set until cards_state lands). Upsert an ACTIVE entry —
+  // never a resolved/✓ — and let the turn-end cards_state replace the set
+  // wholesale, which is the only authority.
+  const upsertActiveCard = useCallback((actionData: { type: string; payload: Record<string, unknown> }) => {
+    const key = cardKeyForUiAction(actionData)
+    if (!key) return
+    setCardsState((prev) => [
+      ...prev.filter((c) => c.key !== key),
+      { key, status: 'active', uiAction: actionData },
+    ])
   }, [])
 
   const sendMessage = useCallback(
@@ -192,6 +203,13 @@ export function useChat(
               next.set(msgId, actionData)
               return next
             })
+            upsertActiveCard(actionData)
+          },
+          onCardsState: (d) => {
+            if (ownsTurn()) {
+              setCardsState((Array.isArray(d.cards) ? d.cards : []) as ActiveCardEntry[])
+              setSubmittingKey(null)
+            }
           },
           onError: (data) => {
             settled = true
@@ -263,7 +281,7 @@ export function useChat(
         if (inFlightRef.current === turn) inFlightRef.current = null
       }
     },
-    [conversationId, customerId, onDebugEvent, extraHeaders]
+    [conversationId, customerId, onDebugEvent, extraHeaders, upsertActiveCard]
   )
 
   const sendAction = useCallback(
@@ -284,6 +302,10 @@ export function useChat(
 
       setError(null)
       setSuggestions([])
+      // Claim the card: it renders `submitting` (locked, NO ✓) until the
+      // turn-end cards_state reconciles — applied → absent → resolved;
+      // rejected → still listed → back to interactive (spec 2026-07-20 §2).
+      setSubmittingKey(cardKeyForAction(action))
 
       const msgId = nextTurnMessageId('assistant')
       const assistantMsg: ChatMessage = {
@@ -330,12 +352,22 @@ export function useChat(
               next.set(msgId, actionData)
               return next
             })
+            upsertActiveCard(actionData)
+          },
+          onCardsState: (d) => {
+            if (ownsTurn()) {
+              setCardsState((Array.isArray(d.cards) ? d.cards : []) as ActiveCardEntry[])
+              setSubmittingKey(null)
+            }
           },
           onError: (data) => {
             settled = true
             setMessages((prev) => prev.filter((m) => m.id !== msgId))
             if (!ownsTurn()) return
             setError((data.error as string) ?? 'Unknown error')
+            // failed submit: the card returns to interactive — the server
+            // state still lists it
+            setSubmittingKey(null)
             setIsStreaming(false)
             setToolStatus(null)
           },
@@ -348,6 +380,9 @@ export function useChat(
             if (data.suggestions && Array.isArray(data.suggestions)) {
               setSuggestions(data.suggestions as string[])
             }
+            // a done without cards_state (server-side derive failure) must
+            // not strand the card in `submitting`
+            setSubmittingKey(null)
             setIsStreaming(false)
             setToolStatus(null)
           },
@@ -360,6 +395,7 @@ export function useChat(
             prev.map((m) => (m.id === msgId ? { ...m, isStreaming: false } : m))
           )
           if (ownsTurn()) {
+            setSubmittingKey(null)
             setIsStreaming(false)
             setToolStatus(null)
           }
@@ -372,6 +408,7 @@ export function useChat(
               .filter((m) => m.id !== msgId || m.content !== '')
           )
           if (ownsTurn()) {
+            setSubmittingKey(null)
             setIsStreaming(false)
             setToolStatus(null)
           }
@@ -381,6 +418,7 @@ export function useChat(
         setMessages((prev) => prev.filter((m) => m.id !== msgId))
         if (ownsTurn()) {
           setError(errorMessage)
+          setSubmittingKey(null)
           setIsStreaming(false)
           setToolStatus(null)
         }
@@ -388,7 +426,7 @@ export function useChat(
         if (inFlightRef.current === turn) inFlightRef.current = null
       }
     },
-    [conversationId, customerId, onDebugEvent, extraHeaders]
+    [conversationId, customerId, onDebugEvent, extraHeaders, upsertActiveCard]
   )
 
   // P1-12: the retry affordance for an aborted turn — resends the exact
@@ -413,7 +451,7 @@ export function useChat(
     retryLastMessage,
     suggestions,
     uiActions,
-    answeredMessageIds,
-    markAnswered,
+    cardsState,
+    submittingKey,
   }
 }
