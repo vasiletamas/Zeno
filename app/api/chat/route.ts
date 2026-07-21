@@ -11,6 +11,9 @@ import { handleChatTurn } from '@/lib/chat/orchestrator'
 import { adaptAction } from '@/lib/chat/action-adapter'
 import { ACTION_MESSAGE_PREFIX, actionLabel } from '@/lib/chat/action-labels'
 import { logError, logFatal } from '@/lib/errors/logger'
+import { decideConversationAccess } from '@/lib/chat/conversation-access'
+import { PROOF_COOKIE } from '@/lib/auth/session-proof'
+import { canonicalCustomerId } from '@/lib/auth/reauth-gate'
 
 // ==============================================
 // REQUEST VALIDATION
@@ -58,6 +61,42 @@ export async function POST(request: NextRequest) {
     const parsed = requestSchema.parse(body)
 
     const conversationId = parsed.conversationId
+
+    /**
+     * ACCESS BEFORE ANYTHING ELSE (spec 2026-07-21 §3.1) — deliberately ahead
+     * of the concurrency guard, so a refused caller never takes a slot. Three
+     * refused posts would otherwise 429 the owner out of their own
+     * conversation.
+     *
+     * The route previously trusted BOTH ids from the body. Because the
+     * identity slice is derived from `conversation.customerId`
+     * (lib/engines/snapshot-loader.ts), that let any caller drive a turn in
+     * someone else's conversation — reading their state and writing commits
+     * under their identity.
+     *
+     * `customerId` is now derived from the cookie and the body copy is only
+     * ever checked against it, so reads and writes share one principal.
+     */
+    const callerId = await canonicalCustomerId(request.cookies.get('zeno_session')?.value)
+    if (!callerId) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if (parsed.customerId && (await canonicalCustomerId(parsed.customerId)) !== callerId) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if (conversationId) {
+      const access = await decideConversationAccess({
+        conversationId,
+        cookieCustomerId: request.cookies.get('zeno_session')?.value,
+        proofToken: request.cookies.get(PROOF_COOKIE)?.value,
+      })
+      // `reauth` refuses here too: the page renders the challenge, and a turn
+      // posted from a stale tab must not slip past it.
+      if (access.kind !== 'allow') {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    }
+
     if (conversationId) {
       const current = inFlightRequests.get(conversationId) ?? 0
       if (current >= MAX_CONCURRENT_PER_CONVERSATION) {
@@ -92,7 +131,9 @@ export async function POST(request: NextRequest) {
     try {
       stream = handleChatTurn({
         conversationId: parsed.conversationId,
-        customerId: parsed.customerId,
+        // the COOKIE's customer, canonicalised — never the body's (see the
+        // access block above): reads and writes must share one principal.
+        customerId: callerId,
         message,
         language: parsed.language,
         syntheticToolCall,
