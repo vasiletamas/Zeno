@@ -7,6 +7,7 @@
 
 import type { EmailProvider } from './types'
 import { MockEmailProvider } from './providers/mock'
+import { ResendEmailProvider } from './providers/resend'
 
 let instance: EmailProvider | null = null
 
@@ -19,15 +20,17 @@ export function getEmailProvider(): EmailProvider {
 
   switch (providerName) {
     case 'resend': {
-      const { ResendEmailProvider } = require('./providers/resend') as {
-        ResendEmailProvider: new () => EmailProvider
-      }
+      // Static import, NOT a lazy require(): `require` inside this ESM module
+      // fails to resolve ("Cannot find module './providers/resend'"), so
+      // EMAIL_PROVIDER=resend threw instead of sending — verification codes
+      // would silently stop being delivered while every other test stayed
+      // green (pinned by provider-resolution.test.ts). Importing the module
+      // is free; the Resend client is only constructed here, and its
+      // constructor is what demands RESEND_API_KEY.
       instance = new ResendEmailProvider()
       break
     }
     case 'mock': {
-      // Static import (unlike resend below): dependency-free, and the lazy
-      // require() path does not resolve under the ESM test runner.
       instance = new MockEmailProvider()
       break
     }
