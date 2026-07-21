@@ -81,7 +81,14 @@ export async function buildAcceptReadyQuote(options: { withoutDisclosureAck?: bo
   const email = `fx-${fx.customerId}@example.com`
   await setDeclaredField(fx.customerId, 'email', email, 'fixture')
   await setDeclaredField(fx.customerId, 'phone', '+40712345678', 'fixture')
-  if (!options.withoutVerifiedChannel) {
+  if (options.withoutVerifiedChannel) {
+    // 2026-07-21: createCustomer() now proves a channel by DEFAULT (R2 — the
+    // DNT/questionnaire commits upstream of this fixture require one). So
+    // "without a verified channel" can no longer mean "skip the create"; it
+    // must actively remove what the upstream fixture provided, or this option
+    // silently stops peeling off the gate it names.
+    await prisma.verificationChallenge.deleteMany({ where: { customerId: fx.customerId } })
+  } else {
     // a CONSUMED challenge is what makes a channel verified (B3.4)
     await prisma.verificationChallenge.create({
       data: { customerId: fx.customerId, channel: 'email', target: email, codeHash: 'fixture', expiresAt: new Date(Date.now() + 600_000), consumedAt: new Date() },
