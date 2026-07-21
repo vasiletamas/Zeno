@@ -22,8 +22,10 @@ beforeEach(async () => { await resetDb() }, 60000)
  * the ladder has collected email (phone is due only after email, both in
  * FIELD_ORDER and in the derivation).
  */
-async function makeConversationFixture(opts: { openApplication?: boolean; issuedQuote?: boolean } = {}) {
-  const customer = await createCustomer()
+async function makeConversationFixture(opts: { openApplication?: boolean; issuedQuote?: boolean; customerId?: string } = {}) {
+  // customerId lets two conversations share one customer — the shape that
+  // exposed the cross-conversation expired-OTP leak (2026-07-21 browser pass).
+  const customer = opts.customerId ? { id: opts.customerId } : await createCustomer()
   const conv = await prisma.conversation.create({ data: { customerId: customer.id, language: 'ro' } })
   if (opts.openApplication) {
     const product = await ensureTestProduct()
@@ -82,6 +84,25 @@ describe.skipIf(!process.env.DATABASE_URL)('deriveActiveCards (spec 2026-07-20 �
     expect(await deriveActiveCards(conversationId)).toContainEqual(expect.objectContaining({ key: 'otp:email', status: 'active' }))
     await prisma.verificationChallenge.update({ where: { id: ch.id }, data: { expiresAt: new Date(Date.now() - 1_000) } })
     expect(await deriveActiveCards(conversationId)).toContainEqual(expect.objectContaining({ key: 'otp:email', status: 'expired' }))
+  })
+
+  // Browser-verified 2026-07-21: a stale expired challenge from an earlier
+  // conversation greeted a BRAND-NEW conversation with a context-free "Codul a
+  // expirat" card before the customer had said a word. An expired card is a
+  // recovery affordance for the flow that raised it; a LIVE one still follows
+  // the customer (the verification blocks the funnel wherever they continue).
+  it('an EXPIRED challenge from another conversation does not leak; a LIVE one still does', async () => {
+    const { conversationId, customerId } = await makeConversationFixture()
+    const other = await makeConversationFixture({ customerId })
+    const ch = await prisma.verificationChallenge.create({
+      data: { customerId, channel: 'email', target: 'a@b.ro', codeHash: 'h', conversationId: other.conversationId, expiresAt: new Date(Date.now() + 60_000) },
+    })
+    // live: visible in the sibling conversation too
+    expect(await deriveActiveCards(conversationId)).toContainEqual(expect.objectContaining({ key: 'otp:email', status: 'active' }))
+    await prisma.verificationChallenge.update({ where: { id: ch.id }, data: { expiresAt: new Date(Date.now() - 1_000) } })
+    // expired: only in its own conversation
+    expect((await deriveActiveCards(conversationId)).find((c) => c.key === 'otp:email')).toBeUndefined()
+    expect(await deriveActiveCards(other.conversationId)).toContainEqual(expect.objectContaining({ key: 'otp:email', status: 'expired' }))
   })
 
   it('active DNT session with a pending question → question:<code> active with a renderable uiAction', async () => {

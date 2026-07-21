@@ -41,17 +41,27 @@ describe('main-chat agent constraints', () => {
   // NO tool result had emitted a card — the customer was stranded confirming
   // a control that never existed. Enforced offline by the
   // hallucinated_ui_reference diagnostics check.
-  it('forbids referencing cards no tool result emitted THIS turn (T11 clause 7)', () => {
+  // 2026-07-20 amendment (spec card-state-ssot §5): cards now outlive the turn
+  // that emitted them (derived server state, re-rendered on reload), so the
+  // emitted-this-turn test ALONE made the model talk past a live card — conv
+  // cmrrhruba msgs 13-39 ignored a stale phone card and an expired OTP card for
+  // 13 turns. The ON-SCREEN CARDS briefing is now a second licence. The
+  // anti-hallucination floor is unchanged: no card in EITHER source, no claim.
+  it('licenses cards emitted this turn OR briefing-listed, and nothing else (T11 clause 7 + §5 amendment)', () => {
     const mainChat = AGENTS.find((a) => a.slug === 'main-chat')
-    const parsed = JSON.parse(mainChat!.constraints as string)
-    expect(parsed).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining('ONLY when a tool result THIS turn emitted one'),
-      ]),
-    )
-    const rule = (parsed as string[]).find((c) => c.includes('THIS turn emitted one'))
+    const parsed = JSON.parse(mainChat!.constraints as string) as string[]
+    const rule = parsed.find((c) => c.includes('THIS turn emitted one'))
+    expect(rule).toBeDefined()
+    // both licences, explicitly
+    expect(rule).toContain('THIS turn emitted one OR when the ON-SCREEN CARDS briefing lists it')
     expect(rule).toContain('ONE short invite line')
+    // the floor T11 exists for
     expect(rule).toContain('never claim one exists')
+    // an EXPIRED card must be resolved or disowned, never left silent
+    expect(rule).toContain('EXPIRED')
+    // a DECLINED entry renders NO card — referencing one would be the very
+    // fabrication this clause forbids (caught in review of the amendment)
+    expect(rule).toContain('A DECLINED entry is NOT a card')
   })
 
   // T13 supersession clause (2026-07-17, conv cmrm3fgku00056g0y4eb2hsme

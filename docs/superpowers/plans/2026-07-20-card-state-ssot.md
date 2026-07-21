@@ -28,7 +28,14 @@
 **Browser verification (2026-07-21, coordinator, conv `cmrrhruba0001g40yh3am7peo`, cold reload — the incident conversation itself):** `phoneCardPresent: false` — the zombie phone card that opened this investigation no longer renders. The OTP card is re-derived server-side on a cold load (pre-fix: `show_otp_entry` was lost entirely on reload) and renders its true status: "Codul a expirat", code input + Verifică disabled, **"Retrimite codul" ENABLED** (pre-fix it was dead via positional supersession — the customer's only recovery path was blocked). Zero console errors.
 
 **Environment gotcha (cost 20 minutes, worth recording):** a dev server started BEFORE a migration holds a stale in-memory Prisma client — `deriveActiveCards` threw `Cannot read properties of undefined (reading 'findMany')` on `profileFieldDeferral` at SSR while unit tests and `tsc` were green (vitest spawns fresh processes). The code was correct; restart the dev server after every migration.
-| T13–T16 | ⬜ pending | — | — |
+| T13 ON-SCREEN CARDS briefing | ✅ done + quality-reviewed | 1c476ed2 (+a9fecf9c) | quality review caught a T11 regression: DECLINED entries render no card → own heading + clause scoped |
+| T14 T11 amendment + offline net | ✅ done + quality-reviewed | 8f92eef1 (+a9fecf9c) | clause verified IN THE DB after reseed; net counts only printed families |
+| T15 verify-card-state script | ✅ done | 9b2b5a00 | 12/12 ok; non-vacuity probe proved the four checks fire on pre-fix shapes |
+| T16 full gate | 🔄 in progress | — | tsc ✅ · migrations ✅ (fresh+upgrade) · browser ✅ · full suite + sims running |
+
+**T16 browser pass (2026-07-21, fresh conversation `cmruaerwt0000qk0ya3zmxf6v`, reseeded constitution live):** replayed the incident script — "asigurare de viata cu tratament in strainatate" → **"am 40 de ani"** → the agent recorded the age and continued the conversation with **NO email card and NO phone card** (the only input on the page is the composer). This is the exact turn that produced the unsolicited email card. Deterministic checker on the new conversation: **zero card findings** (vs six on the original incident: 3× unsolicited_contact_card, stale_card_replayed, card_for_committed_fact, competing_input_cards). Zero server errors, zero console errors.
+
+**Defect found BY the browser pass (fixed, see below):** a brand-new conversation opened with a context-free "Codul a expirat" card — an expired challenge from a PRIOR conversation leaked into it, because the OTP derivation is customer-scoped. Expired cards are now scoped to the conversation that raised them; live challenges keep customer scope (the verification blocks the funnel wherever the customer continues).
 
 **T8-9 notes:** plan's phone-active fixture needed a declared email (ladder order); ErrorLayer has no 'chat' → 'orchestrator'; noted-for-later: deep-freeze FIELD_META_FOR_CARDS next time data-handlers.ts is touched; card-view.ts (T11) becomes the canonical home of the shared card-entry type + the 'question:batch' key constant.
 

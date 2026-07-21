@@ -51,7 +51,15 @@ export async function deriveActiveCards(conversationId: string): Promise<ActiveC
   })
   if (challenge && !snapshot.identity.verifiedChannels.includes(challenge.channel as 'email' | 'sms')) {
     const expired = challenge.expiresAt <= new Date()
-    cards.push({
+    // An EXPIRED card is a recovery affordance for the flow that raised it, so
+    // it stays in its own conversation: browser-verified 2026-07-21 that a
+    // stale expired challenge otherwise greeted a BRAND-NEW conversation with
+    // a context-free "Codul a expirat" before the customer had said anything.
+    // A LIVE challenge keeps customer scope — the verification blocks the
+    // funnel wherever the customer continues (matches snapshot.pendingChallenge
+    // and the identity gate, both customer-scoped).
+    const foreignExpired = expired && challenge.conversationId !== null && challenge.conversationId !== conversationId
+    if (!foreignExpired) cards.push({
       key: `otp:${challenge.channel}`,
       status: expired ? 'expired' : 'active',
       uiAction: { type: 'show_otp_entry', payload: { channel: challenge.channel, target: challenge.target, targetMasked: maskVerificationTarget(challenge.channel as 'email' | 'sms', challenge.target) } },
