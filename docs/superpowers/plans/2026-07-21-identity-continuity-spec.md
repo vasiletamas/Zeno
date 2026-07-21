@@ -168,13 +168,36 @@ Consequences, all intended:
   proven, answering `requires_identity` with a machine-readable `needs` payload the agent already
   knows how to act on.
 - Any emitter that would produce a card for a now-blocked tool must be gated, or the customer is
-  shown a card they cannot legally act on. `select-coverage-handlers.ts:90` is the primary one.
+  shown a card they cannot legally act on.
+
+  > **Correction (2026-07-21, impact analysis).** An earlier draft named
+  > `select-coverage-handlers.ts:90` as "the primary one". **That is wrong.** The card-state SSOT is
+  > `lib/chat/derive-pending-card.ts`, which re-derives the question card (`:51-58`) and the DNT card
+  > (`:37-44`) from the snapshot with *zero identity input*, on every page load
+  > (`app/chat/[id]/page.tsx`), every turn start and every turn end (`lib/chat/orchestrator.ts:656`,
+  > `:1830`). Gate `select_coverage` alone and the blocked card returns by derivation on the very
+  > next turn — with the agent briefed to "invite a tap" (`derive-active-cards.ts:81`). The gate
+  > belongs in the derivation.
+  >
+  > A second emitter cannot be closed by a table row at all: `get_dnt_next_question`
+  > (`dnt-handlers.ts:165`) returns the DNT review card — whose only action is `sign_dnt` — and is
+  > registered `kind: 'read'`. `checkIdentityRequirement` runs only for `kind: 'commit'`
+  > (`derive-and-expose.ts:438`), so reads never reach it. That one needs an explicit handler guard.
 - **`INPUT_CARD_PRIORITY` becomes unnecessary for the OTP-versus-question case** — the question card
   cannot exist during verification, so there is no ordering left to enforce. This satisfies R4 by
   deletion rather than by replacement.
 
 The entry-card condition is corrected from a level check to an edge at the same time: emit only on
 the commit that *transitions* the selection into completeness.
+
+> **Scope correction (2026-07-21, impact analysis).** The level-vs-edge mismatch at
+> `select-coverage-handlers.ts:91` is real as a code/comment discrepancy, and the live trace of
+> `cmruelpy7` does show two `show_question` emissions. But it is **not** the cause of the two visible
+> cards, and fixing it does not satisfy AC-5: `unchanged()` short-circuits same-value repeats
+> (`:45,52,56`), a tier change nulls the level before `post` is read, and both emissions carry the
+> same question code, so `questionKeyFor` (`card-view.ts:78-86`) collapses them into one card
+> anyway. Do it for clarity; do not claim it as the fix. The two-card defect is the ordering one,
+> and only Fix B closes it.
 
 ---
 
@@ -245,6 +268,75 @@ A customer who verifies an email already belonging to another customer record is
 (`claim.merged`, `identity-handlers.ts:152`). After the merge they must still reach their own
 conversation: access resolution follows `customer.mergedIntoId` exactly as
 `app/api/session/route.ts:64` does. A naive ownership check locks them out of their own data.
+
+---
+
+## 4a. BLOCKED — AC-1 is not implementable as written
+
+Found by impact analysis on 2026-07-21, **after** §4 was written, and confirmed against source.
+
+### The deadlock
+
+`deriveIdentityTier` (`lib/engines/identity-rules.ts:28-31`):
+
+```js
+const contact = KYC.every((k) => f.fields[k] && f.fields[k]!.provenance !== 'conflict')
+if (!contact) return 'anonymous'
+return f.verifiedChannels.length > 0 ? 'verified_channel' : 'declared'
+```
+
+`KYC_FIELDS = ['email', 'phone']` (`identity-requirements.ts:47`). So `verified_channel` requires
+**email AND phone present**, plus a consumed challenge. A consumed challenge alone lifts
+`declared → verified_channel`; it cannot lift `anonymous`.
+
+§4 AC-1 assumes "verified" means *one proven channel*. It does not. Walk AC-1 with the real rule:
+
+| AC-1 step | Reality |
+|---|---|
+| 3–4: Maria gives and verifies her email | tier is still `anonymous` — phone is missing |
+| 6: "Now the first DNT question appears" | `open_dnt_session` stays `requires_identity` |
+| — | no card ever asks for her phone: the phone card waits on a quote (`derive-active-cards.ts:43`), the quote waits on the questionnaire, the questionnaire waits on the DNT |
+
+**Adding the Fix B rows as specified terminates the funnel permanently for every new customer.**
+
+### The decision required (D1)
+
+- **(a) Keep `verified_channel` meaning email + phone.** The phone card moves to application start,
+  reversing the recorded "Ruling 2: email at application start, phone at quote"
+  (`derive-active-cards.ts:29`), and AC-1 step 3 asks for two fields.
+- **(b) One proven channel suffices for the DNT rows.** Needs either a channel-only clause in the
+  row schema or a change to `KYC_FIELDS` — and the tier ladder stops meaning what
+  `identity-rules.ts:28-31` says it means.
+
+AC-1 as written assumes (b). **No Fix B row may land until this is chosen.**
+
+### Second decision required (D2) — the GDPR re-grant floor
+
+`lib/engines/consent-rules.ts:12-23` places `open_dnt_session` / `write_dnt_answer` / `sign_dnt` in
+`HALT_EXEMPT` *specifically* so a customer who withdrew consent can re-grant it — its header says
+"otherwise sign_dnt is exempt but unreachable and re-granting deadlocks". Fix B puts an identity wall
+in front of that escape hatch (consent is checked at `derive-and-expose.ts:431`, identity at `:438`).
+
+Bites two populations: customers who signed anonymously before the fix, and anyone whose identity
+fields were cleared by `request_erasure` (deliberately `anonymous`-tier and `HALT_EXEMPT`).
+§3.2 listed three intended consequences and this was not among them — it was not considered.
+
+### Also found (not blocking, already fixed)
+
+`POST /api/chat/create` took `customerId` from the request body and bound a new conversation to it
+with no cookie check. Since the identity slice derives from `conversation.customerId`, a conversation
+minted that way *runs as* the named customer. **This defeated the `verified_channel` gates already
+guarding `accept_quote` and `ensure_payment_session`** — a live hole predating this spec, which §1.4
+missed. Closed in `e9e799fe`.
+
+### Further open decisions, deferred
+
+- **D3.** `resume_application` (`application-handlers.ts:589`) has no identity row and is exposed
+  cross-conversation. Does R2 cover resume?
+- **D4.** `app/api/dev/last-verification-email` returns a live OTP and magic link for an arbitrary
+  query-string `customerId`, guarded only by `NODE_ENV !== 'production'`. Env-shaped, not auth-shaped.
+- **D5.** `GET /api/payments/confirm` is unauthenticated and 302-redirects to `/chat/{conversationId}`
+  — an id-disclosure primitive that weakens the "cuids are unguessable" argument in §1.4.
 
 ---
 
