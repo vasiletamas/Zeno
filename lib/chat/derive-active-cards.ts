@@ -16,7 +16,7 @@ import { getProfile, getFieldDeferrals } from '@/lib/customer/profile-service'
 import { maskVerificationTarget } from '@/lib/customer/verification-service'
 import { derivePendingCard } from './derive-pending-card'
 import { FIELD_META_FOR_CARDS } from '@/lib/tools/handlers/data-handlers'
-import { questionKeyFor, type ActiveCardEntry } from './card-view'
+import { questionKeyFor, inputCardRank, type ActiveCardEntry } from './card-view'
 
 export type { ActiveCardStatus } from './card-view'
 /** Server-side entry: the canonical shared shape (lib/chat/card-view.ts —
@@ -86,5 +86,30 @@ export async function deriveActiveCards(conversationId: string): Promise<ActiveC
     cards.push({ key: `confirm:${tool}`, status: 'active', hint: `a ${tool} confirmation card awaits the customer's tap — do NOT call ${tool} again` })
   }
 
-  return cards
+  return queueAllButOneInput(cards)
+}
+
+/**
+ * ONE input card owns the customer's attention (2026-07-21, conv cmruelpy7
+ * turn 2: an OTP card and TWO question cards went live together — a 6-digit
+ * code and a medical answer demanded at once, with nothing saying which one
+ * the conversation was waiting on).
+ *
+ * The earliest funnel blocker keeps `active` (INPUT_CARD_PRIORITY: identity
+ * verification gates every downstream commit, then the questionnaire, then
+ * contact collection); every other RENDERABLE input card drops to `queued`.
+ * Non-input entries (confirm:*, which carry no uiAction) and cards that are
+ * already expired/deferred never take the slot and are left untouched.
+ */
+function queueAllButOneInput(cards: ActiveCard[]): ActiveCard[] {
+  const contenders = cards
+    .filter((c) => c.status === 'active' && c.uiAction)
+    .sort((a, b) => inputCardRank(a.key) - inputCardRank(b.key))
+  const winner = contenders[0]
+  if (!winner || contenders.length === 1) return cards
+  return cards.map((c) =>
+    c === winner || c.status !== 'active' || !c.uiAction
+      ? c
+      : { ...c, status: 'queued' as const, hint: `queued behind ${winner.key} — do NOT ask for this yet; it becomes available once that card is resolved` },
+  )
 }

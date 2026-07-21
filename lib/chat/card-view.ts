@@ -8,7 +8,30 @@
  * derived from server state (kills the `answeredValue ?? value` empty-✓).
  */
 
-export type ActiveCardStatus = 'active' | 'expired' | 'deferred'
+export type ActiveCardStatus = 'active' | 'queued' | 'expired' | 'deferred'
+
+/**
+ * ONE input card is interactive at a time (2026-07-21). A live run emitted an
+ * OTP card and TWO question cards in a single turn: the customer was asked for
+ * a 6-digit code and a medical answer simultaneously, with no way to know which
+ * one the conversation was actually waiting on. The pre-SSOT client hid this by
+ * making only the newest card clickable; the derived set exposed it.
+ *
+ * The server picks the one card that owns the customer's attention — the
+ * earliest funnel blocker — and QUEUES the rest. Lower index wins.
+ *
+ * Order follows the funnel, not convenience: a verification in flight blocks
+ * every downstream commit; the contact/identity anchor is deliberately asked
+ * BEFORE the questionnaire investment (spec §1 Ruling 2, email at application
+ * start); the questionnaire comes last.
+ */
+export const INPUT_CARD_PRIORITY = ['otp:', 'data_field:', 'question:'] as const
+
+/** Priority rank of a key; Infinity for keys outside the input families. */
+export function inputCardRank(key: string): number {
+  const i = INPUT_CARD_PRIORITY.findIndex((prefix) => key.startsWith(prefix))
+  return i === -1 ? Number.POSITIVE_INFINITY : i
+}
 
 export interface ActiveCardEntry {
   /** Semantic key: data_field:<field> | otp:<channel> | question:<code> | confirm:<tool>. */
@@ -26,6 +49,8 @@ export type CardViewStatus =
   | 'inert_resolved'
   | 'inert_expired'
   | 'inert_released'
+  /** Pending, but another card owns the customer's attention right now. */
+  | 'inert_queued'
 
 /**
  * The ONE shared key for a code-less question card (the T10 medical BATCH
@@ -123,5 +148,6 @@ export function cardView(
   if (!entry) return { status: 'inert_resolved' }
   if (entry.status === 'expired') return { status: 'inert_expired' }
   if (entry.status === 'deferred') return { status: 'inert_released' }
+  if (entry.status === 'queued') return { status: 'inert_queued' }
   return { status: 'interactive' }
 }

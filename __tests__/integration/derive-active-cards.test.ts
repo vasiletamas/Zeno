@@ -105,8 +105,43 @@ describe.skipIf(!process.env.DATABASE_URL)('deriveActiveCards (spec 2026-07-20 �
     expect(await deriveActiveCards(other.conversationId)).toContainEqual(expect.objectContaining({ key: 'otp:email', status: 'expired' }))
   })
 
+  // Live run cmruelpy7 turn 2: an OTP card and TWO question cards went live at
+  // once — the customer was asked for a 6-digit code AND a medical answer with
+  // nothing indicating which one the conversation waited on. Exactly one input
+  // card may be interactive; identity verification outranks the questionnaire.
+  it('only ONE input card stays active — the rest queue behind it', async () => {
+    const fx = await makeDntSessionFixture()
+    await prisma.verificationChallenge.create({
+      data: { customerId: fx.customerId, channel: 'email', target: 'a@b.ro', codeHash: 'h', conversationId: fx.conversationId, expiresAt: new Date(Date.now() + 60_000) },
+    })
+    const cards = await deriveActiveCards(fx.conversationId)
+    const inputs = cards.filter((c) => c.uiAction)
+    expect(inputs.length).toBeGreaterThan(1) // the conflict really is present
+    expect(inputs.filter((c) => c.status === 'active')).toHaveLength(1)
+    // a live challenge outranks every other input: nothing proceeds unverified
+    expect(inputs.find((c) => c.status === 'active')!.key).toBe('otp:email')
+    const queued = inputs.filter((c) => c.status === 'queued')
+    expect(queued.length).toBe(inputs.length - 1)
+    expect(queued.every((c) => c.hint?.includes('do NOT ask for this yet'))).toBe(true)
+  })
+
+  it('a lone input card is never queued', async () => {
+    const { conversationId, customerId } = await makeConversationFixture()
+    await prisma.verificationChallenge.create({
+      data: { customerId, channel: 'email', target: 'a@b.ro', codeHash: 'h', conversationId, expiresAt: new Date(Date.now() + 60_000) },
+    })
+    const inputs = (await deriveActiveCards(conversationId)).filter((c) => c.uiAction)
+    expect(inputs).toHaveLength(1)
+    expect(inputs[0].status).toBe('active')
+  })
+
+  // Email is seeded so the question is the SOLE input card: with the contact
+  // anchor still missing, the email card legitimately outranks it (Ruling 2 —
+  // email is asked before the questionnaire investment), which the queueing
+  // tests above cover. This one pins the question derivation itself.
   it('active DNT session with a pending question → question:<code> active with a renderable uiAction', async () => {
-    const { conversationId } = await makeDntSessionFixture()
+    const { conversationId, customerId } = await makeDntSessionFixture()
+    await setDeclaredField(customerId, 'email', 'a@b.ro', 'test')
     const cards = await deriveActiveCards(conversationId)
     const q = cards.find((c) => c.key.startsWith('question:'))
     expect(q?.status).toBe('active')

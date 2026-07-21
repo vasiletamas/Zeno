@@ -32,6 +32,7 @@ const STATE_COPY = {
   submitting: { ro: 'Se trimite…', en: 'Submitting…' },
   noLongerNeeded: { ro: 'Nu mai este necesar', en: 'No longer needed' },
   released: { ro: 'Amânat la cererea ta', en: 'Deferred at your request' },
+  queued: { ro: 'Urmează după pasul curent', en: 'Next, after the current step' },
 }
 
 /* ── Built-in validation patterns ─────────────────── */
@@ -222,13 +223,18 @@ export function InlineDataForm({
 
   const pick = (key: { ro: string; en: string }) => (language === 'ro' ? key.ro : key.en)
 
-  if (viewStatus === 'inert_released') {
+  // Queued: still pending, but another card owns the customer's attention.
+  // Shown (so the next step is visible) but never submittable — two live
+  // input demands at once is the defect this state exists to prevent.
+  if (viewStatus === 'inert_released' || viewStatus === 'inert_queued') {
     return (
-      <div className="bg-soft-white border border-warm-border rounded-xl p-5 animate-[message-appear_300ms_ease-out]">
+      <div className="bg-soft-white border border-warm-border rounded-xl p-5 animate-[message-appear_300ms_ease-out] opacity-60">
         <label className="text-[13px] font-medium text-muted block mb-1">
           {labelText}
         </label>
-        <span className="text-[14px] text-muted">{pick(STATE_COPY.released)}</span>
+        <span className="text-[14px] text-muted">
+          {pick(viewStatus === 'inert_queued' ? STATE_COPY.queued : STATE_COPY.released)}
+        </span>
       </div>
     )
   }

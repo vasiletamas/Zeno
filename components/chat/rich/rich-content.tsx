@@ -193,6 +193,7 @@ export function RichContent({
           }
           language={language}
           isAnswered={isAnswered}
+          queued={inputViewStatus === 'inert_queued'}
           isLoading={isLoading}
         />
       )

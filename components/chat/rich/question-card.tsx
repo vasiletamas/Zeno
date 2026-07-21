@@ -42,6 +42,10 @@ interface QuestionCardProps {
   language: Language
   isAnswered?: boolean
   isLoading?: boolean
+  /** Pending, but another card owns the customer's attention (spec §2:
+   * exactly one input card is answerable at a time). Renders the question
+   * with a "next" notice and NO controls. */
+  queued?: boolean
   /** The previously submitted answer, shown in answered state */
   answeredValue?: string | string[]
   /**
@@ -61,17 +65,22 @@ function loc(obj: { en: string; ro: string }, lang: Language): string {
 /* State copy — same wording + muted treatment as inline-data-form.tsx, so the
  * two card families read identically when they go inert. */
 const NO_LONGER_NEEDED = { ro: 'Nu mai este necesar', en: 'No longer needed' }
+const QUEUED = { ro: 'Urmează după pasul curent', en: 'Next, after the current step' }
 
 /**
  * The inert-with-nothing-to-show state (spec 2026-07-20 §2). An answered card
  * whose value this client never had — i.e. after ANY reload, since no caller
  * passes `answeredValue` — must NOT render a ✓ beside an empty box. It says so
  * plainly instead, exactly like InlineDataForm's `inert_resolved` branch.
+ *
+ * `queued` is the OTHER inert reason (2026-07-21): the question is still
+ * pending but another card owns the customer's attention, so it must read as
+ * "next", never as "no longer needed" — the customer WILL be asked this.
  */
-function NoLongerNeeded({ language }: { language: Language }) {
+function NoLongerNeeded({ language, queued = false }: { language: Language; queued?: boolean }) {
   return (
     <div className="text-[14px] text-muted bg-linen rounded-lg px-4 py-3">
-      {loc(NO_LONGER_NEEDED, language)}
+      {loc(queued ? QUEUED : NO_LONGER_NEEDED, language)}
     </div>
   )
 }
@@ -601,6 +610,7 @@ export function QuestionCard({
   isLoading = false,
   answeredValue,
   clientValidate,
+  queued = false,
 }: QuestionCardProps) {
   const [clientHint, setClientHint] = useState<string | null>(null)
   const progressPercent =
@@ -747,8 +757,10 @@ export function QuestionCard({
         </p>
       )}
 
-      {/* Input area */}
-      <div className="mt-4">{renderInput()}</div>
+      {/* Input area. A QUEUED card (2026-07-21) shows what is coming but
+          offers no controls: exactly one input card may be answerable at a
+          time, and a queued question is "next", never "no longer needed". */}
+      <div className="mt-4">{queued ? <NoLongerNeeded language={language} queued /> : renderInput()}</div>
 
       {/* Client-side pre-submit hint (server re-validates regardless) */}
       {clientHint && (
