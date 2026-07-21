@@ -85,8 +85,29 @@ describe('cardKeyForAction — submitted actions map to semantic keys (REAL adap
     // rich-content posts { answer, questionId, questionCode, groupType }
     expect(cardKeyForAction({ type: 'answer_question', payload: { answer: 'true', questionId: 'q1', questionCode: 'DNT_TRAVEL', groupType: 'dnt' } })).toBe('question:DNT_TRAVEL')
     expect(cardKeyForAction({ type: 'answer_dnt', payload: { questionCode: 'DNT_TRAVEL', value: 'true' } })).toBe('question:DNT_TRAVEL')
-    // question.code is string|null — a null code falls back to the batch key
-    expect(cardKeyForAction({ type: 'answer_question', payload: { answer: 'x', questionCode: null, groupType: 'application' } })).toBe(QUESTION_BATCH_KEY)
+  })
+
+  it('a question submit that names NO question has no key (never the batch key)', () => {
+    // BdResultCard's continue/decline post answer_question with no questionCode
+    // (rich-content.tsx show_bd_rejected). Falling back to question:batch there
+    // would lock a co-rendered medical-batch card into `submitting` — a submit
+    // that addresses no question addresses no keyed card at all.
+    expect(cardKeyForAction({ type: 'answer_question', payload: { value: 'x' } })).toBeNull()
+    expect(cardKeyForAction({ type: 'answer_question', payload: { answer: 'continue_without_bd', groupType: 'bd_medical' } })).toBeNull()
+    // an EXPLICIT null code is equally code-less
+    expect(cardKeyForAction({ type: 'answer_question', payload: { answer: 'x', questionCode: null, groupType: 'application' } })).toBeNull()
+    expect(cardKeyForAction({ type: 'answer_dnt', payload: { value: 'true' } })).toBeNull()
+    expect(cardKeyForAction({ type: 'write_question_answer', payload: { answer: 'true', confirmToken: 't' } })).toBeNull()
+    expect(cardKeyForAction({ type: 'modify_answer', payload: { newValue: 'false' } })).toBeNull()
+  })
+
+  it('the code-less RENDERED card keeps its batch key (cardKeyForUiAction is deliberately NOT changed)', () => {
+    // an emitted medical-batch card legitimately carries no code — it must stay
+    // addressable, and its OWN submit (medical_batch) still names it.
+    expect(cardKeyForUiAction({ type: 'show_medical_batch', payload: { conditions: [] } })).toBe(QUESTION_BATCH_KEY)
+    expect(cardKeyForAction({ type: 'medical_batch', payload: { answers: {} } })).toBe(QUESTION_BATCH_KEY)
+    // and a coded question submit is unaffected
+    expect(cardKeyForAction({ type: 'answer_question', payload: { questionCode: 'BD_1', answer: 'true' } })).toBe('question:BD_1')
   })
 
   it('medical_batch (the REAL type — not submit_medical_batch) → shared batch key', () => {

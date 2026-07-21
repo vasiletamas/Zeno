@@ -90,7 +90,13 @@ export function cardKeyForAction(action: { type: string; payload: Record<string,
     case 'write_question_answer':
     case 'modify_answer': {
       const code = (action.payload.questionCode ?? action.payload.code ?? null) as string | null
-      return questionKeyFor(code)
+      // NO fallback to QUESTION_BATCH_KEY here (unlike cardKeyForUiAction,
+      // where a code-less RENDERED card is legitimately the batch card): a
+      // submit that names no question addresses no keyed card. BdResultCard's
+      // continue/decline post `answer_question` with no code — keying them to
+      // question:batch would spuriously lock a co-rendered medical-batch card
+      // into `submitting`.
+      return code == null ? null : questionKeyFor(code)
     }
     case 'medical_batch':
       return QUESTION_BATCH_KEY

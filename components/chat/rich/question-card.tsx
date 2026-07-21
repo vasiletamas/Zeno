@@ -58,6 +58,24 @@ function loc(obj: { en: string; ro: string }, lang: Language): string {
   return lang === 'ro' ? obj.ro : obj.en
 }
 
+/* State copy — same wording + muted treatment as inline-data-form.tsx, so the
+ * two card families read identically when they go inert. */
+const NO_LONGER_NEEDED = { ro: 'Nu mai este necesar', en: 'No longer needed' }
+
+/**
+ * The inert-with-nothing-to-show state (spec 2026-07-20 §2). An answered card
+ * whose value this client never had — i.e. after ANY reload, since no caller
+ * passes `answeredValue` — must NOT render a ✓ beside an empty box. It says so
+ * plainly instead, exactly like InlineDataForm's `inert_resolved` branch.
+ */
+function NoLongerNeeded({ language }: { language: Language }) {
+  return (
+    <div className="text-[14px] text-muted bg-linen rounded-lg px-4 py-3">
+      {loc(NO_LONGER_NEEDED, language)}
+    </div>
+  )
+}
+
 /* ── Sub-components ───────────────────────────────── */
 
 function BooleanInput({
@@ -301,9 +319,13 @@ function OpenEndedInput({
   }
 
   if (isAnswered) {
+    // Show the answer ONLY when this client actually has one (server-supplied
+    // or typed in this session); otherwise the truthful muted state.
+    const shown = typeof answeredValue === 'string' ? answeredValue : value
+    if (!shown.trim()) return <NoLongerNeeded language={language} />
     return (
       <div className="text-[15px] text-muted bg-linen rounded-lg px-4 py-3">
-        {typeof answeredValue === 'string' ? answeredValue : value}
+        {shown}
       </div>
     )
   }
@@ -373,9 +395,11 @@ function NumberInput({
   }
 
   if (isAnswered) {
+    const shown = typeof answeredValue === 'string' ? answeredValue : value
+    if (!shown.trim()) return <NoLongerNeeded language={language} />
     return (
       <div className="text-[15px] text-muted bg-linen rounded-lg px-4 py-3">
-        {typeof answeredValue === 'string' ? answeredValue : value}
+        {shown}
       </div>
     )
   }
@@ -459,13 +483,22 @@ function DateInput({
     }
   }
 
-  if (isAnswered && typeof answeredValue === 'string') {
-    const date = new Date(answeredValue)
+  if (isAnswered) {
+    // The date this client has: server-supplied, or the one just picked here.
+    const iso =
+      typeof answeredValue === 'string'
+        ? answeredValue
+        : day && month && year
+          ? `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+          : ''
+    // Without one, an inert card must NOT keep offering a live date picker
+    // (its selects and Save were only gated on isLoading) — it says so instead.
+    if (!iso) return <NoLongerNeeded language={language} />
     const formatted = new Intl.DateTimeFormat(language === 'ro' ? 'ro-RO' : 'en-GB', {
       day: 'numeric',
       month: 'long',
       year: 'numeric',
-    }).format(date)
+    }).format(new Date(iso))
     return (
       <div className="text-[15px] text-muted bg-linen rounded-lg px-4 py-3">
         {formatted}
