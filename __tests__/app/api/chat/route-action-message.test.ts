@@ -5,6 +5,7 @@
  * reload.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { NextRequest } from 'next/server'
 import { ACTION_MESSAGE_PREFIX } from '@/lib/chat/action-labels'
 
 // Capture the handleChatTurn arguments so we can assert on the persisted message
@@ -17,18 +18,30 @@ vi.mock('@/lib/chat/orchestrator', () => ({
   handleChatTurn: (input: unknown) => handleChatTurnSpy(input),
 }))
 vi.mock('@/lib/errors/logger', () => ({ logError: vi.fn(), logFatal: vi.fn() }))
+// 2026-07-21: the route now resolves the caller from the cookie and checks
+// conversation ownership before anything else (spec §3.1). Both are DB-backed;
+// stubbed to "allow" here exactly as the orchestrator already is. The refusal
+// paths have their own suite: __tests__/integration/chat-route-access.test.ts.
+vi.mock('@/lib/auth/reauth-gate', () => ({
+  canonicalCustomerId: async (id?: string | null) => id ?? null,
+}))
+vi.mock('@/lib/chat/conversation-access', () => ({
+  decideConversationAccess: async ({ cookieCustomerId }: { cookieCustomerId?: string }) => ({
+    kind: 'allow', customerId: cookieCustomerId,
+  }),
+}))
 
 const { POST } = await import('@/app/api/chat/route')
 
 let convCounter = 0
 function actionRequest(body: Record<string, unknown>) {
-  return new Request('http://localhost/api/chat', {
+  return new NextRequest('http://localhost/api/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', cookie: 'zeno_session=cust1' },
     // Fresh conversationId per request: the module-level concurrency guard
     // only releases on stream consumption, which these tests never do.
     body: JSON.stringify({ conversationId: `conv-t22-${convCounter++}`, customerId: 'cust1', ...body }),
-  }) as unknown as import('next/server').NextRequest
+  })
 }
 
 describe('POST /api/chat — action turns persist human-readable messages (T22)', () => {

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { NextRequest } from 'next/server'
 
 // Capture the handleChatTurn arguments so we can assert on them
 const handleChatTurnSpy = vi.fn((..._args: unknown[]) => {
@@ -11,15 +12,28 @@ vi.mock('@/lib/chat/orchestrator', () => ({
 }))
 vi.mock('@/lib/chat/action-adapter', () => ({ adaptAction: () => undefined }))
 vi.mock('@/lib/errors/logger', () => ({ logError: vi.fn(), logFatal: vi.fn() }))
+// 2026-07-21: the route now resolves the caller from the cookie and checks
+// conversation ownership before anything else (spec §3.1). Both are DB-backed;
+// this suite is about the debug header, so they are stubbed to "allow" exactly
+// as the orchestrator already is. The refusal paths have their own suite:
+// __tests__/integration/chat-route-access.test.ts.
+vi.mock('@/lib/auth/reauth-gate', () => ({
+  canonicalCustomerId: async (id?: string | null) => id ?? null,
+}))
+vi.mock('@/lib/chat/conversation-access', () => ({
+  decideConversationAccess: async ({ cookieCustomerId }: { cookieCustomerId?: string }) => ({
+    kind: 'allow', customerId: cookieCustomerId,
+  }),
+}))
 
 const { POST } = await import('@/app/api/chat/route')
 
 function makeRequest(headers: Record<string, string>) {
-  return new Request('http://localhost/api/chat', {
+  return new NextRequest('http://localhost/api/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...headers },
+    headers: { 'Content-Type': 'application/json', cookie: 'zeno_session=cust1', ...headers },
     body: JSON.stringify({ conversationId: 'c1', customerId: 'cust1', message: 'hi' }),
-  }) as unknown as import('next/server').NextRequest
+  })
 }
 
 describe('POST /api/chat — x-zeno-debug header', () => {
