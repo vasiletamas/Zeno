@@ -23,7 +23,11 @@
 | T9 cards_state SSE | ✅ done + spec+quality approved | 2fb0136d | emitted once, main path, before done; consumer case + harness assert |
 | T10 reload parity (full set) | ✅ done | 20af7522 (joint w/ T12) | page.tsx seeds deriveActiveCards → initialCards; tsc clean |
 | T11 card-view reducer + wiring | ✅ done | d101ae04 (reducer) + 20af7522 (wiring) | 17 pure unit tests TDD; REAL action types enumerated |
-| T12 components render card truth | ✅ done (12.5 browser pass pending — T16 gate) | 20af7522 | chat ring 50 files/361 green; identity-cards 4/4 |
+| T12 components render card truth | ✅ done + **browser-verified** | 20af7522 | chat ring 50 files/361 green; identity-cards 4/4; live DOM audit below |
+
+**Browser verification (2026-07-21, coordinator, conv `cmrrhruba0001g40yh3am7peo`, cold reload — the incident conversation itself):** `phoneCardPresent: false` — the zombie phone card that opened this investigation no longer renders. The OTP card is re-derived server-side on a cold load (pre-fix: `show_otp_entry` was lost entirely on reload) and renders its true status: "Codul a expirat", code input + Verifică disabled, **"Retrimite codul" ENABLED** (pre-fix it was dead via positional supersession — the customer's only recovery path was blocked). Zero console errors.
+
+**Environment gotcha (cost 20 minutes, worth recording):** a dev server started BEFORE a migration holds a stale in-memory Prisma client — `deriveActiveCards` threw `Cannot read properties of undefined (reading 'findMany')` on `profileFieldDeferral` at SSR while unit tests and `tsc` were green (vitest spawns fresh processes). The code was correct; restart the dev server after every migration.
 | T13–T16 | ⬜ pending | — | — |
 
 **T8-9 notes:** plan's phone-active fixture needed a declared email (ladder order); ErrorLayer has no 'chat' → 'orchestrator'; noted-for-later: deep-freeze FIELD_META_FOR_CARDS next time data-handlers.ts is touched; card-view.ts (T11) becomes the canonical home of the shared card-entry type + the 'question:batch' key constant.
