@@ -32,6 +32,17 @@ Interactive chat cards are no longer fire-and-forget SSE events held in browser 
 - `tsc --noEmit` clean · migration chain verified (fresh + upgrade, no drift).
 - `scripts/verify-card-state.ts`: **12/12 ok**, re-run after every subsequent change. Its author ran a non-vacuity probe — staging pre-fix shapes makes all four new checks fire — so the green is a real negative, not an empty set.
 - Browser: fresh conversation + the incident conversation, zero server errors, zero console errors.
+- **Spec sims: 3 of 4 scenarios pass.** `happy-path` and `verification-typed-code` each drove the funnel end-to-end to an **issued policy** (two `PENDING_SUBMISSION` policies in the DB) — so quote generation, acceptance and payment all work under the new card rules. `dnt-refusal` passed. `quote-decline` failed `goal_not_reached`, diagnosed below.
+
+### `quote-decline` sim failure — pre-existing harness gap, not this work
+
+Evidence, not inference. In the failed run (`cmrub7bv800ghs80y8jf5kdmf`, 120 messages, hit the 60-turn cap) the ledger shows `set_application`, `sign_dnt`, `select_coverage`, `collect_customer_field`, `start_channel_verification` — and **no `generate_quote` attempt at all**. The transcript ends in a 15-turn loop: the persona repeats "am dat click pe linkul din email" while the agent correctly insists on the 6-digit code. The challenge row confirms it: `consumedAt: null`.
+
+Root cause is structural in the harness. `worldHooks` — the only thing that actually clicks the magic link and consumes the challenge — runs `if (sc.fullFunnel)` (`run-spec-sims.ts:518`), and `quote-decline` is not a `fullFunnel` scenario (only two are). But its persona *is* in link mode (no `verification` field defaults to `'link'`, `run-spec-sims.ts:534`), so it claims a click that the harness never performs. Verification can therefore never complete in that scenario, identity stays unverified, and the quote it needs for its goal is unreachable. That is deterministic — no run of `quote-decline` can pass while those two settings disagree.
+
+Not caused by this work: none of the 34 commits touch the sim harness, the scenarios, the verification gate, or the quote rules (`spec-scenarios.ts` last changed 2026-07-17; `run-spec-sims.ts` last changed 2026-07-18 by T28). The single funnel-adjacent change is one *additive* exposure rule for `defer_customer_field`, which cannot block a quote. The likely regression window is T28 (`0cb12fc7`), which moved pre-acceptance collection to phone+email and thereby put an identity challenge in this scenario's path.
+
+**Recommended fix (not applied — it is a scenario-config decision, outside this spec):** give `quote-decline` either `verification: 'typed'` (persona types the code, agent confirms it — the `verification-typed-code` pattern) or `fullFunnel: true` so the link hook runs. Worth a short discussion before changing a shared scenario.
 
 ## Defects found by review and verification (not by the plan)
 

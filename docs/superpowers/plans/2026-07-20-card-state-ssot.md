@@ -31,7 +31,7 @@
 | T13 ON-SCREEN CARDS briefing | ✅ done + quality-reviewed | 1c476ed2 (+a9fecf9c) | quality review caught a T11 regression: DECLINED entries render no card → own heading + clause scoped |
 | T14 T11 amendment + offline net | ✅ done + quality-reviewed | 8f92eef1 (+a9fecf9c) | clause verified IN THE DB after reseed; net counts only printed families |
 | T15 verify-card-state script | ✅ done | 9b2b5a00 | 12/12 ok; non-vacuity probe proved the four checks fire on pre-fix shapes |
-| T16 full gate | 🔄 in progress | — | tsc ✅ · migrations ✅ (fresh+upgrade) · browser ✅ · full suite + sims running |
+| T16 full gate | ✅ done | 19211e0d + report | suite 1893 ✅ · tsc ✅ · migrations ✅ · verify-card-state 12/12 ✅ · browser ✅ · sims 3/4 (quote-decline = pre-existing harness gap, diagnosed in the report) |
 
 **T16 browser pass (2026-07-21, fresh conversation `cmruaerwt0000qk0ya3zmxf6v`, reseeded constitution live):** replayed the incident script — "asigurare de viata cu tratament in strainatate" → **"am 40 de ani"** → the agent recorded the age and continued the conversation with **NO email card and NO phone card** (the only input on the page is the composer). This is the exact turn that produced the unsolicited email card. Deterministic checker on the new conversation: **zero card findings** (vs six on the original incident: 3× unsolicited_contact_card, stale_card_replayed, card_for_committed_fact, competing_input_cards). Zero server errors, zero console errors.
 
