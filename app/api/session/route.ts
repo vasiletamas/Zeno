@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { maskVerificationTarget } from '@/lib/customer/verification-service'
+import { accountChallengeTarget } from '@/lib/auth/reauth-gate'
 
 const COOKIE_OPTS = {
   httpOnly: true,
@@ -17,18 +17,12 @@ const COOKIE_OPTS = {
  * withholds the customerId and does not extend the cookie. Anonymous
  * customers resume as before; {fresh:true} always starts a new anonymous
  * session (the explicit decline path).
+ *
+ * 2026-07-21: the gate itself moved to lib/auth/reauth-gate.ts — /chat/[id]
+ * now enforces the same rule (spec §3.1), and two copies of it would leave
+ * one door locked and the other open.
  */
-async function reauthGate(customerId: string): Promise<{ maskedEmail: string } | null> {
-  const user = await prisma.user.findUnique({ where: { customerId }, select: { id: true } })
-  if (!user) return null
-  const proven = await prisma.verificationChallenge.findFirst({
-    where: { customerId, channel: 'email', consumedAt: { not: null } },
-    orderBy: { consumedAt: 'desc' },
-    select: { target: true },
-  })
-  if (!proven) return null
-  return { maskedEmail: maskVerificationTarget('email', proven.target) }
-}
+const reauthGate = accountChallengeTarget
 
 function mintAnonymous() {
   return prisma.customer.create({ data: { isAnonymous: true, language: 'ro' } })
