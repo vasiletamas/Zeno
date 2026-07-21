@@ -56,6 +56,8 @@ export interface SSEHandlers {
   onToolStart: (tool: string, statusMessage: string) => void
   onToolComplete: () => void
   onUiAction: (action: { type: string; payload: Record<string, unknown> }) => void
+  /** Turn-end authoritative card set (spec 2026-07-20 §2): { cards: ActiveCard[] }. */
+  onCardsState?: (data: Record<string, unknown>) => void
   /** Raw parsed payload: the two senders extract different fields from it. */
   onError: (data: Record<string, unknown>) => void
   onDone: (data: Record<string, unknown>) => void
@@ -95,6 +97,9 @@ export async function consumeSSE(response: Response, handlers: SSEHandlers): Pro
         break
       case 'ui_action':
         handlers.onUiAction(data as { type: string; payload: Record<string, unknown> })
+        break
+      case 'cards_state':
+        handlers.onCardsState?.(data)
         break
       case 'error':
         handlers.onError(data)

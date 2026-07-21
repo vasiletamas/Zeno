@@ -196,6 +196,13 @@ describe('synthetic GUI turn runs the standard tool loop (T13)', () => {
     expect(events.some((e) => e.event === 'content' && String(e.data.text).includes('Oferta este gata'))).toBe(true)
     expect(events.some((e) => e.event === 'done')).toBe(true)
     expect(events.some((e) => e.event === 'error')).toBe(false)
+
+    // --- cards_state SSOT (spec 2026-07-20 §2): exactly one turn-end card
+    // set, emitted BEFORE done (deriveActiveCards runs against the mocked
+    // post-commit snapshot + the real test DB) ---
+    const cardsEvents = events.filter((e) => e.event === 'cards_state')
+    expect(cardsEvents).toHaveLength(1)
+    expect(events.findIndex((e) => e.event === 'cards_state')).toBeLessThan(events.findIndex((e) => e.event === 'done'))
   }, 60000)
 
   it('_autoChain single hop (T8 §3.4): an applied synthetic commit declaring data._autoChain executes ONE follow-up gui tool, seeds BOTH exchanges before round 1, and ignores the hop\'s own _autoChain', async () => {

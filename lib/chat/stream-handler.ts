@@ -15,6 +15,7 @@ export interface SSEEvent {
     | 'tool_start'
     | 'tool_complete'
     | 'ui_action'
+    | 'cards_state'
     | 'error'
     | 'done'
     | 'status'

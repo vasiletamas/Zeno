@@ -55,6 +55,7 @@ import { detectToolNarration, type ToolNarrationResult } from './tool-narration-
 import { debugYield, isDev, buildIdentityPayload, buildLegalityPayload, recordDebugEvent, type DebugEvent, type DebugGatePayload } from './debug'
 import { serializeToolResultForModel } from './tool-result-serializer'
 import { persistTurnDebug } from './turn-debug-persistence'
+import { deriveActiveCards } from './derive-active-cards'
 
 // ==============================================
 // CONSTANTS
@@ -1797,6 +1798,17 @@ async function* chatTurnGenerator(input: ChatTurnInput): AsyncGenerator<SSEEvent
     traceId: state.traceId,
     events: state.debugEvents,
   })
+
+  // Card-state SSOT (spec 2026-07-20 §2): the turn's authoritative card
+  // set — the client reconciles rendered cards against it; absence of a
+  // key means resolved/superseded. Same failure posture as turn-debug
+  // persistence: never break the turn.
+  try {
+    const cards = await deriveActiveCards(state.conversationId)
+    yield { event: 'cards_state', data: { cards } }
+  } catch (err) {
+    logError({ layer: 'orchestrator', category: 'cards_state', message: 'deriveActiveCards failed at turn end', context: { conversationId: state.conversationId }, error: err })
+  }
 
   // =============================================
   // DONE
