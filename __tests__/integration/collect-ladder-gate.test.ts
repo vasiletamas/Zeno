@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { randomUUID } from 'crypto'
 import { prisma } from '@/lib/db'
 import { resetDb, createCustomer, ensureTestProduct, issueTestQuote } from '@/__tests__/helpers/test-db'
-import { collectCustomerField } from '@/lib/tools/handlers/data-handlers'
+import { collectCustomerField, FIELD_META_FOR_CARDS } from '@/lib/tools/handlers/data-handlers'
 import type { ToolContext } from '@/lib/tools/types'
 
 beforeEach(async () => { await resetDb() })
@@ -91,6 +91,10 @@ describe.skipIf(!process.env.DATABASE_URL)('ladder gate (spec 2026-07-20 §4, co
     expect(r.success).toBe(true)
     expect(r.uiAction).toMatchObject({ type: 'show_data_field', payload: { field: 'phone' } })
     expect(r.message).toContain('Please provide phone')
+    // Parity ratchet (quality review 2026-07-20): the live emitter and
+    // deriveActiveCards draw the show_data_field payload from the ONE shared
+    // source — a derived card must deep-equal the live emission.
+    expect(r.uiAction!.payload).toEqual(FIELD_META_FOR_CARDS.phone)
   })
 
   it('email save that declares the auto-chain → OTP owns the turn: NO data-field card, chain message', async () => {

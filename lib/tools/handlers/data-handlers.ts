@@ -51,16 +51,17 @@ const FIELD_META: Record<
   },
 }
 
-/** Card payloads shared with deriveActiveCards (spec 2026-07-20 §1). */
-export const FIELD_META_FOR_CARDS: Record<CollectableField, Record<string, unknown>> = Object.fromEntries(
-  FIELD_ORDER.map((f) => [f, {
+/** Card payloads shared by the collectCustomerField emitter and
+ * deriveActiveCards (spec 2026-07-20 §1) — the ONE payload source. */
+export const FIELD_META_FOR_CARDS = Object.fromEntries(
+  FIELD_ORDER.map((f): [CollectableField, Record<string, unknown>] => [f, {
     field: f,
     label: FIELD_META[f].label,
     type: FIELD_META[f].type,
     validation: FIELD_META[f].validation ?? null,
     placeholder: FIELD_META[f].placeholder ?? null,
   }]),
-) as unknown as Record<CollectableField, Record<string, unknown>>
+) as Record<CollectableField, Record<string, unknown>>
 
 // ─────────────────────────────────────────────
 // Validation helpers
@@ -264,21 +265,13 @@ export const collectCustomerField: ToolHandler = async (args, context) => {
       ...(autoChain ? { _autoChain: autoChain } : {}),
     }
     if (nextField) {
-      const meta = FIELD_META[nextField]
       return {
         success: true,
         data: { ...baseData, nextField },
         message: `${field} saved. Please provide ${nextField}.`,
-        uiAction: {
-          type: 'show_data_field',
-          payload: {
-            field: nextField,
-            label: meta.label,
-            type: meta.type,
-            validation: meta.validation ?? null,
-            placeholder: meta.placeholder ?? null,
-          } as unknown as Record<string, unknown>,
-        },
+        // ONE payload source with deriveActiveCards — a derived card
+        // deep-equals the live emission by construction.
+        uiAction: { type: 'show_data_field', payload: FIELD_META_FOR_CARDS[nextField] },
       }
     }
     return {

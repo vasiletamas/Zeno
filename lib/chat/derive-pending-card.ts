@@ -23,9 +23,16 @@ import { loadDomainSnapshot } from '@/lib/engines/snapshot-loader'
 import { getNextQuestion } from '@/lib/engines/questionnaire-engine'
 import { appGroupCodesFor } from '@/lib/tools/handlers/application-handlers'
 import { medicalBatchCard, questionCard, type MedicalBatchCardAction, type QuestionCardAction } from '@/lib/tools/handlers/questionnaire-cards'
+import type { DomainSnapshot } from '@/lib/engines/domain-types'
 
-export async function derivePendingCard(conversationId: string): Promise<QuestionCardAction | MedicalBatchCardAction | null> {
-  const snapshot = await loadDomainSnapshot(conversationId)
+export async function derivePendingCard(
+  conversationId: string,
+  /** Injectable snapshot (deriveActiveCards passes its in-hand load so the
+   * question card derives from the SAME instant as the other card families
+   * and the turn pays for ONE snapshot, not two). Default: load fresh. */
+  injectedSnapshot?: DomainSnapshot,
+): Promise<QuestionCardAction | MedicalBatchCardAction | null> {
+  const snapshot = injectedSnapshot ?? await loadDomainSnapshot(conversationId)
 
   if (snapshot.dnt.sessionActive) {
     if (!snapshot.dnt.pendingCode) return null

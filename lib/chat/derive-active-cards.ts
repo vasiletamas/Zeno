@@ -66,7 +66,9 @@ export async function deriveActiveCards(conversationId: string): Promise<ActiveC
   }
 
   // ---- question: reuse the existing reload-parity derivation verbatim
-  const pending = await derivePendingCard(conversationId)
+  // (injecting the in-hand snapshot: same instant as the other families,
+  // one snapshot load per derivation)
+  const pending = await derivePendingCard(conversationId, snapshot)
   if (pending) {
     const payload = pending.payload as Record<string, unknown>
     const code = (payload.code ?? (payload.question as { code?: string } | undefined)?.code ?? 'batch') as string
