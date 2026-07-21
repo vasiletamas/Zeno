@@ -22,12 +22,27 @@ export interface IdentityRequirement {
   minTier: IdentityTier
   anyDeclaredOf?: ('cnp' | 'dateOfBirth' | 'declaredAge')[]
   productDocuments?: boolean
+  /**
+   * Ruling D1 (2026-07-21): "≥1 consumed challenge", independent of the tier.
+   *
+   * Needed because `verified_channel` as a TIER means email AND phone
+   * (deriveIdentityTier over KYC_FIELDS) — a consumed challenge alone cannot
+   * lift `anonymous`. Gating the questionnaire on the tier would deadlock the
+   * funnel permanently: no card asks for the phone until a quote exists, and
+   * the quote is downstream of the questionnaire that would be blocked.
+   *
+   * So the sensitive-collection rows ask the narrower question they actually
+   * mean — "has this customer proven a channel?" — and leave the contact
+   * ladder to the rows that genuinely need a full contact set.
+   */
+  channelProven?: boolean
 }
 export type IdentityRequirementsTable = Record<string, IdentityRequirement>
 
 export const IDENTITY_REQUIREMENTS: IdentityRequirementsTable = {
   set_application: { minTier: 'anonymous' }, // no hard gate pre-needs-analysis (#1)
-  sign_dnt: { minTier: 'anonymous' },
+  // sign_dnt moved DOWN to the sensitive-collection block (2026-07-21) — it
+  // gained channelProven and belongs with the rest of the DNT gates.
   generate_quote: { minTier: 'anonymous', anyDeclaredOf: ['cnp', 'dateOfBirth', 'declaredAge'] },
   accept_quote: { minTier: 'verified_channel' },
   ensure_payment_session: { minTier: 'verified_channel', productDocuments: true },
@@ -36,6 +51,28 @@ export const IDENTITY_REQUIREMENTS: IdentityRequirementsTable = {
   // the very identity data it erases).
   request_data_export: { minTier: 'verified_channel' },
   request_erasure: { minTier: 'anonymous' },
+
+  /**
+   * 2026-07-21 (spec §3.2, ruling R2): authentication moves to APPLICATION
+   * START. The DNT and the medical questionnaire carry the most sensitive data
+   * in the product, and until now were collected entirely in the unverified
+   * state — where the session reauth gate does not fire, because that gate
+   * needs an account and the account is born at OTP confirmation.
+   *
+   * This deliberately reverses the `set_application` comment above ("no hard
+   * gate pre-needs-analysis") for everything AFTER application creation.
+   * `set_application` itself stays anonymous: it creates the application, and
+   * the email card becomes due precisely because one now exists.
+   *
+   * D2 ruling: these rows outrank the consent HALT_EXEMPT re-grant floor. A
+   * withdrawn, unverified customer must prove a channel before re-granting —
+   * accepted deliberately, see derive-consent-exposure.test.ts.
+   */
+  open_dnt_session: { minTier: 'anonymous', channelProven: true },
+  write_dnt_answer: { minTier: 'anonymous', channelProven: true },
+  sign_dnt: { minTier: 'anonymous', channelProven: true },
+  write_question_answer: { minTier: 'anonymous', channelProven: true },
+  write_medical_batch: { minTier: 'anonymous', channelProven: true },
 }
 
 const TIER_ORDER: Record<IdentityTier, number> = { anonymous: 0, declared: 1, verified_channel: 2 }
@@ -85,6 +122,12 @@ export function evaluateRow(
     } else {
       needs.push(req.minTier === 'verified_channel' ? 'verified_channel' : 'declared')
     }
+  }
+  // D1: the channel-only clause. `detail` absent means the caller could not
+  // report channel state — fail CLOSED, never hand a security gate a pass on
+  // missing information.
+  if (req.channelProven && !detail?.hasVerifiedChannel) {
+    needs.push('verified_channel')
   }
   if (req.anyDeclaredOf && !req.anyDeclaredOf.some(hasDeclared)) {
     needs.push(`declared:${req.anyDeclaredOf.join('_or_')}`)

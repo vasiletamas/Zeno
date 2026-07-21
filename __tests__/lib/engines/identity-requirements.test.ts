@@ -1,14 +1,66 @@
 import { describe, it, expect } from 'vitest'
 import { deriveAndExpose } from '@/lib/engines/derive-and-expose'
-import { checkIdentityRequirement, IDENTITY_REQUIREMENTS } from '@/lib/engines/identity-requirements'
+import { checkIdentityRequirement, evaluateRow, IDENTITY_REQUIREMENTS } from '@/lib/engines/identity-requirements'
 import { listCommitTools } from '@/lib/tools/registry'
 import { makeSnapshot } from './snapshot-fixtures'
 
 describe('identity-requirements mechanism (contradiction #1)', () => {
   it('the B3.2 + E3 rows are landed — one row per ratified commit gate', () => {
     expect(Object.keys(IDENTITY_REQUIREMENTS).sort()).toEqual(
-      ['accept_quote', 'ensure_payment_session', 'generate_quote', 'request_data_export', 'request_erasure', 'set_application', 'sign_dnt'],
+      [
+        'accept_quote', 'ensure_payment_session', 'generate_quote',
+        // 2026-07-21 (spec §3.2, ruling R2): the sensitive-collection gates.
+        // The DNT and the medical questionnaire hold the most sensitive data
+        // in the product and were collected entirely unverified.
+        'open_dnt_session', 'request_data_export', 'request_erasure',
+        'set_application', 'sign_dnt', 'write_dnt_answer', 'write_medical_batch',
+        'write_question_answer',
+      ],
     )
+  })
+
+  /**
+   * Ruling D1 (2026-07-21). `verified_channel` as a TIER means email AND phone
+   * (deriveIdentityTier over KYC_FIELDS) — a consumed challenge alone cannot
+   * lift `anonymous`. Gating the questionnaire on that tier would deadlock the
+   * funnel permanently: no card asks for the phone until a quote exists, and
+   * the quote is downstream of the questionnaire.
+   *
+   * So these rows gate on the CHALLENGE, not the tier: `channelProven` means
+   * "≥1 consumed challenge", independent of how much contact data is on file.
+   */
+  it('D1: the sensitive-collection rows gate on a proven CHANNEL, not the contact tier', () => {
+    for (const tool of ['open_dnt_session', 'write_dnt_answer', 'sign_dnt', 'write_question_answer', 'write_medical_batch']) {
+      expect(IDENTITY_REQUIREMENTS[tool], tool).toEqual({ minTier: 'anonymous', channelProven: true })
+    }
+  })
+
+  it('D1: an email-only customer with a proven channel PASSES the DNT gate (AC-1 step 6)', () => {
+    const r = checkIdentityRequirement(
+      IDENTITY_REQUIREMENTS,
+      'open_dnt_session',
+      // Maria at AC-1 step 5: email verified, no phone anywhere. Her TIER is
+      // still 'anonymous' — that is exactly the deadlock this ruling avoids.
+      { tier: 'anonymous', fields: { email: { provenance: 'verified' } }, verifiedChannels: ['email'], pendingChallenge: null },
+    )
+    expect(r).toEqual({ ok: true })
+  })
+
+  it('D1: the same customer BEFORE verifying is blocked, naming the channel', () => {
+    const r = checkIdentityRequirement(
+      IDENTITY_REQUIREMENTS,
+      'open_dnt_session',
+      { tier: 'anonymous', fields: { email: { provenance: 'declared' } }, verifiedChannels: [], pendingChallenge: null },
+    )
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.needs).toEqual(['verified_channel'])
+  })
+
+  // Fail closed: a caller that cannot report channel state must not be handed
+  // a pass on a security gate.
+  it('D1: channelProven is unmet when the caller supplies no decomposition', () => {
+    expect(evaluateRow({ minTier: 'anonymous', channelProven: true }, 'anonymous', () => true))
+      .toEqual(['verified_channel'])
   })
   it('pins the ratified rows (ADD-1, erratum-4a encoding; T28 adds declaredAge)', () => {
     expect(IDENTITY_REQUIREMENTS.generate_quote).toEqual({ minTier: 'anonymous', anyDeclaredOf: ['cnp', 'dateOfBirth', 'declaredAge'] })

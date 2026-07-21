@@ -148,4 +148,45 @@ describe('deriveAndExpose — exposure over the FULL snapshot (contradiction #12
     expect(r.actions.available).toContain('get_product_info')
     expect(r.actions.available).toContain('escalate_to_human')
   })
+
+  /**
+   * Ruling R2 (spec 2026-07-21 §3.2): authentication at APPLICATION START.
+   * The DNT and medical questionnaire hold the most sensitive data in the
+   * product and were previously collected entirely unverified — the window in
+   * which the session reauth gate cannot fire, because that gate needs an
+   * account and the account is born at OTP confirmation.
+   *
+   * makeSnapshot() now defaults to a proven channel so unrelated suites stay
+   * focused; THIS is the case that pins the blocked side, so that default can
+   * never silently hide the gate.
+   */
+  it('R2: an unverified customer cannot reach ANY sensitive-collection commit', () => {
+    const unverified = makeSnapshot({
+      identity: { tier: 'anonymous', fields: {}, verifiedChannels: [], pendingChallenge: null },
+      consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true },
+      dnt: { signed: false, valid: false, validUntil: null, coversProductTypes: [], answeredCount: 0, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0, facts: {} },
+    })
+    const r = deriveAndExpose(unverified)
+
+    expect(r.actions.available).not.toContain('open_dnt_session')
+    expect(r.actions.blocked).toContainEqual(
+      expect.objectContaining({ action: 'open_dnt_session', reason: 'requires_identity', params: { needs: ['verified_channel'] } }),
+    )
+  })
+
+  it('R2: the SAME snapshot with a proven channel opens the DNT (AC-1 step 6)', () => {
+    const base = {
+      consents: { gdprProcessing: true, aiDisclosure: true, marketing: false, gdprWithdrawn: false, hasAnyEvents: true },
+      dnt: { signed: false, valid: false, validUntil: null, coversProductTypes: [], answeredCount: 0, totalCount: 5, sessionActive: false, latest: null, activeSessionId: null, sessionType: null, sessionAnswered: 0, sessionTotal: 0, facts: {} },
+    }
+    // email only, no phone — her TIER is still 'anonymous' (D1: that is the
+    // deadlock the channelProven clause exists to avoid).
+    const verified = makeSnapshot({
+      ...base,
+      identity: { tier: 'anonymous', fields: { email: { provenance: 'verified' } }, verifiedChannels: ['email'], pendingChallenge: null },
+    })
+
+    expect(deriveAndExpose(verified).actions.available).toContain('open_dnt_session')
+  })
+
 })
