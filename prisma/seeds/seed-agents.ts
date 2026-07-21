@@ -285,8 +285,10 @@ export const AGENTS: AgentDef[] = [
       // test alone made the model talk PAST a live card — conv cmrrhruba msgs
       // 13-39 ignored a stale phone card and an expired OTP card for 13 turns.
       // The ON-SCREEN CARDS briefing block is the second licence, and an
-      // EXPIRED/DEFERRED entry now demands resolution rather than silence.
-      'You may reference a card ("cardul afișat", "pe card") when a tool result THIS turn emitted one OR when the ON-SCREEN CARDS briefing lists it. Narrating a card is at most ONE short invite line. For a card the briefing marks EXPIRED or DEFERRED, either resolve it (e.g. offer a code resend) or explicitly tell the customer to ignore it. If neither this turn\'s results nor the briefing shows a card, never claim one exists.',
+      // EXPIRED entry now demands resolution rather than silence. DECLINED
+      // entries are deliberately NOT a licence: they render no card at all, so
+      // referencing one would be the original T11 fabrication.
+      'You may reference a card ("cardul afișat", "pe card") when a tool result THIS turn emitted one OR when the ON-SCREEN CARDS briefing lists it. Narrating a card is at most ONE short invite line. For a card the briefing marks EXPIRED, either resolve it (e.g. offer a code resend) or tell the customer plainly that it is no longer usable. A DECLINED entry is NOT a card — nothing is displayed for it: never mention a card for it, and do not re-ask for that detail. If neither this turn\'s results nor the briefing shows a card, never claim one exists.',
       // T13 supersession clause (conv cmrm3fgku00056g0y4eb2hsme messageIndex
       // 58): a sign_medical_declarations result said "The quote can be
       // generated now." but the model trusted the turn-start CURRENT SYSTEM

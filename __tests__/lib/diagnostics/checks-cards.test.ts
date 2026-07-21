@@ -95,6 +95,20 @@ describe('hallucinated_ui_reference', () => {
     expect(runDiagnostics(e).some((x) => x.checkId === 'hallucinated_ui_reference')).toBe(false)
   })
 
+  // The payload records the FULL derived set, but only data_field/otp families
+  // are printed as card lines — a question:* entry never reaches the model as a
+  // card, so it cannot license card prose (diagnostic ≡ constitution).
+  it('an unprinted family (question:*) in briefedCards does NOT license card prose', () => {
+    const e = makeExport({
+      messages: [
+        { id: 'u', role: 'user', content: 'ok', toolCalls: null, toolResults: null, createdAt: 'x' },
+        { id: 'a', role: 'assistant', content: 'Alege pe cardul afișat.', toolCalls: null, toolResults: null, createdAt: 'x' },
+      ] as never,
+      turns: [turn(0, { briefedCards: [{ key: 'question:BD_CANCER', status: 'active' }], toolCalls: [] })] as never,
+    })
+    expect(runDiagnostics(e).some((x) => x.checkId === 'hallucinated_ui_reference')).toBe(true)
+  })
+
   it('still flags a card reference with neither a tool trace nor briefed cards', () => {
     const e = makeExport({
       messages: [

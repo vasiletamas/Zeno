@@ -26,10 +26,17 @@ const CARD_REFERENCE = /\b(cardul|pe card|card afisat|de pe card)\b/
  * 2026-07-20 amendment (spec §5): a card the ON-SCREEN CARDS briefing listed
  * at turn start is on screen whether or not THIS turn emitted it — the
  * constitution now licenses referencing it (and REQUIRES addressing an
- * expired/deferred one), so `briefedCards` is a trace in its own right.
+ * expired one), so `briefedCards` is a trace in its own right.
+ *
+ * Scoped to the families the briefing actually PRINTS (data_field / otp): the
+ * payload records the full derived set, but the question and confirm families
+ * never reach the model as card lines, so counting them would license card
+ * prose the model was never shown — diagnostic and constitution stay identical.
  */
+const BRIEFED_CARD_FAMILIES = ['data_field:', 'otp:']
+
 const hasCardTrace = (t: { toolCalls: { result?: { success?: boolean; uiAction?: unknown; data?: unknown } }[]; briefedCards?: { key: string }[] }): boolean =>
-  (t.briefedCards?.length ?? 0) > 0 ||
+  (t.briefedCards ?? []).some((c) => BRIEFED_CARD_FAMILIES.some((f) => c.key.startsWith(f))) ||
   t.toolCalls.some((c) => {
     if (c.result?.uiAction) return true
     const d = c.result?.data as { _instruction?: unknown; preview?: unknown } | undefined

@@ -181,17 +181,27 @@ describe('ON-SCREEN CARDS briefing (spec 2026-07-20 §5)', () => {
   it('prints data_field entries and EXPIRED otp entries with their hints', () => {
     const briefing = formatDerivedBriefing(baseState(), baseActions(), [
       { key: 'data_field:phone', status: 'active', hint: 'the phone card owns this input — invite the customer to fill it; do not re-ask in prose' },
-      { key: 'data_field:email', status: 'deferred', hint: 'customer declined email for now — do NOT re-ask; resumes only if they offer it' },
       { key: 'otp:email', status: 'expired', hint: 'the code EXPIRED — offer to resend (start_channel_verification); never ask for the old code' },
       { key: 'otp:sms', status: 'active', hint: 'x' },
       { key: 'confirm:sign_dnt', status: 'active', hint: 'x' },
     ])
     expect(briefing).toContain('ON-SCREEN CARDS:')
-    expect(briefing).toContain('data_field:phone [ACTIVE] — the phone card owns this input')
-    expect(briefing).toContain('data_field:email [DEFERRED] — customer declined email')
-    expect(briefing).toContain('otp:email [EXPIRED] — the code EXPIRED')
+    expect(briefing).toContain('data_field:phone [ACTIVE]: the phone card owns this input')
+    expect(briefing).toContain('otp:email [EXPIRED]: the code EXPIRED')
     expect(briefing).not.toContain('otp:sms')
     expect(briefing).not.toMatch(/ON-SCREEN CARDS:[\s\S]*confirm:sign_dnt/)
+  })
+
+  // A deferred field renders NO card (the derivation gives it no uiAction and
+  // message-list filters it out), so listing it as on-screen would instruct the
+  // model to discuss a card that does not exist — the T11 fabrication class.
+  // The fact still briefs, under its own heading.
+  it('brands DECLINED entries as no-card and keeps them out of the ON-SCREEN block', () => {
+    const briefing = formatDerivedBriefing(baseState(), baseActions(), [
+      { key: 'data_field:email', status: 'deferred', hint: 'customer declined email for now — do NOT re-ask; resumes only if they offer it' },
+    ])
+    expect(briefing).toContain('DECLINED (no card on screen): data_field:email — customer declined email')
+    expect(briefing).not.toContain('ON-SCREEN CARDS')
   })
 
   it('omits the block entirely when no printable entries exist', () => {

@@ -127,11 +127,23 @@ export function formatDerivedBriefing(state: DerivedStateV3, actions: ExposedAct
   // that has NO other durable surface — contact-field cards and expired OTP.
   // ACTIVE otp keeps the Verification line below, confirm:* keeps P0-5 above,
   // question:* keeps the DNT-code line — printing them here would duplicate.
-  const printable = (activeCards ?? []).filter((c) =>
+  //
+  // DEFERRED entries are NOT on screen: the derivation gives them no uiAction
+  // and message-list filters them out, so they must never appear under the
+  // ON-SCREEN heading — telling the customer to "ignore" a card that does not
+  // render is the very T11 fabrication this section exists to prevent. They
+  // ride their own suppression line instead (the fact still matters: it is why
+  // the ask is absent).
+  const briefable = (activeCards ?? []).filter((c) =>
     c.key.startsWith('data_field:') || (c.key.startsWith('otp:') && c.status === 'expired'))
-  if (printable.length > 0) {
+  const onScreen = briefable.filter((c) => c.status !== 'deferred')
+  const deferred = briefable.filter((c) => c.status === 'deferred')
+  if (onScreen.length > 0) {
     lines.push('ON-SCREEN CARDS:')
-    for (const c of printable) lines.push(`- ${c.key} [${c.status.toUpperCase()}] — ${c.hint}`)
+    for (const c of onScreen) lines.push(`- ${c.key} [${c.status.toUpperCase()}]: ${c.hint}`)
+  }
+  for (const c of deferred) {
+    lines.push(`DECLINED (no card on screen): ${c.key} — ${c.hint}`)
   }
   if (state.product) lines.push(`Product: ${state.product.code}`)
   if (state.selection.tier) lines.push(`Selection: tier ${state.selection.tier}${state.selection.level ? ', level ' + state.selection.level : ''}${state.selection.addon ? ', add-on included' : ''}`)
