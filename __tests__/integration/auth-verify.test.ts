@@ -9,7 +9,7 @@ import { POST as magicLinkPost } from '@/app/api/auth/magic-link/route'
 beforeEach(async () => { await resetFunnelTables() })
 
 it('link verification binds the chat session and returns to the conversation, not the dashboard (erratum 2: /chat/[id])', async () => {
-  const c = await createCustomer({ email: 'ana@example.ro' })
+  const c = await createCustomer({ email: 'ana@example.ro' }, { channelProven: false })
   const conv = await prisma.conversation.create({ data: { customerId: c.id } })
   const { linkToken } = await issueChallenge(c.id, 'email', 'ana@example.ro', conv.id)
   const res = await verifyGet(new NextRequest(`http://localhost/api/auth/verify?token=${linkToken}`))
@@ -23,7 +23,7 @@ it('link verification binds the chat session and returns to the conversation, no
 })
 
 it('a dashboard-initiated challenge (no conversation) redirects to the dashboard', async () => {
-  const c = await createCustomer({ email: 'solo@example.ro' })
+  const c = await createCustomer({ email: 'solo@example.ro' }, { channelProven: false })
   const { linkToken } = await issueChallenge(c.id, 'email', 'solo@example.ro', null)
   const res = await verifyGet(new NextRequest(`http://localhost/api/auth/verify?token=${linkToken}`))
   expect(res.headers.get('location')).toContain('/dashboard')
@@ -35,7 +35,7 @@ it('expired/consumed token redirects with an error, never throws', async () => {
 })
 
 it('magic-link route issues through the challenge primitive and never reveals whether the email exists', async () => {
-  const c = await createCustomer({ email: 'known@example.ro' })
+  const c = await createCustomer({ email: 'known@example.ro' }, { channelProven: false })
   const known = await magicLinkPost(new NextRequest('http://localhost/api/auth/magic-link', {
     method: 'POST', headers: new Headers({ 'content-type': 'application/json' }), body: JSON.stringify({ email: 'known@example.ro' }),
   }))

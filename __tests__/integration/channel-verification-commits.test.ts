@@ -19,7 +19,7 @@ function lastIssuedCode(): string {
 }
 
 it('start issues a challenge without disclosing whether the target matches an existing account (anti-enumeration, T4.D4)', async () => {
-  const c = await createCustomer()
+  const c = await createCustomer({}, { channelProven: false })
   const conv = await prisma.conversation.create({ data: { customerId: c.id } })
   const r = await executeCommit({
     tool: 'start_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
@@ -31,7 +31,7 @@ it('start issues a challenge without disclosing whether the target matches an ex
 
 it('confirm merges into an owner who VERIFIED the target (consumed evidence), but NEVER into one who merely declared it (P0-1)', async () => {
   // Owner establishes ownership by verifying the address themselves.
-  const owner = await createCustomer({ isAnonymous: false })
+  const owner = await createCustomer({ isAnonymous: false }, { channelProven: false })
   const ownerConv = await prisma.conversation.create({ data: { customerId: owner.id } })
   await executeCommit({
     tool: 'start_channel_verification', actor: 'agent', customerId: owner.id, conversationId: ownerConv.id,
@@ -43,10 +43,10 @@ it('confirm merges into an owner who VERIFIED the target (consumed evidence), bu
   })
 
   // Attacker only DECLARES the same address — must not gain ownership.
-  const attacker = await createCustomer()
+  const attacker = await createCustomer({}, { channelProven: false })
   await setDeclaredField(attacker.id, 'email', 'ana@example.ro', 'collect_customer_field')
 
-  const shell = await createCustomer()
+  const shell = await createCustomer({}, { channelProven: false })
   const conv = await prisma.conversation.create({ data: { customerId: shell.id } })
   await executeCommit({
     tool: 'start_channel_verification', actor: 'agent', customerId: shell.id, conversationId: conv.id,
@@ -70,7 +70,7 @@ it('confirm merges into an owner who VERIFIED the target (consumed evidence), bu
 // configured, so the gateway rejects with invalid_args before the handler
 // runs. The handler's own reject stays as defense in depth (tested below).
 it('NEGATIVE: sms verification is rejected at the schema layer while no SMS provider is configured (a standing sms challenge is an unfulfillable dead end)', async () => {
-  const c = await createCustomer()
+  const c = await createCustomer({}, { channelProven: false })
   const conv = await prisma.conversation.create({ data: { customerId: c.id } })
   const r = await executeCommit({
     tool: 'start_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
@@ -82,7 +82,7 @@ it('NEGATIVE: sms verification is rejected at the schema layer while no SMS prov
 })
 
 it('NEGATIVE (defense in depth): the handler itself still rejects sms with the email redirect even when called past the schema', async () => {
-  const c = await createCustomer()
+  const c = await createCustomer({}, { channelProven: false })
   const conv = await prisma.conversation.create({ data: { customerId: c.id } })
   const { startChannelVerification } = await import('@/lib/tools/handlers/identity-handlers')
   const r = await startChannelVerification({ channel: 'sms', target: '0712345678' }, ctx(c.id, conv.id))
@@ -96,7 +96,7 @@ it('NEGATIVE (defense in depth): the handler itself still rejects sms with the e
 // attempt budget, and a live challenge blocks silent re-sends.
 
 it('wrong code → rejected envelope carrying attemptsRemaining; next-turn briefing says attempts remaining', async () => {
-  const c = await createCustomer()
+  const c = await createCustomer({}, { channelProven: false })
   const conv = await prisma.conversation.create({ data: { customerId: c.id } })
   await executeCommit({
     tool: 'start_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
@@ -118,7 +118,7 @@ it('wrong code → rejected envelope carrying attemptsRemaining; next-turn brief
 })
 
 it('second start for the SAME target while a challenge is pending → rejected verification_already_pending (the old code survives)', async () => {
-  const c = await createCustomer()
+  const c = await createCustomer({}, { channelProven: false })
   const conv = await prisma.conversation.create({ data: { customerId: c.id } })
   await executeCommit({
     tool: 'start_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
@@ -140,7 +140,7 @@ it('second start for the SAME target while a challenge is pending → rejected v
 })
 
 it('explicit resend: true re-issues for the same target (fresh code, old one dead)', async () => {
-  const c = await createCustomer()
+  const c = await createCustomer({}, { channelProven: false })
   const conv = await prisma.conversation.create({ data: { customerId: c.id } })
   await executeCommit({
     tool: 'start_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
@@ -162,7 +162,7 @@ it('explicit resend: true re-issues for the same target (fresh code, old one dea
 })
 
 it('a NEW target passes the guard without resend (customer corrected their address)', async () => {
-  const c = await createCustomer()
+  const c = await createCustomer({}, { channelProven: false })
   const conv = await prisma.conversation.create({ data: { customerId: c.id } })
   await executeCommit({
     tool: 'start_channel_verification', actor: 'agent', customerId: c.id, conversationId: conv.id,
@@ -176,7 +176,7 @@ it('a NEW target passes the guard without resend (customer corrected their addre
 })
 
 it('confirm verifies in place when nobody else owns the target; tier climbs to verified_channel', async () => {
-  const c = await createCustomer()
+  const c = await createCustomer({}, { channelProven: false })
   const conv = await prisma.conversation.create({ data: { customerId: c.id } })
   await setDeclaredField(c.id, 'name', 'Ana Pop', 'test')
   await setDeclaredField(c.id, 'cnp', '1980418089861', 'test')

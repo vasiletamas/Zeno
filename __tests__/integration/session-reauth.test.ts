@@ -28,7 +28,7 @@ const req = (url: string, opts: { cookie?: string; body?: unknown } = {}) =>
 
 /** An account-holder: linked User + consumed email challenge (B3.4 evidence). */
 async function makeAccountHolder(email = 'holder@example.ro') {
-  const c = await createCustomer({ isAnonymous: false, email })
+  const c = await createCustomer({ isAnonymous: false, email }, { channelProven: false })
   await prisma.user.create({ data: { email, role: 'CUSTOMER', customerId: c.id } })
   await prisma.verificationChallenge.create({
     data: {
@@ -51,7 +51,7 @@ it('an account-holder cookie gets reauth_required with the masked email — neve
 })
 
 it('an anonymous cookie (no linked User) still resumes silently', async () => {
-  const c = await createCustomer({ isAnonymous: true })
+  const c = await createCustomer({ isAnonymous: true }, { channelProven: false })
   const res = await sessionPost(req('/api/session', { cookie: `zeno_session=${c.id}` }))
   // T21: resumes also carry activeConversationId (null when no ACTIVE conversation)
   expect(await res.json()).toEqual({ customerId: c.id, isNew: false, activeConversationId: null })
@@ -59,7 +59,7 @@ it('an anonymous cookie (no linked User) still resumes silently', async () => {
 
 it('a merged-shell cookie follows the pointer, then the CANONICAL account demands reauth', async () => {
   const owner = await makeAccountHolder('owner@example.ro')
-  const shell = await createCustomer({ isAnonymous: true, mergedIntoId: owner.id })
+  const shell = await createCustomer({ isAnonymous: true, mergedIntoId: owner.id }, { channelProven: false })
   const res = await sessionPost(req('/api/session', { cookie: `zeno_session=${shell.id}` }))
   const body = await res.json()
   expect(body.status).toBe('reauth_required')
@@ -85,7 +85,7 @@ it('reauth start issues a challenge to the ACCOUNT email; anti-enumeration: 200 
   expect(challenge).toMatchObject({ channel: 'email', target: 'holder@example.ro' })
 
   // no account behind the cookie → SAME 200, no challenge issued
-  const anon = await createCustomer({ isAnonymous: true })
+  const anon = await createCustomer({ isAnonymous: true }, { channelProven: false })
   const res2 = await reauthStart(req('/api/session/reauth/start', { cookie: `zeno_session=${anon.id}`, body: {} }))
   expect(res2.status).toBe(200)
   expect(await prisma.verificationChallenge.count({ where: { customerId: anon.id } })).toBe(0)

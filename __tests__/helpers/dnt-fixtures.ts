@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/db'
 import { openDntSession, writeDntAnswer, getDntNextQuestion } from '@/lib/tools/handlers/dnt-handlers'
-import { ensureTestProduct } from './test-db'
+import { ensureTestProduct, proveChannel } from './test-db'
 import type { ToolContext } from '@/lib/tools/types'
 
 function answerFor(q: { type: string; options: unknown; code?: string | null }): string {
@@ -49,6 +49,9 @@ export async function answerAllDntQuestions(customerId: string, conversationId: 
 export async function seedDntFullyAnswered() {
   const product = await ensureTestProduct()
   const customer = await prisma.customer.create({ data: { isAnonymous: true, language: 'ro' } })
+  // 2026-07-21 (R2): the DNT commits require a proven channel; without one
+  // open_dnt_session below is refused requires_identity and this fixture throws.
+  await proveChannel(customer.id)
   const conversation = await prisma.conversation.create({ data: { customerId: customer.id, productId: product.id } })
   const ctx = makeCtx(customer.id, conversation.id)
   const opened = await openDntSession({}, ctx)

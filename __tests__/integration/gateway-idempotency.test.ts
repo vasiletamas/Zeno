@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { prisma } from '@/lib/db'
-import { resetFunnelTables, ensureTestProduct } from '@/__tests__/helpers/test-db'
+import { resetFunnelTables, ensureTestProduct, proveChannel } from '@/__tests__/helpers/test-db'
 import { executeCommit, REPLAY_NOTICE } from '@/lib/tools/gateway'
 import { answerAllDntQuestions } from '@/__tests__/helpers/dnt-fixtures'
 import type { ToolContext } from '@/lib/tools/types'
@@ -8,6 +8,10 @@ import type { ToolContext } from '@/lib/tools/types'
 async function fixture(productOnConversation = false) {
   const product = await ensureTestProduct()
   const customer = await prisma.customer.create({ data: { isAnonymous: false, language: 'ro' } })
+  // 2026-07-21 (R2): the DNT commits this suite drives require a proven
+  // channel; without one the gateway refuses requires_identity before the
+  // ordering behaviour under test is ever reached.
+  await proveChannel(customer.id)
   const conv = await prisma.conversation.create({ data: { customerId: customer.id, ...(productOnConversation ? { productId: product.id } : {}) } })
   const ctx = { customerId: customer.id, conversationId: conv.id, language: 'ro', db: prisma, actor: 'gui' } as unknown as ToolContext
   return { product, customer, conv, ctx }

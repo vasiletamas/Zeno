@@ -75,8 +75,50 @@ export async function resetDb(): Promise<void> {
   await seedDependencyEdges(prisma)
 }
 
-export async function createCustomer(data: Record<string, unknown> = {}) {
-  return prisma.customer.create({ data: { language: 'ro', ...data } })
+/**
+ * 2026-07-21 (R2): customers are created WITH a proven channel by default.
+ *
+ * The DNT and questionnaire commits now require one (`channelProven`), and the
+ * overwhelming majority of suites using this helper are about something else
+ * entirely — gateway ordering, idempotency, consent linkage, card emission.
+ * Leaving them unproven would turn every one of them into an identity test and
+ * bury what each is actually pinning.
+ *
+ * The BLOCKED side is pinned deliberately and separately:
+ *   - identity-requirements.test.ts  (the rows + the channel clause)
+ *   - derive-and-expose.test.ts      ("an unverified customer cannot reach the DNT")
+ *   - derive-active-cards.test.ts    (no questionnaire card during verification)
+ * Pass `{ channelProven: false }` to build an unverified customer explicitly.
+ *
+ * NOTE this does NOT create a linked User, so the SESSION reauth gate stays
+ * disarmed — that is a different control with its own fixtures.
+ */
+export async function createCustomer(
+  data: Record<string, unknown> = {},
+  opts: { channelProven?: boolean } = {},
+) {
+  const customer = await prisma.customer.create({ data: { language: 'ro', ...data } })
+  if (opts.channelProven !== false) await proveChannel(customer.id)
+  return customer
+}
+
+/**
+ * Give a customer a PROVEN CHANNEL (spec 2026-07-21, ruling D1): one consumed
+ * email challenge. That — not the contact tier — is what the DNT and
+ * questionnaire commits now require (`channelProven`), so a fixture that drives
+ * the funnel needs this or the gateway refuses with requires_identity.
+ *
+ * Deliberately does NOT create a linked User: an account would additionally
+ * arm the SESSION reauth gate, which is a different control with its own
+ * fixtures (see __tests__/integration/conversation-access.test.ts).
+ */
+export async function proveChannel(customerId: string, target = 'fixture@example.ro') {
+  return prisma.verificationChallenge.create({
+    data: {
+      customerId, channel: 'email', target, codeHash: 'fixture',
+      expiresAt: new Date(Date.now() - 60_000), consumedAt: new Date(),
+    },
+  })
 }
 
 /**
@@ -96,6 +138,12 @@ export async function seedMinimalProtectFixture(options: { tier?: string; level?
     : null
 
   const customer = await prisma.customer.create({ data: { language: 'ro' } })
+  // 2026-07-21 (R2): this fixture exists to drive the DNT/questionnaire, all of
+  // which now require a proven channel. Without it every consumer of this
+  // fixture dies at the gateway with requires_identity before its first
+  // assertion. The BLOCKED side is pinned separately — see
+  // derive-and-expose.test.ts and identity-requirements.test.ts.
+  await proveChannel(customer.id)
   const application = await prisma.application.create({
     data: {
       customerId: customer.id,

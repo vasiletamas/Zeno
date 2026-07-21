@@ -25,7 +25,7 @@ beforeEach(async () => { await resetDb() }, 60000)
 async function makeConversationFixture(opts: { openApplication?: boolean; issuedQuote?: boolean; customerId?: string } = {}) {
   // customerId lets two conversations share one customer — the shape that
   // exposed the cross-conversation expired-OTP leak (2026-07-21 browser pass).
-  const customer = opts.customerId ? { id: opts.customerId } : await createCustomer()
+  const customer = opts.customerId ? { id: opts.customerId } : await createCustomer({}, { channelProven: false })
   const conv = await prisma.conversation.create({ data: { customerId: customer.id, language: 'ro' } })
   if (opts.openApplication) {
     const product = await ensureTestProduct()
@@ -109,17 +109,48 @@ describe.skipIf(!process.env.DATABASE_URL)('deriveActiveCards (spec 2026-07-20 �
   // once — the customer was asked for a 6-digit code AND a medical answer with
   // nothing indicating which one the conversation waited on. Exactly one input
   // card may be interactive; identity verification outranks the questionnaire.
-  it('only ONE input card stays active — the rest queue behind it', async () => {
-    const fx = await makeDntSessionFixture()
+  /**
+   * AC-5 / AC-1 step 4. This case used to assert that a co-rendered OTP card
+   * and question card resolved by QUEUEING the question — the 2026-07-21
+   * presentation-layer fix for conv cmruelpy7 turn 2.
+   *
+   * Under R2 that conflict is no longer RESOLVED, it is IMPOSSIBLE: an
+   * unverified customer cannot reach write_dnt_answer, so derivePendingCard
+   * emits no question card at all while a challenge is outstanding. The
+   * ordering that INPUT_CARD_PRIORITY encoded by hand now falls out of the
+   * legality wall — which is what ruling R4 ("the order should not be
+   * hardcoded") asked for.
+   *
+   * Asserted as "not even present", NOT as "present but queued": AC-1's
+   * failure condition names both.
+   */
+  it('AC-5: a live challenge means the questionnaire card does not exist at all', async () => {
+    const fx = await makeDntSessionFixture() // customer is channel-proven
+    // Maria at AC-1 step 4 exactly: she has GIVEN her email (so the contact
+    // card is resolved) and a code is in flight, but nothing is proven yet.
+    await setDeclaredField(fx.customerId, 'email', 'a@b.ro', 'test')
+    await prisma.verificationChallenge.deleteMany({ where: { customerId: fx.customerId } })
     await prisma.verificationChallenge.create({
       data: { customerId: fx.customerId, channel: 'email', target: 'a@b.ro', codeHash: 'h', conversationId: fx.conversationId, expiresAt: new Date(Date.now() + 60_000) },
     })
+
     const cards = await deriveActiveCards(fx.conversationId)
     const inputs = cards.filter((c) => c.uiAction)
-    expect(inputs.length).toBeGreaterThan(1) // the conflict really is present
+
+    expect(inputs.map((c) => c.key)).toEqual(['otp:email'])
+    expect(inputs[0].status).toBe('active')
+    expect(cards.some((c) => c.key.startsWith('question:'))).toBe(false)
+  })
+
+  // The queueing mechanism itself still exists for families the identity gate
+  // does not separate (e.g. a contact card beside a questionnaire card), so it
+  // stays pinned — just no longer via the OTP-vs-question shape.
+  it('queueing still resolves a genuine two-input conflict', async () => {
+    const fx = await makeDntSessionFixture() // channel-proven → question card lives
+    const cards = await deriveActiveCards(fx.conversationId)
+    const inputs = cards.filter((c) => c.uiAction)
+    expect(inputs.length).toBeGreaterThan(1)
     expect(inputs.filter((c) => c.status === 'active')).toHaveLength(1)
-    // a live challenge outranks every other input: nothing proceeds unverified
-    expect(inputs.find((c) => c.status === 'active')!.key).toBe('otp:email')
     const queued = inputs.filter((c) => c.status === 'queued')
     expect(queued.length).toBe(inputs.length - 1)
     expect(queued.every((c) => c.hint?.includes('do NOT ask for this yet'))).toBe(true)

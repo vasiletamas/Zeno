@@ -24,7 +24,7 @@ const ctx = (customerId: string, conversationId: string) =>
   ({ customerId, conversationId, language: 'ro', db: prisma, actor: 'gui' } as unknown as ToolContext)
 
 async function makeConversation() {
-  const customer = await createCustomer()
+  const customer = await createCustomer({}, { channelProven: false })
   const conv = await prisma.conversation.create({ data: { customerId: customer.id, language: 'ro' } })
   return { customerId: customer.id, conversationId: conv.id }
 }
