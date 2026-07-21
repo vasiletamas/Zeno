@@ -5,9 +5,11 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    // Load .env into process.env (plain vitest does not): required so the
+    // Loads .env into process.env (plain vitest does not): required so the
     // real-DB integration ring sees DATABASE_URL instead of silently skipping.
-    setupFiles: ['dotenv/config'],
+    // ALSO forces EMAIL_PROVIDER=mock so a live Resend config never turns a
+    // test run into real outbound email (see the helper's comment).
+    setupFiles: ['./__tests__/helpers/test-env.ts'],
     projects: [
       {
         extends: true,
