@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { confirmByCode } from '@/lib/customer/verification-service'
+import { signSessionProof, PROOF_COOKIE } from '@/lib/auth/session-proof'
 
 export async function POST(request: NextRequest) {
   try {
@@ -34,6 +35,18 @@ export async function POST(request: NextRequest) {
       httpOnly: true,
       sameSite: 'lax',
       maxAge: 2592000,
+      path: '/',
+      secure: process.env.NODE_ENV === 'production',
+    })
+    // 2026-07-21 (spec §3.1): the consumed challenge is what makes THIS browser
+    // provable, so this is the one place a proof may be minted. Issued only on
+    // the success path — a wrong code must leave the holder with nothing, or
+    // the roommate guesses their way in (AC-3). Short-lived by design; the
+    // session cookie outlives it by 30 days on purpose.
+    response.cookies.set(PROOF_COOKIE, await signSessionProof(canonicalId), {
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: 12 * 60 * 60,
       path: '/',
       secure: process.env.NODE_ENV === 'production',
     })
