@@ -19,7 +19,11 @@
 | T5 replay presentation strip | ✅ done + spec+quality approved | 79825621 (+b115d61e, 6ac38741) | sanitize stored+returned; stale pins aligned, never weakened |
 | T6 ladder gate + due-timing + OTP-owns-turn | ✅ done + spec+quality approved | 0c34f72c | 16/16 collect ring green; plan code verbatim |
 | T7 deferral facts (defer_customer_field) | ✅ done + spec+quality approved | b944fa1f (+6ac38741 GDPR+FK) | migrations verified; erasure covers deferrals (TDD) |
-| T8–T16 | ⬜ pending | — | — |
+| T8 deriveActiveCards SSOT | ✅ done + spec+quality approved | 5006ee3b (+9860ee70) | 7/7 derivations; single snapshot per turn; payload parity pinned |
+| T9 cards_state SSE | ✅ done + spec+quality approved | 2fb0136d | emitted once, main path, before done; consumer case + harness assert |
+| T10–T16 | ⬜ pending | — | — |
+
+**T8-9 notes:** plan's phone-active fixture needed a declared email (ladder order); ErrorLayer has no 'chat' → 'orchestrator'; noted-for-later: deep-freeze FIELD_META_FOR_CARDS next time data-handlers.ts is touched; card-view.ts (T11) becomes the canonical home of the shared card-entry type + the 'question:batch' key constant.
 
 **T5-7 deviation log:** integration suites must run ONE at a time (shared postgres wedges concurrent runs); `.env` EMAIL_PROVIDER restored to `mock` (uncommitted — flip back if resend was deliberate); accepted quality observations: getFieldDeferrals db param half-threaded, snapshot cost on email-save path, deferral message says "this conversation" while the fact is customer-scoped.
 
