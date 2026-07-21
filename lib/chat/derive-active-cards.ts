@@ -16,16 +16,12 @@ import { getProfile, getFieldDeferrals } from '@/lib/customer/profile-service'
 import { maskVerificationTarget } from '@/lib/customer/verification-service'
 import { derivePendingCard } from './derive-pending-card'
 import { FIELD_META_FOR_CARDS } from '@/lib/tools/handlers/data-handlers'
+import { questionKeyFor, type ActiveCardEntry } from './card-view'
 
-export type ActiveCardStatus = 'active' | 'expired' | 'deferred'
-export interface ActiveCard {
-  key: string
-  status: ActiveCardStatus
-  /** Renderable payload — INPUT cards only (data_field/otp/question). */
-  uiAction?: { type: string; payload: Record<string, unknown> } | null
-  /** Briefing conduct hint, server-authored (spec §5). */
-  hint: string
-}
+export type { ActiveCardStatus } from './card-view'
+/** Server-side entry: the canonical shared shape (lib/chat/card-view.ts —
+ * pure, client-safe) with the briefing hint REQUIRED (spec §5). */
+export type ActiveCard = ActiveCardEntry & { hint: string }
 
 export async function deriveActiveCards(conversationId: string): Promise<ActiveCard[]> {
   const snapshot = await loadDomainSnapshot(conversationId)
@@ -71,8 +67,10 @@ export async function deriveActiveCards(conversationId: string): Promise<ActiveC
   const pending = await derivePendingCard(conversationId, snapshot)
   if (pending) {
     const payload = pending.payload as Record<string, unknown>
-    const code = (payload.code ?? (payload.question as { code?: string } | undefined)?.code ?? 'batch') as string
-    cards.push({ key: `question:${code}`, status: 'active', uiAction: pending as ActiveCard['uiAction'], hint: 'the question card owns this input — invite a tap, never enumerate options in prose' })
+    // the ONE batch-key literal lives in card-view.ts — questionKeyFor keeps
+    // this key construction and the client's cardKeyForUiAction in lockstep
+    const code = (payload.code ?? (payload.question as { code?: string | null } | undefined)?.code ?? null) as string | null
+    cards.push({ key: questionKeyFor(code), status: 'active', uiAction: pending as ActiveCard['uiAction'], hint: 'the question card owns this input — invite a tap, never enumerate options in prose' })
   }
 
   // ---- confirm: ledger-derived pending confirmations (existing P0-5 fact)
