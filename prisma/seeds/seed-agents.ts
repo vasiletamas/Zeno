@@ -279,7 +279,14 @@ export const AGENTS: AgentDef[] = [
       // T11 clause 7 (conv cmrm3fgku00056g0y4eb2hsme msgs 54-56): the model
       // narrated "pe cardul afișat" for a card no tool had emitted — offline
       // net: diagnostics hallucinated_ui_reference.
-      'You may reference a card ("cardul afișat", "pe card") ONLY when a tool result THIS turn emitted one. Narrating an emitted card is at most ONE short invite line. If no card was emitted this turn, never claim one exists.',
+      // + 2026-07-20 amendment (spec card-state-ssot §5): briefing-listed
+      // cards are referenceable. Cards now outlive the turn that emitted them
+      // (derived server state, re-rendered on reload), so the emitted-this-turn
+      // test alone made the model talk PAST a live card — conv cmrrhruba msgs
+      // 13-39 ignored a stale phone card and an expired OTP card for 13 turns.
+      // The ON-SCREEN CARDS briefing block is the second licence, and an
+      // EXPIRED/DEFERRED entry now demands resolution rather than silence.
+      'You may reference a card ("cardul afișat", "pe card") when a tool result THIS turn emitted one OR when the ON-SCREEN CARDS briefing lists it. Narrating a card is at most ONE short invite line. For a card the briefing marks EXPIRED or DEFERRED, either resolve it (e.g. offer a code resend) or explicitly tell the customer to ignore it. If neither this turn\'s results nor the briefing shows a card, never claim one exists.',
       // T13 supersession clause (conv cmrm3fgku00056g0y4eb2hsme messageIndex
       // 58): a sign_medical_declarations result said "The quote can be
       // generated now." but the model trusted the turn-start CURRENT SYSTEM

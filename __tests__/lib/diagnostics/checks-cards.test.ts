@@ -84,6 +84,28 @@ describe('hallucinated_ui_reference', () => {
     expect(runDiagnostics(clean).some((f) => f.checkId === 'hallucinated_ui_reference')).toBe(false)
   })
 
+  it('a card reference is LEGAL when the turn\'s briefing listed cards (T11 amendment, spec §5)', () => {
+    const e = makeExport({
+      messages: [
+        { id: 'u', role: 'user', content: 'ce card?', toolCalls: null, toolResults: null, createdAt: 'x' },
+        { id: 'a', role: 'assistant', content: 'Poți ignora cardul afișat mai sus — nu mai este necesar.', toolCalls: null, toolResults: null, createdAt: 'x' },
+      ] as never,
+      turns: [turn(0, { briefedCards: [{ key: 'data_field:phone', status: 'active' }], toolCalls: [] })] as never,
+    })
+    expect(runDiagnostics(e).some((x) => x.checkId === 'hallucinated_ui_reference')).toBe(false)
+  })
+
+  it('still flags a card reference with neither a tool trace nor briefed cards', () => {
+    const e = makeExport({
+      messages: [
+        { id: 'u', role: 'user', content: 'ok', toolCalls: null, toolResults: null, createdAt: 'x' },
+        { id: 'a', role: 'assistant', content: 'Alege pe cardul afișat.', toolCalls: null, toolResults: null, createdAt: 'x' },
+      ] as never,
+      turns: [turn(0, { toolCalls: [] })] as never,
+    })
+    expect(runDiagnostics(e).some((x) => x.checkId === 'hallucinated_ui_reference')).toBe(true)
+  })
+
   it('user messages and assistant messages with no joined turn are never flagged', () => {
     const e = makeExport({
       messages: [msg('user', 'unde e cardul afisat?'), msg('assistant', 'Bună! Cu ce te pot ajuta?'), msg('assistant', 'Vezi cardul afișat mai sus.')],

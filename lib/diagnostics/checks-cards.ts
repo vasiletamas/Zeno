@@ -22,8 +22,14 @@ const CARD_REFERENCE = /\b(cardul|pe card|card afisat|de pe card)\b/
  * requires_confirmation envelope the gateway returns with the result:
  * `data._instruction` naming the confirmation card, or a `data.preview` on a
  * non-success result (gateway.ts static + handler-conditional confirm paths).
+ *
+ * 2026-07-20 amendment (spec §5): a card the ON-SCREEN CARDS briefing listed
+ * at turn start is on screen whether or not THIS turn emitted it — the
+ * constitution now licenses referencing it (and REQUIRES addressing an
+ * expired/deferred one), so `briefedCards` is a trace in its own right.
  */
-const hasCardTrace = (t: { toolCalls: { result?: { success?: boolean; uiAction?: unknown; data?: unknown } }[] }): boolean =>
+const hasCardTrace = (t: { toolCalls: { result?: { success?: boolean; uiAction?: unknown; data?: unknown } }[]; briefedCards?: { key: string }[] }): boolean =>
+  (t.briefedCards?.length ?? 0) > 0 ||
   t.toolCalls.some((c) => {
     if (c.result?.uiAction) return true
     const d = c.result?.data as { _instruction?: unknown; preview?: unknown } | undefined
