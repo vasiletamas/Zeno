@@ -271,7 +271,7 @@ conversation: access resolution follows `customer.mergedIntoId` exactly as
 
 ---
 
-## 4a. BLOCKED — AC-1 is not implementable as written
+## 4a. RESOLVED — AC-1 was not implementable as first written
 
 Found by impact analysis on 2026-07-21, **after** §4 was written, and confirmed against source.
 
@@ -308,7 +308,12 @@ return f.verifiedChannels.length > 0 ? 'verified_channel' : 'declared'
   row schema or a change to `KYC_FIELDS` — and the tier ladder stops meaning what
   `identity-rules.ts:28-31` says it means.
 
-AC-1 as written assumes (b). **No Fix B row may land until this is chosen.**
+AC-1 as written assumes (b).
+
+> **RULED 2026-07-21: (b), one proven channel.** Implemented as a new row clause `channelProven`
+> (`identity-requirements.ts`) meaning "≥1 consumed challenge", independent of the contact tier. The
+> tier ladder is left untouched; the rows that need a full contact set keep asking for it. AC-1 now
+> holds as written — Maria's tier stays `anonymous` after verifying her email, and that is fine.
 
 ### Second decision required (D2) — the GDPR re-grant floor
 
@@ -320,6 +325,12 @@ in front of that escape hatch (consent is checked at `derive-and-expose.ts:431`,
 Bites two populations: customers who signed anonymously before the fix, and anyone whose identity
 fields were cleared by `request_erasure` (deliberately `anonymous`-tier and `HALT_EXEMPT`).
 §3.2 listed three intended consequences and this was not among them — it was not considered.
+
+> **RULED 2026-07-21: the identity gate wins.** A withdrawn, unverified customer must prove a channel
+> before re-granting. `derive-consent-exposure.test.ts` is rewritten to pin the deadlock as INTENDED
+> rather than patched to hide it, and asserts `escalate_to_human` stays available so it is never
+> total. Two populations are knowingly affected: customers who signed anonymously before this change,
+> and anyone whose contact fields were cleared by `request_erasure`.
 
 ### Also found (not blocking, already fixed)
 
@@ -350,3 +361,38 @@ missed. Closed in `e9e799fe`.
   change and is deferred.
 - The pre-existing `quote-decline` sim harness gap (documented in
   `2026-07-20-card-state-ssot-report.md` §"quote-decline sim failure").
+
+
+---
+
+## 6. Implementation status (2026-07-21)
+
+Branch `feat/identity-continuity`. **1945 tests green** (1491 unit + 454 integration), `tsc` clean.
+
+| | Status |
+|---|---|
+| Fix A — access control | **Done.** session-proof primitive, reauth-gate extraction, `decideConversationAccess`, wired into `/chat/[id]`, `/api/chat`, `/api/chat/create` |
+| Fix B — verification at application start | **Done.** Five `channelProven` rows, `engineVersion` 1.44.0, card SSOT gated on writer availability |
+| AC-5 (the originating defect) | **Structural.** The two-card state is now impossible, not merely queued — asserted as "no question card present" |
+| R4 (no hardcoded ordering) | **Partly.** `INPUT_CARD_PRIORITY` no longer carries the OTP-vs-question case; it remains for conflicts the identity gate does not separate |
+
+### NOT done — required before this can be called finished
+
+1. **No browser verification.** §4 says the acceptance criteria are browser-verified journeys. AC-1,
+   AC-2, AC-3 and AC-6 have unit/integration coverage but have not been walked in a browser.
+2. **The sim harness is expected to be red.** `worldHooks` — the only code that consumes a challenge
+   — runs only `if (sc.fullFunnel)`, which just two of six scenarios set. `open_dnt_session` is the
+   first funnel commit in all six, so `dnt-card-flow`, `dnt-typed-flow`, `dnt-refusal` and
+   `quote-decline` should now deadlock at verification. Not yet run or fixed.
+   Also: `dnt-refusal`'s `goalReached` can go FALSE-GREEN under this change — it requires only a
+   refusal phrase plus zero ACTIVE Dnt rows, and "the DNT never opened" satisfies the second.
+3. **Runtime verifiers untouched.** The gateway-routed ones (`verify-dnt-flow`,
+   `verify-application-flow`, `verify-advance-flow`, …) will throw at their first DNT call without a
+   consumed-challenge seed. Several others call the DNT handlers directly, bypass the gateway, and
+   will stay green while covering a sequence the agent can no longer reach.
+4. **`get_dnt_next_question` still emits the sign card as a `kind:'read'`** (`dnt-handlers.ts:165`),
+   which no `IDENTITY_REQUIREMENTS` row can reach. Largely unreachable in practice — `verifiedChannels`
+   is durable, so anyone with a complete session is already proven — but it remains a dead-card path
+   for customers who signed anonymously before this change.
+5. **D3/D4/D5 untouched** (`resume_application` identity, the dev OTP route, unauthenticated
+   `GET /api/payments/confirm`).
