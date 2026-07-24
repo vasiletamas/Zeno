@@ -4,6 +4,15 @@
  * Implements LLMProviderInterface for OpenAI models including GPT-4o,
  * GPT-5, and o-series reasoning models. Handles message format conversion,
  * model-specific quirks, streaming, and tool calling.
+ *
+ * OpenAI-COMPATIBLE VENDORS: the constructor is parameterizable (base URL,
+ * API-key env var, provider name) so any vendor speaking the OpenAI
+ * /v1/chat/completions dialect — e.g. Moonshot AI's Kimi models — can reuse
+ * this whole implementation by subclassing (see providers/moonshot.ts). The
+ * OpenAI-specific model quirks below (max_completion_tokens, reasoning_effort)
+ * key off `gpt-*`/`o*` model prefixes, so they are simply inert for a Kimi
+ * model id and the vendor gets plain max_tokens + temperature, which is
+ * exactly what Moonshot expects.
  */
 
 import OpenAI from 'openai'
@@ -83,24 +92,61 @@ function adjustTokensForReasoning(
 }
 
 // ==============================================
+// OPENAI-COMPATIBLE PROVIDER CONFIG
+// ==============================================
+
+/**
+ * Config for an OpenAI-compatible provider. All fields default to the real
+ * OpenAI wiring, so `new OpenAIProvider()` behaves exactly as before. A
+ * subclass (e.g. MoonshotProvider) overrides these to point at another vendor
+ * that speaks the same /v1/chat/completions dialect.
+ */
+export interface OpenAICompatibleConfig {
+  /**
+   * Logical provider name used for cache-usage parsing (parseCacheUsage) and
+   * log messages. Matches a Prisma LLMProvider enum value, e.g. 'OPENAI',
+   * 'MOONSHOT'.
+   */
+  providerName?: string
+  /** Env var holding the API key. Default: 'OPENAI_API_KEY'. */
+  apiKeyEnvVar?: string
+  /**
+   * Base URL for the OpenAI-compatible endpoint. Omit for OpenAI's default
+   * (the SDK supplies it); set it for Moonshot etc. Must include the API
+   * version path (e.g. 'https://api.moonshot.ai/v1'); the SDK appends
+   * '/chat/completions'.
+   */
+  baseURL?: string
+}
+
+// ==============================================
 // OPENAI PROVIDER
 // ==============================================
 
 export class OpenAIProvider implements LLMProviderInterface {
   private client: OpenAI
+  /** Logical provider name — drives cache-usage parsing and log context. */
+  protected readonly providerName: string
 
-  constructor() {
-    const apiKey = process.env.OPENAI_API_KEY
+  constructor(config: OpenAICompatibleConfig = {}) {
+    const providerName = config.providerName ?? 'OPENAI'
+    const apiKeyEnvVar = config.apiKeyEnvVar ?? 'OPENAI_API_KEY'
+    this.providerName = providerName
+
+    const apiKey = process.env[apiKeyEnvVar]
     if (!apiKey) {
       logWarn({
         layer: 'provider',
         category: 'config',
-        message: 'No API key configured. Set OPENAI_API_KEY.',
+        message: `No API key configured. Set ${apiKeyEnvVar}.`,
+        context: { provider: providerName },
       })
     }
 
     this.client = new OpenAI({
       apiKey: apiKey ?? 'missing-key',
+      // undefined → the SDK's default OpenAI base URL (unchanged behavior).
+      baseURL: config.baseURL,
       maxRetries: 0, // Gateway handles retries
     })
   }
@@ -172,7 +218,7 @@ export class OpenAIProvider implements LLMProviderInterface {
   }
 
   private extractUsage(usage: OpenAI.CompletionUsage | undefined): TokenUsage {
-    const cache = parseCacheUsage('OPENAI', (usage ?? {}) as unknown as Record<string, unknown>)
+    const cache = parseCacheUsage(this.providerName, (usage ?? {}) as unknown as Record<string, unknown>)
     return {
       promptTokens: usage?.prompt_tokens ?? 0,
       completionTokens: usage?.completion_tokens ?? 0,

@@ -5,7 +5,7 @@ import { PrismaClient } from '../../lib/generated/prisma/client'
 // ============================================================
 
 interface ModelDef {
-  provider: 'OPENAI' | 'ANTHROPIC'
+  provider: 'OPENAI' | 'ANTHROPIC' | 'MOONSHOT'
   modelId: string
   displayName: string
   contextWindow: number
@@ -109,6 +109,44 @@ export const MODELS: ModelDef[] = [
     supportsStructuredOutput: true,
     costPer1kInputTokens: 0.0008,
     costPer1kOutputTokens: 0.004,
+  },
+  // ---- Moonshot AI (Kimi) — OpenAI-compatible vendor ----
+  {
+    // Kimi K2 flagship. PLACEHOLDER pricing — set the live Moonshot rates in
+    // production; these are order-of-magnitude, not billing-accurate.
+    provider: 'MOONSHOT',
+    modelId: 'kimi-k2-0711-preview',
+    displayName: 'Kimi K2',
+    contextWindow: 128_000,
+    supportsStreaming: true,
+    supportsTools: true,
+    supportsStructuredOutput: true,
+    costPer1kInputTokens: 0.0006,
+    costPer1kOutputTokens: 0.0025,
+  },
+  {
+    // Kimi K2 Turbo — higher throughput, larger context. PLACEHOLDER pricing.
+    provider: 'MOONSHOT',
+    modelId: 'kimi-k2-turbo-preview',
+    displayName: 'Kimi K2 Turbo',
+    contextWindow: 256_000,
+    supportsStreaming: true,
+    supportsTools: true,
+    supportsStructuredOutput: true,
+    costPer1kInputTokens: 0.0024,
+    costPer1kOutputTokens: 0.010,
+  },
+  {
+    // Long-context Moonshot v1. PLACEHOLDER pricing.
+    provider: 'MOONSHOT',
+    modelId: 'moonshot-v1-128k',
+    displayName: 'Moonshot v1 128k',
+    contextWindow: 128_000,
+    supportsStreaming: true,
+    supportsTools: true,
+    supportsStructuredOutput: true,
+    costPer1kInputTokens: 0.002,
+    costPer1kOutputTokens: 0.005,
   },
 ]
 

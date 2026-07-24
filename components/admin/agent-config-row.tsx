@@ -28,7 +28,7 @@ interface AgentConfigRowProps {
   models: ModelCatalogEntry[]
 }
 
-const PROVIDERS = ['OPENAI', 'ANTHROPIC']
+const PROVIDERS = ['OPENAI', 'ANTHROPIC', 'MOONSHOT']
 
 export default function AgentConfigRow({ agent, models }: AgentConfigRowProps) {
   const router = useRouter()

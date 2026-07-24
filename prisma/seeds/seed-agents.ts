@@ -237,9 +237,9 @@ interface AgentDef {
   slug: string
   name: string
   role: string
-  provider: 'OPENAI' | 'ANTHROPIC'
+  provider: 'OPENAI' | 'ANTHROPIC' | 'MOONSHOT'
   model: string
-  fallbackProvider: 'OPENAI' | 'ANTHROPIC'
+  fallbackProvider: 'OPENAI' | 'ANTHROPIC' | 'MOONSHOT'
   fallbackModel: string
   temperature: number
   maxTokens: number

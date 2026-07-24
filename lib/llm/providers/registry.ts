@@ -8,6 +8,7 @@
 import type { LLMProviderInterface } from './types'
 import { OpenAIProvider } from './openai'
 import { AnthropicProvider } from './anthropic'
+import { MoonshotProvider } from './moonshot'
 import { LLMError, classifyError, isRetryable, shouldFailover } from '@/lib/llm/errors'
 import { CircuitBreaker } from '@/lib/errors/circuit-breaker'
 import { CircuitOpenError } from '@/lib/errors/types'
@@ -22,7 +23,9 @@ const providers = new Map<string, LLMProviderInterface>()
 
 /**
  * Get a provider by name. Returns a singleton instance.
- * Supported names: 'OPENAI', 'ANTHROPIC' (matching Prisma LLMProvider enum).
+ * Supported names: 'OPENAI', 'ANTHROPIC', 'MOONSHOT' (matching Prisma
+ * LLMProvider enum). MOONSHOT serves the Kimi model family via Moonshot AI's
+ * OpenAI-compatible API.
  */
 export function getProvider(name: string): LLMProviderInterface {
   const key = name.toUpperCase()
@@ -38,9 +41,12 @@ export function getProvider(name: string): LLMProviderInterface {
     case 'ANTHROPIC':
       provider = new AnthropicProvider()
       break
+    case 'MOONSHOT':
+      provider = new MoonshotProvider()
+      break
     default:
       throw new Error(
-        `Unknown LLM provider: ${name}. Available: OPENAI, ANTHROPIC`,
+        `Unknown LLM provider: ${name}. Available: OPENAI, ANTHROPIC, MOONSHOT`,
       )
   }
 

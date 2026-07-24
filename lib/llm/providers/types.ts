@@ -51,6 +51,17 @@ export function parseCacheUsage(provider: string, usage: Record<string, unknown>
     const cached = typeof details?.cached_tokens === 'number' ? details.cached_tokens : 0
     return { cacheRead: cached, cacheWrite: 0, cacheHit: cached > 0 }
   }
+  if (provider === 'MOONSHOT') {
+    // Moonshot's context caching reports cache hits as a top-level
+    // `cached_tokens` on usage; some responses instead nest it under
+    // prompt_tokens_details like OpenAI. Tolerate both shapes. There is no
+    // separate cache-write counter, so cacheWrite is always 0.
+    const topLevel = typeof usage.cached_tokens === 'number' ? usage.cached_tokens : 0
+    const details = usage.prompt_tokens_details as Record<string, unknown> | undefined
+    const nested = typeof details?.cached_tokens === 'number' ? details.cached_tokens : 0
+    const cacheRead = topLevel || nested
+    return { cacheRead, cacheWrite: 0, cacheHit: cacheRead > 0 }
+  }
   return { cacheRead: 0, cacheWrite: 0, cacheHit: false }
 }
 

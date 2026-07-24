@@ -90,6 +90,8 @@ enum PaymentProvider {
 enum LLMProvider {
   OPENAI
   ANTHROPIC
+  // Moonshot AI — serves the Kimi model family via an OpenAI-compatible API.
+  MOONSHOT
 }
 
 enum UserRole {
